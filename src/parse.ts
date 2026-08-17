@@ -1,7 +1,9 @@
 import { domId, resourceKey, typeHue, typeSigil } from "./ident.js";
+import { join as pointerJoin } from "./pointer.js";
 import type {
   DocumentIndex,
   JsonApiError,
+  Reference,
   JsonObject,
   JsonValue,
   RelationshipEntry,
@@ -220,7 +222,11 @@ export function buildIndex(doc: JsonObject): DocumentIndex {
   let fromData = 0;
   let fromIncluded = 0;
 
-  const ingest = (raw: JsonValue, origin: "data" | "included"): Resource | null => {
+  const ingest = (
+    raw: JsonValue,
+    origin: "data" | "included",
+    pointer: string,
+  ): Resource | null => {
     if (!isPlainObject(raw)) return null;
     const identity = readIdentifier(raw);
     if (!identity) return null;
@@ -246,6 +252,8 @@ export function buildIndex(doc: JsonObject): DocumentIndex {
       key,
       domId: domId(type, id),
       origin,
+      raw,
+      pointer,
       attributes: isPlainObject(raw["attributes"]) ? raw["attributes"] : undefined,
       relationships: readRelationships(raw["relationships"]),
       links: isPlainObject(raw["links"]) ? raw["links"] : undefined,
@@ -270,15 +278,15 @@ export function buildIndex(doc: JsonObject): DocumentIndex {
   const primaryIsNull = "data" in doc && data === null;
 
   if (Array.isArray(data)) {
-    for (const item of data) {
-      const resource = ingest(item, "data");
+    data.forEach((item, index) => {
+      const resource = ingest(item, "data", pointerJoin("/data", index));
       if (resource) {
         primary.push({ type: resource.type, id: resource.id });
         primaryTypes.add(resource.type);
       }
-    }
+    });
   } else if (isPlainObject(data)) {
-    const resource = ingest(data, "data");
+    const resource = ingest(data, "data", "/data");
     if (resource) {
       primary.push({ type: resource.type, id: resource.id });
       primaryTypes.add(resource.type);
@@ -287,13 +295,16 @@ export function buildIndex(doc: JsonObject): DocumentIndex {
 
   const included = doc["included"];
   if (Array.isArray(included)) {
-    for (const item of included) ingest(item, "included");
+    included.forEach((item, index) => {
+      ingest(item, "included", pointerJoin("/included", index));
+    });
   }
 
   // Count relationships and collect pointers that resolve to nothing. Doing it
   // here means the orientation panel is free at render time.
   let relationships = 0;
   let danglingPointers = 0;
+  let pointerTotal = 0;
   const danglingSeen = new Set<string>();
   const dangling: ResourceIdentifier[] = [];
 
@@ -301,6 +312,7 @@ export function buildIndex(doc: JsonObject): DocumentIndex {
     for (const rel of resource.relationships) {
       relationships++;
       for (const target of rel.targets) {
+        pointerTotal++;
         const key = resourceKey(target.type, target.id);
         if (byKey.has(key)) continue;
         danglingPointers++;
@@ -319,6 +331,7 @@ export function buildIndex(doc: JsonObject): DocumentIndex {
     : [];
 
   return {
+    root: doc,
     byKey,
     groups: orderGroups(groups, primaryTypes),
     primary,
@@ -336,7 +349,51 @@ export function buildIndex(doc: JsonObject): DocumentIndex {
       danglingPointers,
     },
     dangling,
+    reverse: null,
+    reverseTooLarge: pointerTotal > REVERSE_POINTER_LIMIT,
   };
+}
+
+/**
+ * Above this many pointers, the reverse index is not built. Each entry is a
+ * small object, so a document with a million pointers would cost more memory
+ * than the answer is worth — and at that size the honest move is to say so
+ * rather than to quietly stall on expand.
+ */
+const REVERSE_POINTER_LIMIT = 400_000;
+
+/**
+ * Which resources point at `type:id`.
+ *
+ * Built on first call and cached on the index. JSON:API only encodes pointers
+ * in one direction, so without this, answering "what references this person?"
+ * means reading every resource by hand — which is exactly the work this tool
+ * exists to remove.
+ */
+export function referencesTo(
+  index: DocumentIndex,
+  type: string,
+  id: string,
+): Reference[] | null {
+  if (index.reverseTooLarge) return null;
+
+  if (!index.reverse) {
+    const reverse = new Map<string, Reference[]>();
+    for (const resource of index.byKey.values()) {
+      for (const rel of resource.relationships) {
+        for (const target of rel.targets) {
+          const key = resourceKey(target.type, target.id);
+          const entry: Reference = { from: resource, relationship: rel.name };
+          const existing = reverse.get(key);
+          if (existing) existing.push(entry);
+          else reverse.set(key, [entry]);
+        }
+      }
+    }
+    index.reverse = reverse;
+  }
+
+  return index.reverse.get(resourceKey(type, id)) ?? [];
 }
 
 /** Text in, validated index out. Throws `DocumentError` with something readable. */

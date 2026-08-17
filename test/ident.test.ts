@@ -23,18 +23,18 @@ const HOSTILE = [
   "with/slash",
   "with#hash",
   "with?query&amp=1",
-  "urn:example:trip:9",
+  "urn:example:person:9",
   "dot.separated.id",
   "100%",
   "percent%20encoded",
   "trailing-",
   "_leading-underscore",
   "0-leading-digit",
-  "zürich-hbf",
-  "praha-hlavní",
+  "zürich-city",
+  "praha-mesto",
   "Ραδιοφωνικός",
   "Владивосток",
-  "🚆-express",
+  "🖼-hero",
   "emoji-家-mix-🎫",
   '"quoted"',
   "'single'",
@@ -125,9 +125,9 @@ describe("domId", () => {
   it("produces a valid id attribute that getElementById can find", () => {
     for (const id of HOSTILE.slice(0, 12)) {
       const section = document.createElement("section");
-      section.id = domId("stations", id);
+      section.id = domId("people", id);
       document.body.append(section);
-      expect(document.getElementById(domId("stations", id))).toBe(section);
+      expect(document.getElementById(domId("people", id))).toBe(section);
       section.remove();
     }
   });
@@ -135,9 +135,9 @@ describe("domId", () => {
   it("produces a selector that querySelector accepts", () => {
     for (const id of HOSTILE.slice(0, 12)) {
       const section = document.createElement("section");
-      section.id = domId("trip/legs", id);
+      section.id = domId("draft/sections", id);
       document.body.append(section);
-      expect(document.querySelector(resourceSelector("trip/legs", id))).toBe(section);
+      expect(document.querySelector(resourceSelector("draft/sections", id))).toBe(section);
       section.remove();
     }
   });
@@ -145,8 +145,8 @@ describe("domId", () => {
 
 describe("hrefs and hashes", () => {
   it("builds a fragment that needs no percent-encoding", () => {
-    const href = resourceHref("trip/legs", "2026-09-14/EC 173#1");
-    expect(href).toBe("#" + domId("trip/legs", "2026-09-14/EC 173#1"));
+    const href = resourceHref("draft/sections", "2026-09-14/Section 3#1");
+    expect(href).toBe("#" + domId("draft/sections", "2026-09-14/Section 3#1"));
     // A raw `#` in the id would truncate the fragment; a raw space would be
     // re-encoded inconsistently. Neither survives encoding.
     expect(href.slice(1)).not.toContain("#");
@@ -155,15 +155,15 @@ describe("hrefs and hashes", () => {
   });
 
   it("reads an identity back out of location.hash", () => {
-    const hash = resourceHref("stations", "zürich-hbf");
-    expect(identityFromHash(hash)).toEqual({ type: "stations", id: "zürich-hbf" });
+    const hash = resourceHref("people", "zürich-city");
+    expect(identityFromHash(hash)).toEqual({ type: "people", id: "zürich-city" });
   });
 
   it("tolerates a hash the browser has percent-encoded", () => {
-    const fragment = domId("stations", "zürich-hbf");
+    const fragment = domId("people", "zürich-city");
     expect(identityFromHash("#" + encodeURIComponent(fragment))).toEqual({
-      type: "stations",
-      id: "zürich-hbf",
+      type: "people",
+      id: "zürich-city",
     });
   });
 
@@ -176,7 +176,7 @@ describe("hrefs and hashes", () => {
 
 describe("type hue and sigil", () => {
   it("assigns a stable hue inside the ring", () => {
-    for (const type of ["trips", "stations", "trip/legs", "🚆", ""]) {
+    for (const type of ["articles", "people", "draft/sections", "🚆", ""]) {
       const hue = typeHue(type);
       expect(hue).toBeGreaterThanOrEqual(0);
       expect(hue).toBeLessThan(TYPE_HUES);
@@ -186,8 +186,8 @@ describe("type hue and sigil", () => {
 
   it("builds a monogram from word initials where there are words", () => {
     expect(typeSigil("payment_methods")).toBe("PM");
-    expect(typeSigil("trip/legs")).toBe("TL");
-    expect(typeSigil("stations")).toBe("ST");
+    expect(typeSigil("draft/sections")).toBe("DS");
+    expect(typeSigil("people")).toBe("PE");
     expect(typeSigil("a")).toBe("A");
   });
 

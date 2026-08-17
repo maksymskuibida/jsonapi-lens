@@ -3,9 +3,14 @@ import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
 
+import { copyBlob, copyText, downloadText } from "./clipboard.js";
+import { el } from "./dom.js";
 import { formatBytes, formatDuration } from "./format.js";
-import { parseDomId, resourceKey } from "./ident.js";
+import { domId, parseDomId, resourceKey } from "./ident.js";
+import { openJumpModal } from "./jump.js";
+import { openLibraryModal, openRawModal, openSaveModal, openShortcutsModal } from "./panels.js";
 import { DocumentError, readDocument } from "./parse.js";
+import { resolve as resolvePointer } from "./pointer.js";
 import {
   EAGER_BODY_LIMIT,
   groupsHtml,
@@ -17,16 +22,27 @@ import {
   renderTopLevel,
 } from "./render-document.js";
 import { buildResourceBody } from "./render-resource.js";
-import { clearDocument, loadDocument, saveDocument } from "./store.js";
-import type { DocumentIndex } from "./types.js";
+import { currentRoute, navigate, PASTE_PATH, VIEW_PATH } from "./router.js";
+import type { Route } from "./router.js";
+import { fetchShare, openShareModal } from "./share.js";
+import { ShareError } from "./crypto.js";
+import {
+  clearDocument,
+  loadDocument,
+  saveDocument,
+  saveToLibrary,
+} from "./store.js";
+import type { LibraryEntry } from "./store.js";
+import { closeModal, modalIsOpen, toast } from "./ui.js";
+import type { DocumentIndex, JsonValue, Resource } from "./types.js";
 
-import sampleRail from "./samples/rail.json?raw";
+import sampleArticles from "./samples/articles.json?raw";
 import sampleDangling from "./samples/dangling.json?raw";
 import sampleErrors from "./samples/errors.json?raw";
 import sampleEdge from "./samples/edge.json?raw";
 
 const SAMPLES: Record<string, { text: string; label: string }> = {
-  rail: { text: sampleRail, label: "rail-booking.json" },
+  articles: { text: sampleArticles, label: "articles.json" },
   dangling: { text: sampleDangling, label: "missing-include.json" },
   errors: { text: sampleErrors, label: "error-response.json" },
   edge: { text: sampleEdge, label: "awkward-ids.json" },
@@ -41,17 +57,18 @@ const need = <T extends HTMLElement>(id: string): T => {
 };
 
 const bootEl = need("boot");
+const bootMessageEl = need("boot-message");
 const pasteEl = need("paste");
 const docEl = need("doc");
 const inputEl = need<HTMLTextAreaElement>("input");
 const dropEl = need("drop");
 const dropMetaEl = need("drop-meta");
 const fileEl = need<HTMLInputElement>("file");
-const toastEl = need("toast");
 const errorEl = need("error");
 const errorHeadlineEl = need("error-headline");
 const errorHintEl = need("error-hint");
 const errorWhereEl = need("error-where");
+const resumeEl = need("resume");
 const newDocEl = need<HTMLButtonElement>("new-doc");
 const topbarDocEl = need("topbar-doc");
 const topbarLabelEl = need("topbar-label");
@@ -64,6 +81,7 @@ interface Loaded {
   index: DocumentIndex;
   label: string;
   bytes: number;
+  text: string;
 }
 
 let current: Loaded | null = null;
@@ -103,35 +121,27 @@ themeEl.addEventListener("click", () => {
   }
 });
 
-/* ---------------------------------------------------------------- toast --- */
-
-let toastTimer: number | undefined;
-
-function toast(message: string): void {
-  toastEl.textContent = message;
-  toastEl.classList.add("is-visible");
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.remove("is-visible"), 3200);
-}
-
 /* ----------------------------------------------------------- view state --- */
 
-function showView(which: "boot" | "paste" | "doc"): void {
+function showView(which: "boot" | "paste" | "doc", bootMessage = "Reading stored document"): void {
   bootEl.hidden = which !== "boot";
   pasteEl.hidden = which !== "paste";
   docEl.hidden = which !== "doc";
   newDocEl.hidden = which !== "doc";
   topbarDocEl.hidden = which !== "doc";
+  if (which === "boot") bootMessageEl.textContent = bootMessage;
 }
 
 function showError(error: unknown): void {
   const documentError =
     error instanceof DocumentError
       ? error
-      : new DocumentError(
-          "Something went wrong reading that document.",
-          error instanceof Error ? error.message : String(error),
-        );
+      : error instanceof ShareError
+        ? new DocumentError(error.headline, error.hint)
+        : new DocumentError(
+            "Something went wrong reading that document.",
+            error instanceof Error ? error.message : String(error),
+          );
 
   errorHeadlineEl.textContent = documentError.headline;
   errorHintEl.textContent = documentError.hint;
@@ -190,14 +200,10 @@ function openSection(section: Element): void {
  * just done it. Opening a row grows the page below it, which stales the scroll
  * offsets the browser saved for later history entries — so a Back or Forward
  * into one of those would land a row or two off. Re-scrolling to the fragment
- * makes every landing deterministic: an entry with a hash always lands on that
- * hash, whatever the layout did in between.
+ * makes every landing deterministic.
  *
- * The highlight needs no help from here. `:target` is resolved against the
- * document's current fragment, and it starts matching as soon as an element
- * with that id exists — including one inserted long after the initial
- * navigation. Only the scroll has to be redone, because the browser's own
- * scroll-to-fragment ran while the document was still empty.
+ * The highlight needs no help from here: `:target` starts matching as soon as an
+ * element with that id exists, including one rendered long after the navigation.
  */
 function resolveHash(): void {
   const raw = location.hash;
@@ -213,9 +219,7 @@ function resolveHash(): void {
   const target = document.getElementById(fragment);
   if (!target) {
     const identity = parseDomId(fragment);
-    if (identity) {
-      toast(`No ${identity.type} with id ${identity.id} in this document.`);
-    }
+    if (identity) toast(`No ${identity.type} with id ${identity.id} in this document.`);
     return;
   }
 
@@ -240,25 +244,57 @@ function fillBody(details: HTMLDetailsElement, index: DocumentIndex): void {
   const body = details.querySelector<HTMLElement>(".res__body");
   if (!body || !body.hasAttribute("data-pending")) return;
 
-  const section = details.closest<HTMLElement>(".res");
-  const identity = section ? parseDomId(section.id) : null;
-  if (!identity) return;
-
-  const resource = index.byKey.get(resourceKey(identity.type, identity.id));
+  const resource = resourceOf(details);
   if (!resource) return;
 
   body.removeAttribute("data-pending");
   body.append(buildResourceBody(resource, index));
 }
 
+/** The resource a DOM node belongs to, via its section's encoded id. */
+function resourceOf(node: Element): Resource | null {
+  if (!current) return null;
+  const section = node.closest<HTMLElement>(".res");
+  const identity = section ? parseDomId(section.id) : null;
+  if (!identity) return null;
+  return current.index.byKey.get(resourceKey(identity.type, identity.id)) ?? null;
+}
+
+/** Actions that operate on the whole document, shown in the overview card. */
+function documentActions(): HTMLElement {
+  const button = (label: string, title: string, onClick: () => void, primary = false) => {
+    const node = el("button", {
+      class: `btn${primary ? " btn--primary" : ""} btn--sm`,
+      type: "button",
+      title,
+      text: label,
+    });
+    node.addEventListener("click", onClick);
+    return node;
+  };
+
+  return el(
+    "div",
+    { class: "overview__actions" },
+    button("Share link", "Create an encrypted share link", () => shareDocument(), true),
+    button("Save", "Keep this document in this browser", () => saveCurrent()),
+    button("Export", "Download the document as a file", () => exportCurrent()),
+    button("Raw", "Show the whole document as raw JSON", () => rawDocument()),
+    button("Copy", "Copy the whole document", () => {
+      if (current) void copyBlob(current.text, "document");
+    }),
+  );
+}
+
 function renderDocumentView(loaded: Loaded, parseMs: number): void {
   const { index } = loaded;
   const started = performance.now();
 
-  const main = document.createElement("div");
-  main.className = "main";
+  const main = el("div", { class: "main" });
 
-  main.append(renderOverview(index, { bytes: loaded.bytes, parseMs }));
+  const overview = renderOverview(index, { bytes: loaded.bytes, parseMs });
+  overview.append(documentActions());
+  main.append(overview);
 
   const errors = renderErrors(index);
   if (errors) main.append(errors);
@@ -274,8 +310,7 @@ function renderDocumentView(loaded: Loaded, parseMs: number): void {
 
   // One string, one parse. On a 50k-resource document this is where the render
   // budget is spent, and it is several times cheaper than per-node creation.
-  const groups = document.createElement("div");
-  groups.className = "groups";
+  const groups = el("div", { class: "groups" });
   groups.innerHTML = groupsHtml(index);
   main.append(groups);
 
@@ -336,9 +371,85 @@ docEl.addEventListener(
   true,
 );
 
+/* ------------------------------------------------------- copy delegation --- */
+
+/** Render a value for the clipboard: bare text for strings, JSON for the rest. */
+function valueForClipboard(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || typeof value !== "object") return String(value);
+  return JSON.stringify(value, null, 2);
+}
+
+function handleValueCopy(button: HTMLElement): void {
+  if (!current) return;
+  const row = button.closest<HTMLElement>("[data-pointer]");
+  const pointer = row?.dataset["pointer"];
+  if (!pointer) return;
+
+  if (button.dataset["copy"] === "path") {
+    void copyText(pointer, "JSON Pointer");
+    return;
+  }
+
+  const value = resolvePointer(current.index.root, pointer);
+  if (value === undefined) {
+    toast(`Nothing resolves at ${pointer} any more.`, "error");
+    return;
+  }
+  const text = valueForClipboard(value as JsonValue);
+  if (text.length > 400) void copyBlob(text, "value");
+  else void copyText(text, "value");
+}
+
+function handleObjectAction(button: HTMLElement): void {
+  const resource = resourceOf(button);
+  if (!resource) return;
+
+  switch (button.dataset["objectAction"]) {
+    case "raw":
+      openRawModal({
+        title: `${resource.type} · ${resource.id}`,
+        subtitle: resource.pointer,
+        value: resource.raw,
+        filename: `${resource.type.replace(/[^\w.-]+/g, "_")}-${resource.id.replace(/[^\w.-]+/g, "_")}.json`,
+      });
+      break;
+    case "copy-object":
+      void copyBlob(JSON.stringify(resource.raw, null, 2), `${resource.type} ${resource.id}`);
+      break;
+    case "copy-pointer":
+      void copyText(resource.pointer, "JSON Pointer");
+      break;
+    case "copy-link":
+      void copyText(
+        `${location.origin}${VIEW_PATH}#${domId(resource.type, resource.id)}`,
+        "deep link",
+      );
+      break;
+  }
+}
+
 docEl.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+
+  // These buttons can sit inside a `<summary>`, where a bubbling click would
+  // toggle the disclosure as well as copying.
+  const copyButton = target.closest<HTMLElement>("[data-copy]");
+  if (copyButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    handleValueCopy(copyButton);
+    return;
+  }
+
+  const objectButton = target.closest<HTMLElement>("[data-object-action]");
+  if (objectButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    handleObjectAction(objectButton);
+    return;
+  }
 
   const solo = target.closest<HTMLButtonElement>(".railrow__solo");
   if (solo) {
@@ -374,9 +485,83 @@ docEl.addEventListener("input", (event) => {
   }
 });
 
+/* ---------------------------------------------------- document actions --- */
+
+function safeFilename(label: string): string {
+  const base = label.replace(/\.json$/i, "").replace(/[^\w.-]+/g, "-") || "document";
+  return `${base}.json`;
+}
+
+function exportCurrent(): void {
+  if (!current) return;
+  const filename = safeFilename(current.label);
+  downloadText(current.text, filename);
+  toast(`Downloading ${filename}`);
+}
+
+function rawDocument(): void {
+  if (!current) return;
+  openRawModal({
+    title: current.label,
+    subtitle: "whole document",
+    value: current.index.root,
+    filename: safeFilename(current.label),
+  });
+}
+
+function shareDocument(): void {
+  if (!current) return;
+  openShareModal(current.text, current.label);
+}
+
+function saveCurrent(): void {
+  if (!current) return;
+  const loaded = current;
+  openSaveModal(loaded.label, async (label) => {
+    const entry: LibraryEntry = {
+      label,
+      text: loaded.text,
+      savedAt: Date.now(),
+      bytes: loaded.bytes,
+      resources: loaded.index.counts.total,
+      types: loaded.index.groups.length,
+      shape: loaded.index.primaryIsNull
+        ? "data: null"
+        : loaded.index.errors.length
+          ? `errors[${loaded.index.errors.length}]`
+          : loaded.index.primary.length === 1
+            ? "data{1}"
+            : `data[${loaded.index.primary.length}]`,
+    };
+    const id = await saveToLibrary(entry);
+    if (id === null) {
+      toast("Could not save to this browser's storage.", "error");
+      return;
+    }
+    loaded.label = label;
+    topbarLabelEl.textContent = label;
+    document.title = `${label} — jsonapi-lens`;
+    toast(`Saved "${label}" to this browser`);
+  });
+}
+
+function openLibrary(): void {
+  void openLibraryModal((entry) => {
+    closeModal();
+    void load(entry.text, entry.label, { persist: true, push: true });
+  });
+}
+
 /* ------------------------------------------------------------- loading --- */
 
-async function load(text: string, label: string, options: { persist: boolean }): Promise<void> {
+interface LoadOptions {
+  /** Write to IndexedDB as the current document, and reset the fragment. */
+  persist: boolean;
+  /** Push `/view` onto history rather than replacing the current entry. */
+  push?: boolean;
+}
+
+async function load(text: string, label: string, options: LoadOptions): Promise<boolean> {
   hideError();
 
   const bytes = new TextEncoder().encode(text).byteLength;
@@ -388,28 +573,28 @@ async function load(text: string, label: string, options: { persist: boolean }):
   } catch (error) {
     showView("paste");
     showError(error);
-    return;
+    return false;
   }
 
   const parseMs = performance.now() - started;
-  current = { index, label, bytes };
+  current = { index, label, bytes, text };
+
+  if (options.persist) {
+    // A fresh document invalidates any fragment from the previous one, and the
+    // document view lives at /view.
+    if (options.push) navigate(VIEW_PATH);
+    else navigate(VIEW_PATH, { replace: true });
+  }
 
   renderDocumentView(current, parseMs);
 
   if (options.persist) {
-    // The paste view may have been scrolled — the sample buttons are below the
-    // fold — and swapping views keeps the document's scroll offset. A freshly
-    // read document should start at the top. The boot path passes
-    // `persist: false` and resolves the hash itself, so it is left alone.
     window.scrollTo(0, 0);
-
-    // A fresh document invalidates any fragment from the previous one.
-    history.replaceState(null, "", location.pathname + location.search);
     const saved = await saveDocument({ text, savedAt: Date.now(), label });
-    if (!saved) {
-      toast("This document could not be stored, so a reload will lose it.");
-    }
+    if (!saved) toast("This document could not be stored, so a reload will lose it.");
   }
+
+  return true;
 }
 
 function loadFromInput(): void {
@@ -420,7 +605,7 @@ function loadFromInput(): void {
     );
     return;
   }
-  void load(text, "pasted document", { persist: true });
+  void load(text, "pasted document", { persist: true, push: true });
 }
 
 /* ----------------------------------------------------------- paste view --- */
@@ -445,6 +630,8 @@ inputEl.addEventListener("keydown", (event) => {
 });
 
 need("open-file").addEventListener("click", () => fileEl.click());
+need("open-library").addEventListener("click", openLibrary);
+need("shortcuts").addEventListener("click", openShortcutsModal);
 
 fileEl.addEventListener("change", () => {
   const file = fileEl.files?.[0];
@@ -457,7 +644,7 @@ async function readFile(file: File): Promise<void> {
     const text = await file.text();
     inputEl.value = text;
     updateDropMeta();
-    await load(text, file.name, { persist: true });
+    await load(text, file.name, { persist: true, push: true });
   } catch {
     showError(
       new DocumentError("That file could not be read.", "Try opening it and pasting the contents."),
@@ -471,7 +658,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-sample]
     if (!sample) return;
     inputEl.value = sample.text;
     updateDropMeta();
-    void load(sample.text, sample.label, { persist: true });
+    void load(sample.text, sample.label, { persist: true, push: true });
   });
 }
 
@@ -484,9 +671,7 @@ dropEl.addEventListener("dragenter", (event) => {
   dropEl.classList.add("is-dragging");
 });
 
-dropEl.addEventListener("dragover", (event) => {
-  event.preventDefault();
-});
+dropEl.addEventListener("dragover", (event) => event.preventDefault());
 
 dropEl.addEventListener("dragleave", () => {
   dragDepth = Math.max(0, dragDepth - 1);
@@ -505,6 +690,15 @@ dropEl.addEventListener("drop", (event) => {
 window.addEventListener("dragover", (event) => event.preventDefault());
 window.addEventListener("drop", (event) => event.preventDefault());
 
+/** Leave the document without discarding it — Back and Forward still work. */
+function leaveDocument(): void {
+  if (docEl.hidden) return;
+  navigate(PASTE_PATH);
+  showView("paste");
+  offerResume();
+  window.scrollTo(0, 0);
+}
+
 newDocEl.addEventListener("click", () => {
   void clearDocument();
   current = null;
@@ -512,38 +706,220 @@ newDocEl.addEventListener("click", () => {
   docEl.replaceChildren();
   inputEl.value = "";
   updateDropMeta();
-  history.replaceState(null, "", location.pathname + location.search);
+  resumeEl.hidden = true;
+  navigate(PASTE_PATH);
   document.title = "jsonapi-lens — follow the pointer";
   showView("paste");
   inputEl.focus();
 });
 
+/**
+ * `/` is always the paste view, even when a document is loaded — so it offers a
+ * way back into the one you already have rather than making you paste again.
+ */
+function offerResume(): void {
+  if (!current) {
+    resumeEl.hidden = true;
+    return;
+  }
+  resumeEl.replaceChildren(
+    el("span", { class: "resume__text" }, `Still open: `, el("b", { text: current.label })),
+    (() => {
+      const button = el("button", {
+        class: "btn btn--primary btn--sm",
+        type: "button",
+        text: "Back to document",
+      });
+      button.addEventListener("click", () => {
+        navigate(VIEW_PATH);
+        showView("doc");
+      });
+      return button;
+    })(),
+  );
+  resumeEl.hidden = false;
+}
+
+/* ------------------------------------------------------------ shortcuts --- */
+
+/** Is the user typing? Single-letter shortcuts must not fire mid-word. */
+function isTyping(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable === true
+  );
+}
+
+document.addEventListener("keydown", (event) => {
+  // Shift+Escape leaves the document from anywhere, including out of a dialog.
+  if (event.key === "Escape" && event.shiftKey) {
+    event.preventDefault();
+    closeModal();
+    leaveDocument();
+    return;
+  }
+
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (modalIsOpen()) return;
+
+  if (event.key === "?" ) {
+    event.preventDefault();
+    openShortcutsModal();
+    return;
+  }
+
+  if (isTyping(event.target)) return;
+
+  switch (event.key) {
+    case "/": {
+      const search = docEl.querySelector<HTMLInputElement>("#rail-search");
+      if (search) {
+        event.preventDefault();
+        search.focus();
+        search.select();
+      }
+      break;
+    }
+    case "g":
+      if (current) {
+        event.preventDefault();
+        openJumpModal(current.index);
+      }
+      break;
+    case "s":
+      if (current) {
+        event.preventDefault();
+        saveCurrent();
+      }
+      break;
+    case "r":
+      if (current) {
+        event.preventDefault();
+        rawDocument();
+      }
+      break;
+    case "e":
+      if (current) {
+        event.preventDefault();
+        exportCurrent();
+      }
+      break;
+    case "l":
+      event.preventDefault();
+      openLibrary();
+      break;
+  }
+});
+
+/* --------------------------------------------------------------- routes --- */
+
+/** Load a document that arrived as a share link. */
+async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Promise<void> {
+  showView("boot", "Fetching and decrypting the shared document");
+
+  try {
+    const payload = await fetchShare(route.id, route.secret);
+    // Drop the key from the visible URL and from history before rendering, so
+    // it does not sit in the address bar or leak through a later Referer.
+    navigate(VIEW_PATH, { replace: true });
+    await load(payload.text, payload.label || `shared document ${route.id}`, { persist: true });
+    toast("Opened a shared document. It is now stored in this browser.");
+  } catch (error) {
+    navigate(PASTE_PATH, { replace: true });
+    showView("paste");
+    showError(error);
+  }
+}
+
+async function applyRoute(): Promise<void> {
+  const route = currentRoute();
+
+  if (route.kind === "share") {
+    await loadSharedDocument(route);
+    return;
+  }
+
+  if (route.kind === "unknown") {
+    toast(`No page at ${route.pathname}.`);
+    navigate(PASTE_PATH, { replace: true });
+    showView("paste");
+    offerResume();
+    return;
+  }
+
+  if (route.kind === "view") {
+    // Idempotent: traversing between fragments on /view must not re-render.
+    if (current) {
+      showView("doc");
+      return;
+    }
+    const stored = await loadDocument();
+    if (stored) {
+      inputEl.value = stored.text;
+      updateDropMeta();
+      const ok = await load(stored.text, stored.label ?? "stored document", { persist: false });
+      // The browser tried to scroll to the fragment before any of this existed,
+      // so that attempt hit nothing. Now the sections are in the DOM.
+      if (ok) resolveHash();
+      else navigate(PASTE_PATH, { replace: true });
+      return;
+    }
+    navigate(PASTE_PATH, { replace: true });
+    showView("paste");
+    toast("No document is loaded. Paste one to get started.");
+    return;
+  }
+
+  showView("paste");
+  offerResume();
+}
+
+window.addEventListener("popstate", () => void applyRoute());
+
 /* ------------------------------------------------------------------ boot -- */
 
 async function boot(): Promise<void> {
+  const route = currentRoute();
+
+  if (route.kind === "share") {
+    await loadSharedDocument(route);
+    return;
+  }
+
+  if (route.kind === "view" || route.kind === "unknown") {
+    await applyRoute();
+    return;
+  }
+
+  // The paste view is the entry point. If a document is already stored, offer a
+  // way back to it instead of silently jumping there.
   const stored = await loadDocument();
+  showView("paste");
 
   if (!stored) {
-    showView("paste");
-    // A deep link with no document behind it should say so rather than sit blank.
-    if (location.hash && location.hash !== "#") {
-      const identity = parseDomId(location.hash.slice(1));
-      toast(
-        identity
-          ? `That link points at ${identity.type} ${identity.id}, but no document is loaded yet.`
-          : "No document is loaded yet.",
-      );
-    }
+    resumeEl.hidden = true;
     return;
   }
 
   inputEl.value = stored.text;
   updateDropMeta();
-  await load(stored.text, stored.label ?? "stored document", { persist: false });
 
-  // The browser tried to scroll to the fragment before any of this existed, so
-  // that attempt hit nothing. Now that the sections are in the DOM, resolve it.
-  if (current) resolveHash();
+  // Parse it so "Back to document" is instant, but stay on the paste view.
+  try {
+    const index = readDocument(stored.text);
+    current = {
+      index,
+      label: stored.label ?? "stored document",
+      bytes: new TextEncoder().encode(stored.text).byteLength,
+      text: stored.text,
+    };
+    offerResume();
+  } catch {
+    // A stored document that no longer parses is not worth blocking the paste
+    // view over; it stays in the textarea so it can be fixed by hand.
+    resumeEl.hidden = true;
+  }
 }
 
 void boot();

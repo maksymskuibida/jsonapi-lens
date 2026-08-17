@@ -1,0 +1,246 @@
+{
+  "jsonapi": { "version": "1.1" },
+  "links": {
+    "self": "https://api.example.com/v2/articles?include=comments.author.employer.country",
+    "next": "https://api.example.com/v2/articles?page[offset]=2"
+  },
+  "meta": {
+    "request_id": "0f8b21c4-6d3a-4e19-9c77-2b5ea41f8d60",
+    "generated_at": "2026-09-12T09:41:07.312Z",
+    "page": { "offset": 0, "limit": 2, "total": 47 }
+  },
+  "data": [
+    {
+      "type": "articles",
+      "id": "art-8f21ab",
+      "attributes": {
+        "title": "Following a pointer through a flat document",
+        "slug": "following-a-pointer",
+        "published_at": "2026-09-14T07:34:00+02:00",
+        "updated_at": "2026-09-14T11:56:00+02:00",
+        "reading_minutes": 12,
+        "revision": 4,
+        "published": true,
+        "word_count": 2480,
+        "retracted_reason": null,
+        "keywords": ["json-api", "tooling", "graphs", "browsers"],
+        "metrics": { "views": 18420, "shares": 96, "average_scroll_depth": 0.78 }
+      },
+      "relationships": {
+        "comments": {
+          "data": [
+            { "type": "comments", "id": "cmt-01" },
+            { "type": "comments", "id": "cmt-02" }
+          ],
+          "links": { "related": "https://api.example.com/v2/articles/art-8f21ab/comments" }
+        },
+        "tags": {
+          "data": [
+            { "type": "tags", "id": "tag-tooling" },
+            { "type": "tags", "id": "tag-specs" }
+          ]
+        },
+        "author": { "data": { "type": "people", "id": "per-ada" } },
+        "retraction": { "data": null },
+        "revisions": {
+          "links": { "related": "https://api.example.com/v2/articles/art-8f21ab/revisions" }
+        }
+      },
+      "links": { "self": "https://api.example.com/v2/articles/art-8f21ab" }
+    },
+    {
+      "type": "articles",
+      "id": "art-3c07de",
+      "attributes": {
+        "title": "Why flat payloads need a reader",
+        "slug": "why-flat-payloads-need-a-reader",
+        "published_at": "2026-09-14T13:34:00+02:00",
+        "updated_at": "2026-09-14T17:38:00+02:00",
+        "reading_minutes": 6,
+        "revision": 1,
+        "published": true,
+        "word_count": 1120,
+        "retracted_reason": "superseded",
+        "keywords": ["json-api", "reading"],
+        "metrics": { "views": 2990, "shares": 12, "average_scroll_depth": 0.41 }
+      },
+      "relationships": {
+        "comments": { "data": [{ "type": "comments", "id": "cmt-03" }] },
+        "tags": { "data": [{ "type": "tags", "id": "tag-specs" }] },
+        "author": { "data": { "type": "people", "id": "per-grace" } },
+        "retraction": { "data": null }
+      },
+      "links": { "self": "https://api.example.com/v2/articles/art-3c07de" }
+    }
+  ],
+  "included": [
+    {
+      "type": "comments",
+      "id": "cmt-01",
+      "attributes": {
+        "body": "The part about anchors doing the routing for free is the bit I keep coming back to.",
+        "created_at": "2026-09-14T09:12:00+02:00",
+        "edited": false,
+        "score": 14,
+        "flagged": false
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "per-grace" } },
+        "article": { "data": { "type": "articles", "id": "art-8f21ab" } },
+        "in_reply_to": { "data": null }
+      }
+    },
+    {
+      "type": "comments",
+      "id": "cmt-02",
+      "attributes": {
+        "body": "Worth noting that content-visibility does not help if you remove the nodes.",
+        "created_at": "2026-09-14T09:44:00+02:00",
+        "edited": true,
+        "score": 8,
+        "flagged": false
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "per-ada" } },
+        "article": { "data": { "type": "articles", "id": "art-8f21ab" } },
+        "in_reply_to": { "data": { "type": "comments", "id": "cmt-01" } }
+      }
+    },
+    {
+      "type": "comments",
+      "id": "cmt-03",
+      "attributes": {
+        "body": "Short and useful. More of these please.",
+        "created_at": "2026-09-14T17:38:00+02:00",
+        "edited": false,
+        "score": 3,
+        "flagged": false
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "per-grace" } },
+        "article": { "data": { "type": "articles", "id": "art-3c07de" } },
+        "in_reply_to": { "data": null }
+      }
+    },
+    {
+      "type": "people",
+      "id": "per-ada",
+      "attributes": {
+        "name": "Ada Lovelace",
+        "handle": "ada",
+        "email": "ada@example.com",
+        "joined": "2024-01-15",
+        "verified": true,
+        "bio": "",
+        "profile": {
+          "location": "London",
+          "timezone": "Europe/London",
+          "website": "https://example.com/~ada",
+          "pronouns": null
+        }
+      },
+      "relationships": {
+        "employer": { "data": { "type": "organizations", "id": "org-acme" } },
+        "articles": { "data": [{ "type": "articles", "id": "art-8f21ab" }] }
+      },
+      "links": { "self": "https://api.example.com/v2/people/per-ada" }
+    },
+    {
+      "type": "people",
+      "id": "per-grace",
+      "attributes": {
+        "name": "Grace Hopper",
+        "handle": "grace",
+        "email": "grace@example.com",
+        "joined": "2023-11-02",
+        "verified": true,
+        "bio": "Compiler person. Reads a lot of payloads.",
+        "profile": {
+          "location": "Arlington",
+          "timezone": "America/New_York",
+          "website": "https://example.com/~grace",
+          "pronouns": "she/her"
+        }
+      },
+      "relationships": {
+        "employer": { "data": { "type": "organizations", "id": "org-globex" } },
+        "articles": { "data": [{ "type": "articles", "id": "art-3c07de" }] }
+      }
+    },
+    {
+      "type": "organizations",
+      "id": "org-acme",
+      "attributes": {
+        "name": "Acme Research",
+        "short_name": "Acme",
+        "support_url": "https://example.com/support/acme",
+        "founded": "1994-01-01",
+        "employee_count": 412
+      },
+      "relationships": {
+        "country": { "data": { "type": "countries", "id": "GB" } }
+      }
+    },
+    {
+      "type": "organizations",
+      "id": "org-globex",
+      "attributes": {
+        "name": "Globex Corporation",
+        "short_name": "Globex",
+        "support_url": "https://example.com/support/globex",
+        "founded": "1989-06-30",
+        "employee_count": 1780
+      },
+      "relationships": {
+        "country": { "data": { "type": "countries", "id": "US" } }
+      }
+    },
+    {
+      "type": "countries",
+      "id": "GB",
+      "attributes": {
+        "name": "United Kingdom",
+        "iso_alpha2": "GB",
+        "currency": "GBP",
+        "default_locale": "en-GB"
+      },
+      "relationships": {
+        "primary_organization": { "data": { "type": "organizations", "id": "org-acme" } }
+      }
+    },
+    {
+      "type": "countries",
+      "id": "US",
+      "attributes": {
+        "name": "United States",
+        "iso_alpha2": "US",
+        "currency": "USD",
+        "default_locale": "en-US"
+      },
+      "relationships": {
+        "primary_organization": { "data": { "type": "organizations", "id": "org-globex" } }
+      }
+    },
+    {
+      "type": "tags",
+      "id": "tag-tooling",
+      "attributes": { "name": "Tooling", "slug": "tooling", "article_count": 31 },
+      "relationships": {
+        "articles": { "data": [{ "type": "articles", "id": "art-8f21ab" }] }
+      }
+    },
+    {
+      "type": "tags",
+      "id": "tag-specs",
+      "attributes": { "name": "Specifications", "slug": "specs", "article_count": 18 },
+      "relationships": {
+        "articles": {
+          "data": [
+            { "type": "articles", "id": "art-8f21ab" },
+            { "type": "articles", "id": "art-3c07de" }
+          ]
+        }
+      }
+    }
+  ]
+}

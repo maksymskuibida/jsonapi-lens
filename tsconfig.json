@@ -15,5 +15,9 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "test", "vite.config.ts"]
+  "include": ["src", "test", "vite.config.ts", "vitest.config.ts"],
+  // The Worker runs on workerd, not in a browser: its `Request`/`Response` and
+  // globals come from @cloudflare/workers-types and conflict with the DOM lib
+  // above. It is typechecked separately by tsconfig.worker.json.
+  "exclude": ["src/worker.ts"]
 }

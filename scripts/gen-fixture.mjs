@@ -4,11 +4,11 @@
  *
  *   node scripts/gen-fixture.mjs [includedCount] [outPath]
  *
- * Defaults to 50,000 included resources at fixtures/large-50k.json. The shape
- * mirrors a rail provider response: a page of trips whose segments point at
- * stations, which point at countries, plus fares, vehicles and carriers — so
- * the relationship graph is deep enough that resolution actually costs
- * something, and roughly 2% of pointers deliberately dangle.
+ * Defaults to 50,000 included resources at fixtures/large-50k.json. The shape is
+ * a paginated article feed: articles whose comments point at people, who point
+ * at organizations, which point at countries — deep enough that relationship
+ * resolution actually costs something. Roughly 2% of pointers deliberately
+ * dangle, so the unresolved-pointer path gets exercised at scale too.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -36,66 +36,67 @@ function random() {
 const pick = (list) => list[Math.floor(random() * list.length)];
 const int = (min, max) => min + Math.floor(random() * (max - min + 1));
 
-const CITIES = [
-  "Berlin", "Praha", "Wien", "Zürich", "Milano", "Lyon", "Barcelona", "Porto",
-  "Kraków", "Budapest", "Ljubljana", "Zagreb", "București", "Sofia", "Thessaloniki",
-  "København", "Göteborg", "Oslo", "Tampere", "Rīga", "Vilnius", "Tallinn",
-  "Amsterdam", "Antwerpen", "Luxembourg", "Strasbourg", "Torino", "Napoli",
+const GIVEN = [
+  "Ada", "Grace", "Alan", "Barbara", "Edsger", "Katherine", "Donald", "Radia",
+  "Tim", "Frances", "Ken", "Margaret", "Dennis", "Adele", "Linus", "Jean",
+  "Guido", "Sophie", "Rich", "Anita", "Bjarne", "Karen", "Vint", "Shafi",
+];
+
+const FAMILY = [
+  "Lovelace", "Hopper", "Turing", "Liskov", "Dijkstra", "Johnson", "Knuth",
+  "Perlman", "Berners-Lee", "Allen", "Thompson", "Hamilton", "Ritchie",
+  "Goldberg", "Torvalds", "Bartik", "Rossum", "Wilson", "Stallman", "Borg",
+];
+
+const ORGS = [
+  ["acme", "Acme Research"], ["globex", "Globex Corporation"],
+  ["initech", "Initech"], ["umbrella", "Umbrella Analytics"],
+  ["hooli", "Hooli Labs"], ["soylent", "Soylent Media"],
+  ["cyberdyne", "Cyberdyne Systems"], ["stark", "Stark Industries"],
+  ["wayne", "Wayne Enterprises"], ["tyrell", "Tyrell Corporation"],
+  ["aperture", "Aperture Science"], ["blackmesa", "Black Mesa"],
 ];
 
 const COUNTRIES = [
-  ["DE", "Germany", "EUR"], ["CZ", "Czechia", "CZK"], ["AT", "Austria", "EUR"],
-  ["CH", "Switzerland", "CHF"], ["IT", "Italy", "EUR"], ["FR", "France", "EUR"],
-  ["ES", "Spain", "EUR"], ["PT", "Portugal", "EUR"], ["PL", "Poland", "PLN"],
-  ["HU", "Hungary", "HUF"], ["SI", "Slovenia", "EUR"], ["HR", "Croatia", "EUR"],
-  ["RO", "Romania", "RON"], ["BG", "Bulgaria", "BGN"], ["GR", "Greece", "EUR"],
-  ["DK", "Denmark", "DKK"], ["SE", "Sweden", "SEK"], ["NO", "Norway", "NOK"],
-  ["FI", "Finland", "EUR"], ["LV", "Latvia", "EUR"], ["LT", "Lithuania", "EUR"],
-  ["EE", "Estonia", "EUR"], ["NL", "Netherlands", "EUR"], ["BE", "Belgium", "EUR"],
-  ["LU", "Luxembourg", "EUR"],
+  ["GB", "United Kingdom", "GBP"], ["US", "United States", "USD"],
+  ["DE", "Germany", "EUR"], ["FR", "France", "EUR"], ["JP", "Japan", "JPY"],
+  ["BR", "Brazil", "BRL"], ["IN", "India", "INR"], ["CA", "Canada", "CAD"],
+  ["AU", "Australia", "AUD"], ["ZA", "South Africa", "ZAR"],
+  ["SE", "Sweden", "SEK"], ["PL", "Poland", "PLN"], ["ES", "Spain", "EUR"],
+  ["IT", "Italy", "EUR"], ["NL", "Netherlands", "EUR"], ["KR", "South Korea", "KRW"],
+  ["MX", "Mexico", "MXN"], ["NG", "Nigeria", "NGN"], ["EG", "Egypt", "EGP"],
+  ["AR", "Argentina", "ARS"], ["ID", "Indonesia", "IDR"], ["TR", "Turkey", "TRY"],
+  ["CZ", "Czechia", "CZK"], ["PT", "Portugal", "EUR"], ["FI", "Finland", "EUR"],
 ];
 
-const CARRIERS = [
-  ["db", "Deutsche Bahn"], ["cd", "České dráhy"], ["obb", "ÖBB"], ["sbb", "SBB"],
-  ["trenitalia", "Trenitalia"], ["sncf", "SNCF"], ["renfe", "Renfe"], ["cp", "CP"],
-  ["pkp", "PKP Intercity"], ["mav", "MÁV"], ["flix", "FlixTrain"], ["westbahn", "WESTbahn"],
+const TOPICS = [
+  "parsers", "indexes", "caching", "rendering", "protocols", "typography",
+  "storage", "scheduling", "compilers", "queues", "graphs", "encodings",
 ];
 
-const AMENITIES = ["wifi", "power_sockets", "bistro", "bicycle_spaces", "quiet_zone", "air_conditioning"];
+const KEYWORDS = ["json-api", "tooling", "graphs", "browsers", "performance", "specs"];
 
 /* Budget: the caller asks for a total `included` count, so split it across the
    types in fixed proportions rather than hardcoding per-type counts. */
-const share = {
-  segments: 0.34,
-  stations: 0.2,
-  fares: 0.28,
-  vehicles: 0.11,
-  carriers: 0.0,
-  countries: 0.0,
-};
-
-const nStations = Math.max(2, Math.floor(included * share.stations));
-const nSegments = Math.max(1, Math.floor(included * share.segments));
-const nFares = Math.max(1, Math.floor(included * share.fares));
-const nVehicles = Math.max(1, Math.floor(included * share.vehicles));
+const nPeople = Math.max(2, Math.floor(included * 0.2));
+const nTags = Math.max(1, Math.floor(included * 0.11));
 const nCountries = COUNTRIES.length;
-const nCarriers = CARRIERS.length;
+const nOrgs = ORGS.length;
 
-// Whatever the proportions leave over becomes extra segments.
-const assigned = nStations + nSegments + nFares + nVehicles + nCountries + nCarriers;
-const nSegmentsFinal = nSegments + Math.max(0, included - assigned);
+const baseComments = Math.max(1, Math.floor(included * 0.62));
+const assigned = nPeople + nTags + nCountries + nOrgs + baseComments;
+// Whatever the proportions leave over becomes extra comments.
+const nComments = baseComments + Math.max(0, included - assigned);
 
-// Trips are the primary data; each owns a few segments and fares.
-const nTrips = Math.max(1, Math.floor(nSegmentsFinal / 3));
+// Articles are the primary data; each owns a few comments and tags.
+const nArticles = Math.max(1, Math.floor(nComments / 3));
 
 const pad = (n, width) => String(n).padStart(width, "0");
-const stationId = (i) => `station-${pad(i, 6)}`;
-const segmentId = (i) => `seg-${pad(i, 7)}`;
-const fareId = (i) => `fare-${pad(i, 7)}`;
-const vehicleId = (i) => `vehicle-${pad(i, 6)}`;
-const tripId = (i) => `trip-${pad(i, 7)}`;
+const personId = (i) => `per-${pad(i, 6)}`;
+const commentId = (i) => `cmt-${pad(i, 7)}`;
+const tagId = (i) => `tag-${pad(i, 6)}`;
+const articleId = (i) => `art-${pad(i, 7)}`;
 
-const DAY = 24 * 60 * 60 * 1000;
 const BASE = Date.parse("2026-09-14T05:00:00Z");
 const isoAt = (minutes) => new Date(BASE + minutes * 60_000).toISOString();
 
@@ -109,172 +110,160 @@ for (const [code, name, currency] of COUNTRIES) {
       name,
       iso_alpha2: code,
       currency,
-      requires_seat_reservation: random() < 0.4,
+      default_locale: `${code.toLowerCase()}-${code}`,
     },
     relationships: {
-      default_carrier: { data: { type: "carriers", id: `carrier-${pick(CARRIERS)[0]}` } },
+      primary_organization: { data: { type: "organizations", id: `org-${pick(ORGS)[0]}` } },
     },
   });
 }
 
-for (const [slug, name] of CARRIERS) {
+for (const [slug, name] of ORGS) {
   includedOut.push({
-    type: "carriers",
-    id: `carrier-${slug}`,
+    type: "organizations",
+    id: `org-${slug}`,
     attributes: {
       name,
-      short_name: slug.toUpperCase(),
+      short_name: slug,
       support_url: `https://example.com/support/${slug}`,
-      founded: `${int(1980, 2005)}-01-01`,
-    },
-    relationships: {
-      home_country: { data: { type: "countries", id: pick(COUNTRIES)[0] } },
-    },
-  });
-}
-
-for (let i = 0; i < nStations; i++) {
-  const city = pick(CITIES);
-  includedOut.push({
-    type: "stations",
-    id: stationId(i),
-    attributes: {
-      name: `${city} ${pick(["Hauptbahnhof", "Centrale", "Central", "Hbf", "Nord", "Est"])}`,
-      code: `${city.slice(0, 3).toUpperCase()}${pad(i % 1000, 3)}`,
-      timezone: "Europe/Berlin",
-      latitude: Number((40 + random() * 20).toFixed(6)),
-      longitude: Number((-8 + random() * 32).toFixed(6)),
-      wheelchair_accessible: random() < 0.75,
-      platforms: int(2, 28),
-      address: {
-        street: `${pick(["Bahnhofstraße", "Via Roma", "Rue de la Gare", "Wilsonova"])} ${int(1, 240)}`,
-        postal_code: pad(int(1000, 99999), 5),
-        city,
-        region: random() < 0.5 ? null : city,
-      },
+      founded: `${int(1980, 2015)}-01-01`,
+      employee_count: int(12, 4200),
     },
     relationships: {
       country: { data: { type: "countries", id: pick(COUNTRIES)[0] } },
-      // ~2% of station pointers reference a station that was never sent.
-      connected_stations: {
+    },
+  });
+}
+
+for (let i = 0; i < nPeople; i++) {
+  const given = pick(GIVEN);
+  const family = pick(FAMILY);
+  includedOut.push({
+    type: "people",
+    id: personId(i),
+    attributes: {
+      name: `${given} ${family}`,
+      handle: `${given.toLowerCase()}${pad(i % 10000, 4)}`,
+      email: `${given.toLowerCase()}.${family.toLowerCase().replace(/[^a-z]/g, "")}@example.com`,
+      joined: `${int(2019, 2026)}-${pad(int(1, 12), 2)}-${pad(int(1, 28), 2)}`,
+      verified: random() < 0.7,
+      comment_count: int(0, 480),
+      profile: {
+        location: pick(["London", "Berlin", "Tokyo", "São Paulo", "Toronto", "Kraków"]),
+        timezone: "Europe/London",
+        website: random() < 0.4 ? null : `https://example.com/~${given.toLowerCase()}${i}`,
+        pronouns: random() < 0.5 ? null : pick(["she/her", "he/him", "they/them"]),
+      },
+    },
+    relationships: {
+      employer: { data: { type: "organizations", id: `org-${pick(ORGS)[0]}` } },
+      // ~2% of these reference a person who was never sent.
+      follows: {
         data: Array.from({ length: int(0, 3) }, () =>
           random() < 0.02
-            ? { type: "stations", id: `station-absent-${pad(int(0, 9999), 6)}` }
-            : { type: "stations", id: stationId(int(0, nStations - 1)) },
+            ? { type: "people", id: `per-absent-${pad(int(0, 9999), 6)}` }
+            : { type: "people", id: personId(int(0, nPeople - 1)) },
         ),
       },
     },
   });
 }
 
-for (let i = 0; i < nVehicles; i++) {
+for (let i = 0; i < nTags; i++) {
+  const topic = pick(TOPICS);
   includedOut.push({
-    type: "vehicles",
-    id: vehicleId(i),
+    type: "tags",
+    id: tagId(i),
     attributes: {
-      kind: pick(["train", "coach", "ferry"]),
-      model: pick(["Siemens Vectron", "Railjet", "Frecciarossa 1000", "TGV Duplex", "Stadler FLIRT"]),
-      has_wifi: random() < 0.8,
-      coaches: int(3, 14),
-      quiet_zone: random() < 0.5,
+      name: `${topic[0].toUpperCase()}${topic.slice(1)} ${i}`,
+      slug: `${topic}-${i}`,
+      article_count: int(1, 900),
+      featured: random() < 0.1,
     },
     relationships: {
-      operator: { data: { type: "carriers", id: `carrier-${pick(CARRIERS)[0]}` } },
+      articles: { data: [{ type: "articles", id: articleId(i % nArticles) }] },
     },
   });
 }
 
-for (let i = 0; i < nSegmentsFinal; i++) {
-  const depart = int(0, 14 * 24 * 60);
+for (let i = 0; i < nComments; i++) {
+  const created = int(0, 14 * 24 * 60);
   includedOut.push({
-    type: "segments",
-    id: segmentId(i),
+    type: "comments",
+    id: commentId(i),
     attributes: {
-      sequence: (i % 3) + 1,
-      departure_time: isoAt(depart),
-      arrival_time: isoAt(depart + int(35, 320)),
-      platform: String(int(1, 24)),
-      distance_km: Number((30 + random() * 600).toFixed(1)),
-      service_number: `${pick(["EC", "IC", "RJ", "TGV", "FR"])} ${int(100, 9999)}`,
+      body: `Comment ${i} about ${pick(TOPICS)}. ${pick(["Useful.", "Not sure about this.", "Agreed.", "Needs a citation.", "This matches what I measured."])}`,
+      created_at: isoAt(created),
+      edited_at: random() < 0.3 ? isoAt(created + int(1, 500)) : null,
+      score: int(-4, 120),
+      edited: random() < 0.3,
+      flagged: random() < 0.05,
     },
     relationships: {
-      origin_station: { data: { type: "stations", id: stationId(int(0, nStations - 1)) } },
-      destination_station: {
+      author: {
         data:
           random() < 0.02
-            ? { type: "stations", id: `station-absent-${pad(int(0, 9999), 6)}` }
-            : { type: "stations", id: stationId(int(0, nStations - 1)) },
+            ? { type: "people", id: `per-absent-${pad(int(0, 9999), 6)}` }
+            : { type: "people", id: personId(int(0, nPeople - 1)) },
       },
-      vehicle: { data: { type: "vehicles", id: vehicleId(int(0, nVehicles - 1)) } },
-      operating_carrier: { data: { type: "carriers", id: `carrier-${pick(CARRIERS)[0]}` } },
-      trip: { data: { type: "trips", id: tripId(i % nTrips) } },
-    },
-  });
-}
-
-for (let i = 0; i < nFares; i++) {
-  includedOut.push({
-    type: "fares",
-    id: fareId(i),
-    attributes: {
-      name: pick(["Standard", "Flexible", "Super Saver", "Business", "Youth"]),
-      class: pick(["first", "second"]),
-      refundable: random() < 0.3,
-      changeable: random() < 0.6,
-      change_fee: random() < 0.2 ? null : { amount: int(0, 4000), currency: "EUR" },
-      baggage_allowance: { pieces: int(1, 3), max_weight_kg: int(20, 32) },
-    },
-    relationships: {
-      trip: { data: { type: "trips", id: tripId(i % nTrips) } },
+      article: { data: { type: "articles", id: articleId(i % nArticles) } },
+      in_reply_to:
+        random() < 0.35
+          ? { data: { type: "comments", id: commentId(int(0, nComments - 1)) } }
+          : { data: null },
     },
   });
 }
 
 const data = [];
-for (let i = 0; i < nTrips; i++) {
-  const depart = int(0, 14 * 24 * 60);
-  const duration = int(60, 600);
+for (let i = 0; i < nArticles; i++) {
+  const published = int(0, 14 * 24 * 60);
   data.push({
-    type: "trips",
-    id: tripId(i),
+    type: "articles",
+    id: articleId(i),
     attributes: {
-      name: `${pick(CITIES)} → ${pick(CITIES)}`,
-      departure_time: isoAt(depart),
-      arrival_time: isoAt(depart + duration),
-      duration_minutes: duration,
-      changes: int(0, 3),
-      bookable: random() < 0.9,
-      available_seats: int(0, 220),
-      cancellation_policy: random() < 0.5 ? null : pick(["non_refundable", "flexible"]),
-      amenities: AMENITIES.filter(() => random() < 0.5),
-      price: { amount: int(900, 24900), currency: "EUR", fractional_digits: 2 },
+      title: `On ${pick(TOPICS)} and ${pick(TOPICS)} (${i})`,
+      slug: `on-${pick(TOPICS)}-${i}`,
+      published_at: isoAt(published),
+      updated_at: isoAt(published + int(10, 6000)),
+      reading_minutes: int(2, 40),
+      revision: int(1, 12),
+      published: random() < 0.9,
+      word_count: int(200, 9000),
+      retracted_reason: random() < 0.5 ? null : pick(["superseded", "duplicate"]),
+      keywords: KEYWORDS.filter(() => random() < 0.5),
+      metrics: {
+        views: int(10, 90000),
+        shares: int(0, 900),
+        average_scroll_depth: Number(random().toFixed(2)),
+      },
     },
     relationships: {
-      segments: {
+      comments: {
         data: [0, 1, 2]
           .map((k) => i * 3 + k)
-          .filter((k) => k < nSegmentsFinal)
-          .map((k) => ({ type: "segments", id: segmentId(k) })),
+          .filter((k) => k < nComments)
+          .map((k) => ({ type: "comments", id: commentId(k) })),
       },
-      fares: {
+      tags: {
         data: [0, 1]
           .map((k) => i * 2 + k)
-          .filter((k) => k < nFares)
-          .map((k) => ({ type: "fares", id: fareId(k) })),
+          .filter((k) => k < nTags)
+          .map((k) => ({ type: "tags", id: tagId(k) })),
       },
-      marketing_carrier: { data: { type: "carriers", id: `carrier-${pick(CARRIERS)[0]}` } },
-      booking: { data: null },
-      seat_map: { links: { related: `https://api.example.com/v2/trips/${tripId(i)}/seat-map` } },
+      author: { data: { type: "people", id: personId(int(0, nPeople - 1)) } },
+      retraction: { data: null },
+      revisions: { links: { related: `https://api.example.com/v2/articles/${articleId(i)}/revisions` } },
     },
   });
 }
 
 const doc = {
   jsonapi: { version: "1.1" },
-  links: { self: "https://api.example.com/v2/trips?include=segments.origin_station.country" },
+  links: { self: "https://api.example.com/v2/articles?include=comments.author.employer.country" },
   meta: {
     request_id: "perf-fixture",
-    generated_at: new Date(BASE - DAY).toISOString(),
+    generated_at: new Date(BASE - 86400000).toISOString(),
     page: { offset: 0, limit: data.length, total: data.length },
   },
   data,
@@ -291,10 +280,10 @@ const byType = includedOut.reduce((acc, r) => {
 }, {});
 
 console.log(`Wrote ${outPath}`);
-console.log(`  primary data : ${data.length.toLocaleString()} trips`);
+console.log(`  primary data : ${data.length.toLocaleString()} articles`);
 console.log(`  included     : ${includedOut.length.toLocaleString()}`);
 for (const [type, n] of Object.entries(byType).sort((a, b) => b[1] - a[1])) {
-  console.log(`    ${type.padEnd(12)} ${n.toLocaleString()}`);
+  console.log(`    ${type.padEnd(14)} ${n.toLocaleString()}`);
 }
 console.log(`  total resources: ${(data.length + includedOut.length).toLocaleString()}`);
 console.log(`  size           : ${(json.length / 1024 / 1024).toFixed(2)} MB`);

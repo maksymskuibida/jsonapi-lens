@@ -50,8 +50,8 @@ describe("bulk row rendering", () => {
   it("gives every resource a section with the encoded id", () => {
     const index = buildIndex(
       doc({
-        data: { type: "trip/legs", id: "2026-09-14/EC 173#1" },
-        included: [{ type: "stations", id: "zürich-hbf" }],
+        data: { type: "draft/sections", id: "2026-09-14/Section 3#1" },
+        included: [{ type: "people", id: "zürich-city" }],
       }),
     );
 
@@ -59,8 +59,8 @@ describe("bulk row rendering", () => {
     host.innerHTML = groupsHtml(index);
     document.body.append(host);
 
-    expect(document.getElementById(domId("trip/legs", "2026-09-14/EC 173#1"))).not.toBeNull();
-    expect(document.getElementById(domId("stations", "zürich-hbf"))).not.toBeNull();
+    expect(document.getElementById(domId("draft/sections", "2026-09-14/Section 3#1"))).not.toBeNull();
+    expect(document.getElementById(domId("people", "zürich-city"))).not.toBeNull();
     host.remove();
   });
 
@@ -110,14 +110,14 @@ describe("bulk row rendering", () => {
 
 describe("chip", () => {
   it("renders a resolved pointer as a link to the target section", () => {
-    const node = chip("stations", "zürich-hbf", true);
+    const node = chip("people", "zürich-city", true);
     expect(node.tagName).toBe("A");
-    expect(node.getAttribute("href")).toBe("#" + domId("stations", "zürich-hbf"));
+    expect(node.getAttribute("href")).toBe("#" + domId("people", "zürich-city"));
     expect(node.querySelector(".chip__absent")).toBeNull();
   });
 
   it("renders an unresolved pointer as a non-link that says so", () => {
-    const node = chip("stations", "gone", false);
+    const node = chip("people", "gone", false);
     expect(node.tagName).toBe("SPAN");
     expect(node.hasAttribute("href")).toBe(false);
     expect(node.querySelector(".chip__absent")?.textContent).toBe("not in document");
@@ -156,23 +156,23 @@ describe("value classification", () => {
 
 describe("summary attribute", () => {
   it("prefers a human-meaningful key", () => {
-    expect(summaryAttribute({ id_hash: "x", name: "Berlin Hbf" })?.key).toBe("name");
+    expect(summaryAttribute({ id_hash: "x", name: "Ada Lovelace" })?.key).toBe("name");
     expect(summaryAttribute({ z: 1, title: "T" })?.key).toBe("title");
   });
 
   it("falls back to the first usable scalar", () => {
-    expect(summaryAttribute({ platform: "11", extra: null })?.key).toBe("platform");
+    expect(summaryAttribute({ handle: "11", extra: null })?.key).toBe("handle");
   });
 
   it("prefers an identifying string over a number that happens to come first", () => {
-    // A segment summarised as "sequence 2" tells you nothing; "EC 173" does.
-    expect(summaryAttribute({ sequence: 2, service_number: "EC 173" })?.key).toBe(
-      "service_number",
+    // A comment summarised as "score 2" tells you nothing; its headline does.
+    expect(summaryAttribute({ score: 2, headline: "Section 3" })?.key).toBe(
+      "headline",
     );
   });
 
   it("still uses a number when there is no string at all", () => {
-    expect(summaryAttribute({ sequence: 2, distance_km: 141.2 })?.key).toBe("sequence");
+    expect(summaryAttribute({ score: 2, word_count: 141.2 })?.key).toBe("score");
   });
 
   it("skips nulls, empty strings and nested values", () => {

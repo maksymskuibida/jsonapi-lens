@@ -292,8 +292,9 @@ function renderError(error: JsonApiError, position: number): HTMLElement {
     );
   }
 
-  if (error.meta) item.append(renderObjectBlock("Meta", error.meta, "sub"));
-  if (error.links) item.append(renderObjectBlock("Links", error.links, "sub"));
+  const errorPointer = `/errors/${position}`;
+  if (error.meta) item.append(renderObjectBlock("Meta", error.meta, `${errorPointer}/meta`, "sub"));
+  if (error.links) item.append(renderObjectBlock("Links", error.links, `${errorPointer}/links`, "sub"));
 
   return item;
 }
@@ -329,9 +330,9 @@ export function renderTopLevel(index: DocumentIndex): HTMLElement | null {
   details.append(el("summary", { class: "toplevel__summary", text: "Top-level members" }));
 
   const body = el("div", { class: "toplevel__body" });
-  if (index.jsonapi) body.append(renderObjectBlock("jsonapi", index.jsonapi, "sub"));
-  if (index.links) body.append(renderObjectBlock("Links", index.links, "sub"));
-  if (index.meta) body.append(renderObjectBlock("Meta", index.meta, "sub"));
+  if (index.jsonapi) body.append(renderObjectBlock("jsonapi", index.jsonapi, "/jsonapi", "sub"));
+  if (index.links) body.append(renderObjectBlock("Links", index.links, "/links", "sub"));
+  if (index.meta) body.append(renderObjectBlock("Meta", index.meta, "/meta", "sub"));
   details.append(body);
 
   return details;

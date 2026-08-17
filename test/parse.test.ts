@@ -77,14 +77,14 @@ describe("assertJsonApi", () => {
 
 describe("buildIndex — document shapes", () => {
   it("handles data as a single resource", () => {
-    const index = buildIndex(doc({ data: { type: "trips", id: "1" } }));
+    const index = buildIndex(doc({ data: { type: "articles", id: "1" } }));
     expect(index.counts.total).toBe(1);
-    expect(index.primary).toEqual([{ type: "trips", id: "1" }]);
+    expect(index.primary).toEqual([{ type: "articles", id: "1" }]);
     expect(index.primaryIsNull).toBe(false);
   });
 
   it("handles data as an array", () => {
-    const index = buildIndex(doc({ data: [{ type: "trips", id: "1" }, { type: "trips", id: "2" }] }));
+    const index = buildIndex(doc({ data: [{ type: "articles", id: "1" }, { type: "articles", id: "2" }] }));
     expect(index.counts.total).toBe(2);
     expect(index.primary).toHaveLength(2);
   });
@@ -113,8 +113,8 @@ describe("buildIndex — document shapes", () => {
     const index = buildIndex(
       doc({
         data: [
-          { type: "trips", id: "1" },
-          { type: "trips" },
+          { type: "articles", id: "1" },
+          { type: "articles" },
           { id: "no-type" },
           null,
           "string",
@@ -135,11 +135,11 @@ describe("buildIndex — identity", () => {
   it("dedupes repeated type:id so DOM ids stay unique", () => {
     const index = buildIndex(
       doc({
-        data: { type: "trips", id: "1" },
+        data: { type: "articles", id: "1" },
         included: [
-          { type: "stations", id: "s", attributes: { name: "First" } },
-          { type: "stations", id: "s", attributes: { name: "Second" } },
-          { type: "stations", id: "s", attributes: { name: "Third" } },
+          { type: "people", id: "s", attributes: { name: "First" } },
+          { type: "people", id: "s", attributes: { name: "Second" } },
+          { type: "people", id: "s", attributes: { name: "Third" } },
         ],
       }),
     );
@@ -147,10 +147,10 @@ describe("buildIndex — identity", () => {
     expect(index.counts.total).toBe(2);
     expect(index.counts.duplicates).toBe(2);
 
-    const station = index.byKey.get(resourceKey("stations", "s"));
-    expect(station?.duplicated).toBe(true);
+    const person = index.byKey.get(resourceKey("people", "s"));
+    expect(person?.duplicated).toBe(true);
     // First occurrence wins, so the rendered attributes are predictable.
-    expect(station?.attributes).toEqual({ name: "First" });
+    expect(person?.attributes).toEqual({ name: "First" });
 
     const domIds = index.groups.flatMap((g) => g.resources.map((r) => r.domId));
     expect(new Set(domIds).size).toBe(domIds.length);
@@ -159,12 +159,12 @@ describe("buildIndex — identity", () => {
   it("lets primary data win the origin label when it also appears in included", () => {
     const index = buildIndex(
       doc({
-        included: [{ type: "trips", id: "1" }],
-        data: { type: "trips", id: "1" },
+        included: [{ type: "articles", id: "1" }],
+        data: { type: "articles", id: "1" },
       }),
     );
     // `data` is ingested first, so this checks the reverse order too.
-    expect(index.byKey.get(resourceKey("trips", "1"))?.origin).toBe("data");
+    expect(index.byKey.get(resourceKey("articles", "1"))?.origin).toBe("data");
   });
 
   it("treats identical ids under different types as distinct", () => {
@@ -179,28 +179,28 @@ describe("buildIndex — identity", () => {
 describe("buildIndex — relationships", () => {
   const base = {
     data: {
-      type: "trips",
+      type: "articles",
       id: "1",
       relationships: {
-        segments: { data: [{ type: "segments", id: "a" }, { type: "segments", id: "missing" }] },
-        carrier: { data: { type: "carriers", id: "gone" } },
-        booking: { data: null },
-        seat_map: { links: { related: "https://example.com/seat-map" } },
+        comments: { data: [{ type: "comments", id: "a" }, { type: "comments", id: "missing" }] },
+        author: { data: { type: "people", id: "gone" } },
+        retraction: { data: null },
+        revisions: { links: { related: "https://example.com/revisions" } },
       },
     },
-    included: [{ type: "segments", id: "a" }],
+    included: [{ type: "comments", id: "a" }],
   };
 
   it("distinguishes to-one, to-many, explicit null and absent linkage", () => {
     const index = buildIndex(doc(base));
-    const trip = index.byKey.get(resourceKey("trips", "1"))!;
-    const kinds = Object.fromEntries(trip.relationships.map((r) => [r.name, r.kind]));
+    const article = index.byKey.get(resourceKey("articles", "1"))!;
+    const kinds = Object.fromEntries(article.relationships.map((r) => [r.name, r.kind]));
 
     expect(kinds).toEqual({
-      segments: "to-many",
-      carrier: "to-one",
-      booking: "empty",
-      seat_map: "no-linkage",
+      comments: "to-many",
+      author: "to-one",
+      retraction: "empty",
+      revisions: "no-linkage",
     });
   });
 
@@ -208,10 +208,10 @@ describe("buildIndex — relationships", () => {
     const index = buildIndex(doc(base));
     expect(index.counts.danglingPointers).toBe(2);
     expect(index.dangling).toEqual([
-      { type: "segments", id: "missing" },
-      { type: "carriers", id: "gone" },
+      { type: "comments", id: "missing" },
+      { type: "people", id: "gone" },
     ]);
-    expect(index.byKey.get(resourceKey("trips", "1"))?.danglingCount).toBe(2);
+    expect(index.byKey.get(resourceKey("articles", "1"))?.danglingCount).toBe(2);
   });
 
   it("counts a repeated dangling pointer once in the distinct list", () => {
@@ -229,8 +229,8 @@ describe("buildIndex — relationships", () => {
 
   it("resolves relationships in O(1) through byKey", () => {
     const index = buildIndex(doc(base));
-    expect(index.byKey.get(resourceKey("segments", "a"))).toBeDefined();
-    expect(index.byKey.get(resourceKey("segments", "missing"))).toBeUndefined();
+    expect(index.byKey.get(resourceKey("comments", "a"))).toBeDefined();
+    expect(index.byKey.get(resourceKey("comments", "missing"))).toBeUndefined();
   });
 
   it("keeps relationship links and meta", () => {
@@ -260,16 +260,16 @@ describe("buildIndex — grouping", () => {
   it("puts primary-data types first, then orders by count", () => {
     const index = buildIndex(
       doc({
-        data: [{ type: "trips", id: "1" }],
+        data: [{ type: "articles", id: "1" }],
         included: [
-          { type: "stations", id: "a" },
-          { type: "stations", id: "b" },
-          { type: "stations", id: "c" },
-          { type: "fares", id: "f" },
+          { type: "people", id: "a" },
+          { type: "people", id: "b" },
+          { type: "people", id: "c" },
+          { type: "tags", id: "f" },
         ],
       }),
     );
-    expect(index.groups.map((g) => g.type)).toEqual(["trips", "stations", "fares"]);
+    expect(index.groups.map((g) => g.type)).toEqual(["articles", "people", "tags"]);
   });
 
   it("keeps document order within a group", () => {
@@ -282,7 +282,7 @@ describe("buildIndex — grouping", () => {
 
 describe("readDocument", () => {
   it("goes from text to index", () => {
-    const index = readDocument('{"data":{"type":"trips","id":"1"}}');
+    const index = readDocument('{"data":{"type":"articles","id":"1"}}');
     expect(index.counts.total).toBe(1);
   });
 

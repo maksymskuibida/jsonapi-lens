@@ -131,9 +131,8 @@ export function summaryAttribute(
 
   // Fall back in two passes rather than one. A single pass returns whatever
   // comes first in key order, which lets a dull number win on position alone —
-  // a segment would be summarised as "sequence 2" when it also carries
-  // "service_number EC 173". Short strings are far more identifying, so they
-  // get the first pass.
+  // a comment would be summarised as "score 2" when it also carries a body.
+  // Short strings are far more identifying, so they get the first pass.
   for (const key of Object.keys(attributes)) {
     const value = attributes[key]!;
     if (classify(value) === "string" && String(value).length <= 60) return { key, value };

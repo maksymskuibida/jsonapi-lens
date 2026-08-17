@@ -1,0 +1,95 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # Lets a failed deploy be retried without an empty commit.
+  workflow_dispatch:
+
+# A queued deploy is always superseded by a newer one, but never cancelled
+# mid-flight — cancelling between the D1 migration and the Worker upload would
+# leave the two out of step.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # `worker-configuration.d.ts` is generated rather than committed, so the
+      # Worker typecheck needs it to exist first. This reads wrangler.jsonc only
+      # and needs no credentials.
+      - name: Generate Worker types
+        run: npx wrangler types
+
+      - name: Typecheck the app
+        run: npx tsc --noEmit
+
+      - name: Typecheck the Worker
+        run: npx tsc -p tsconfig.worker.json --noEmit
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npx vite build
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: check
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Worker types
+        run: npx wrangler types
+
+      - name: Build
+        run: npx vite build
+
+      # Migrations run before the Worker so a new deploy never meets a schema
+      # that has not caught up. They are additive and idempotent.
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply jsonapi-lens-shares --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy Worker and assets
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Smoke test the deployment
+        run: |
+          set -euo pipefail
+          BASE=https://jsonapi.mstool.dev
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$BASE/api/health" || echo 000)
+            [ "$code" = "200" ] && break
+            echo "attempt $i: $code"; sleep 6
+          done
+          curl -sf --max-time 15 "$BASE/api/health" | grep -q '"ok":true'
+          curl -sf --max-time 15 "$BASE/" | grep -q '<title>'
+          curl -sf --max-time 15 "$BASE/view" | grep -q '<title>'
+          echo "Deployment healthy."

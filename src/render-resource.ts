@@ -1,6 +1,8 @@
 import { el, escapeHtml } from "./dom.js";
 import { humanizeKey, previewValue, summaryAttribute } from "./format.js";
 import { domId, resourceHref, resourceKey, typeHue, typeSigil } from "./ident.js";
+import { referencesTo } from "./parse.js";
+import { join as pointerJoin } from "./pointer.js";
 import { renderObjectBlock, renderScalar } from "./render-value.js";
 import type { DocumentIndex, RelationshipEntry, Resource } from "./types.js";
 
@@ -226,13 +228,138 @@ function renderRelationships(resource: Resource, index: DocumentIndex): HTMLElem
       item.append(relationshipTargets(rel, index));
     }
 
-    if (rel.links) item.append(renderObjectBlock("Links", rel.links, "sub"));
-    if (rel.meta) item.append(renderObjectBlock("Meta", rel.meta, "sub"));
+    const relPointer = pointerJoin(resource.pointer, "relationships", rel.name);
+    if (rel.links) item.append(renderObjectBlock("Links", rel.links, pointerJoin(relPointer, "links"), "sub"));
+    if (rel.meta) item.append(renderObjectBlock("Meta", rel.meta, pointerJoin(relPointer, "meta"), "sub"));
 
     block.append(item);
   }
 
   return block;
+}
+
+/**
+ * Which resources point at this one.
+ *
+ * JSON:API only encodes pointers in one direction: a comment names its author,
+ * but a person has no idea which comments are theirs. Answering that by hand
+ * means reading every resource in the document, which is exactly the work this
+ * tool exists to remove — so it is worth a block of its own.
+ */
+function renderReferencedBy(resource: Resource, index: DocumentIndex): HTMLElement {
+  const block = el("div", { class: "block block--rev" });
+  const references = referencesTo(index, resource.type, resource.id);
+
+  if (references === null) {
+    block.append(
+      el("h4", { class: "block__title" }, "Referenced by"),
+      el("p", {
+        class: "block__empty",
+        text: "This document has too many pointers to index in reverse.",
+      }),
+    );
+    return block;
+  }
+
+  block.append(
+    el(
+      "h4",
+      { class: "block__title" },
+      "Referenced by",
+      el("span", { class: "block__count", text: String(references.length) }),
+    ),
+  );
+
+  if (!references.length) {
+    block.append(
+      el("p", {
+        class: "block__empty",
+        text: "Nothing in this document points at this resource.",
+      }),
+    );
+    return block;
+  }
+
+  // Group by relationship name so "12 segments via origin_station" reads as one
+  // fact rather than twelve.
+  const byRelationship = new Map<string, typeof references>();
+  for (const reference of references) {
+    const bucket = byRelationship.get(reference.relationship);
+    if (bucket) bucket.push(reference);
+    else byRelationship.set(reference.relationship, [reference]);
+  }
+
+  for (const [name, group] of byRelationship) {
+    const item = el(
+      "div",
+      { class: "rel" },
+      el(
+        "div",
+        { class: "rel__head" },
+        el("span", { class: "rel__name", text: name }),
+        el("span", {
+          class: "rel__card",
+          text: `${group.length} inbound`,
+        }),
+      ),
+    );
+
+    const list = el("ul", { class: "rel__targets" });
+    const shown = Math.min(group.length, TARGET_CHUNK);
+    for (let i = 0; i < shown; i++) {
+      const from = group[i]!.from;
+      list.append(el("li", { class: "rel__target" }, chip(from.type, from.id, true)));
+    }
+    if (group.length > shown) {
+      const remaining = group.length - shown;
+      const more = el("button", {
+        class: "rel__more",
+        type: "button",
+        text: `Show ${remaining} more`,
+      });
+      more.addEventListener("click", () => {
+        more.remove();
+        for (let i = shown; i < group.length; i++) {
+          const from = group[i]!.from;
+          list.append(el("li", { class: "rel__target" }, chip(from.type, from.id, true)));
+        }
+      });
+      list.append(el("li", { class: "rel__target rel__target--more" }, more));
+    }
+
+    item.append(list);
+    block.append(item);
+  }
+
+  return block;
+}
+
+/**
+ * Object-level actions.
+ *
+ * Like the value-row actions, these carry no listeners: a single delegated
+ * handler reads `data-object-action` and finds the resource from the enclosing
+ * section's id. Nothing here needs to know which resource it belongs to.
+ */
+function objectActions(resource: Resource): HTMLElement {
+  const button = (action: string, label: string, title: string, extra = ""): HTMLElement =>
+    el("button", {
+      class: `act${extra ? ` ${extra}` : ""}`,
+      type: "button",
+      "data-object-action": action,
+      title,
+      "aria-label": title,
+      text: label,
+    });
+
+  return el(
+    "div",
+    { class: "res__actions" },
+    button("raw", "raw", "Show this resource as raw JSON", "act--accent"),
+    button("copy-object", "copy", "Copy this resource as JSON"),
+    button("copy-pointer", "path", `Copy the JSON Pointer to this resource (${resource.pointer})`),
+    button("copy-link", "link", "Copy a deep link to this resource"),
+  );
 }
 
 /** Everything shown when a resource is expanded. */
@@ -255,19 +382,31 @@ export function buildResourceBody(resource: Resource, index: DocumentIndex): Doc
         el("span", { class: "res__identity-label", text: "id" }),
         el("code", { class: "res__identity-value", text: resource.id }),
       ),
-      el("a", {
-        class: "res__permalink",
-        href: resourceHref(resource.type, resource.id),
-        title: "Link to this resource",
-        text: "permalink",
-      }),
+      el(
+        "div",
+        { class: "res__identity-pair res__identity-pair--pointer" },
+        el("span", { class: "res__identity-label", text: "at" }),
+        el("code", { class: "res__identity-value", text: resource.pointer }),
+      ),
+      objectActions(resource),
     ),
   );
 
-  body.append(renderObjectBlock("Attributes", resource.attributes ?? {}));
+  body.append(
+    renderObjectBlock(
+      "Attributes",
+      resource.attributes ?? {},
+      pointerJoin(resource.pointer, "attributes"),
+    ),
+  );
   body.append(renderRelationships(resource, index));
-  if (resource.links) body.append(renderObjectBlock("Links", resource.links));
-  if (resource.meta) body.append(renderObjectBlock("Meta", resource.meta));
+  body.append(renderReferencedBy(resource, index));
+  if (resource.links) {
+    body.append(renderObjectBlock("Links", resource.links, pointerJoin(resource.pointer, "links")));
+  }
+  if (resource.meta) {
+    body.append(renderObjectBlock("Meta", resource.meta, pointerJoin(resource.pointer, "meta")));
+  }
 
   return body;
 }

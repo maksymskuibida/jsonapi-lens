@@ -1,12 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "jsonapi-lens",
-
-  // There is deliberately no `main` here. jsonapi-lens is a pure static-asset
-  // Worker: no Worker script, no API, no runtime fetches. Pasted payloads are
-  // parsed, indexed and rendered entirely in the browser and never leave it.
-  // Adding `main` (and an assets `binding`) is the seam if a server-side
-  // feature is ever wanted — but nothing here needs one.
+  "main": "src/worker.ts",
   "compatibility_date": "2026-08-17",
 
   "routes": [
@@ -19,8 +14,43 @@
 
   "assets": {
     "directory": "./dist",
-    // Hash fragments never reach the server, so every request resolves to the
-    // single page. This makes stray paths land on the app instead of a 404.
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    // Paths are resolved in the browser, so every non-asset path must return
+    // the single page: `/`, `/view`, `/d/<id>:<secret>`.
+    "not_found_handling": "single-page-application",
+    // ...except the share API, which has to reach the Worker instead of being
+    // swallowed by the SPA fallback above.
+    "run_worker_first": ["/api/*"]
+  },
+
+  // Share storage. The Worker only ever sees ciphertext: documents are gzipped
+  // and encrypted in the browser with a key that lives in the share URL and is
+  // never sent in a request body. D1 holds the numeric id and the expiry; R2
+  // holds the opaque blob, because payloads are far larger than a D1 row.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "jsonapi-lens-shares",
+      "database_id": "f0903183-f366-438e-835c-b31aaaf62680",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "BLOBS",
+      "bucket_name": "jsonapi-lens-shares"
+    }
+  ],
+
+  // Expiring shares are deleted lazily when someone requests them; this sweeps
+  // the ones nobody comes back for.
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  },
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
   }
 }

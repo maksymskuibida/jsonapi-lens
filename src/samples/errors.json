@@ -2,7 +2,6 @@
   "jsonapi": { "version": "1.1" },
   "meta": {
     "request_id": "b21f7d90-4c8e-4a11-8f3d-77c0a9e14b22",
-    "upstream": "example-rail",
     "received_at": "2026-09-12T09:41:07.312Z"
   },
   "errors": [
@@ -10,26 +9,26 @@
       "id": "err-1",
       "status": "422",
       "code": "invalid_date_range",
-      "title": "Departure date is outside the bookable window",
-      "detail": "Departure must be between today and 180 days ahead. 2027-11-30 is 444 days ahead.",
-      "source": { "parameter": "filter[date]" },
+      "title": "Published-before is outside the allowed window",
+      "detail": "filter[published_before] must be within 180 days of today. 2027-11-30 is 444 days ahead.",
+      "source": { "parameter": "filter[published_before]" },
       "meta": { "max_days_ahead": 180, "requested": "2027-11-30" }
     },
     {
       "id": "err-2",
       "status": "422",
-      "code": "unknown_station",
-      "title": "Unknown station code",
-      "detail": "No station matches the code XXXHBF. Station codes are six characters and come from the /stations endpoint.",
-      "source": { "pointer": "/data/attributes/origin_station_code" },
-      "links": { "about": "https://example.com/docs/errors/unknown_station" }
+      "code": "unknown_tag",
+      "title": "Unknown tag slug",
+      "detail": "No tag matches the slug \"xxxxxx\". Tag slugs come from the /tags endpoint.",
+      "source": { "pointer": "/data/attributes/tag_slug" },
+      "links": { "about": "https://example.com/docs/errors/unknown_tag" }
     },
     {
       "status": "422",
-      "code": "missing_passenger_age",
-      "title": "Passenger age is required",
-      "detail": "This carrier prices by age band, so every passenger needs an age.",
-      "source": { "pointer": "/data/relationships/passengers/data/1" }
+      "code": "missing_author",
+      "title": "Author is required",
+      "detail": "Every article needs an author, and the second entry in the relationship has none.",
+      "source": { "pointer": "/data/relationships/authors/data/1" }
     }
   ]
 }

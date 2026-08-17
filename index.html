@@ -29,6 +29,18 @@
         </div>
 
         <div class="topbar__actions">
+          <button class="btn btn--ghost" type="button" id="open-library" title="Saved documents">
+            Saved
+          </button>
+          <button
+            class="btn btn--ghost btn--icon"
+            type="button"
+            id="shortcuts"
+            title="Keyboard shortcuts"
+            aria-label="Keyboard shortcuts"
+          >
+            ?
+          </button>
           <button class="btn btn--ghost" type="button" id="theme-toggle" aria-live="polite">
             Theme: auto
           </button>
@@ -41,7 +53,7 @@
              deep link never flashes the paste view first. -->
         <div class="loading" id="boot">
           <div class="loading__bar"></div>
-          <p>Reading stored document</p>
+          <p id="boot-message">Reading stored document</p>
         </div>
 
         <div class="paste" id="paste" hidden>
@@ -56,6 +68,8 @@
               document and every pointer becomes a link you can click — with real browser
               history, deep links and find-in-page.
             </p>
+
+            <div class="resume" id="resume" hidden></div>
 
             <div class="drop" id="drop">
               <div class="drop__head">
@@ -99,7 +113,7 @@
             <div class="samples">
               <span class="samples__label">Or try</span>
               <div class="samples__list">
-                <button class="btn" type="button" data-sample="rail">Rail booking</button>
+                <button class="btn" type="button" data-sample="articles">Article feed</button>
                 <button class="btn" type="button" data-sample="dangling">Missing include</button>
                 <button class="btn" type="button" data-sample="errors">Error response</button>
                 <button class="btn" type="button" data-sample="edge">Awkward ids</button>
@@ -160,6 +174,7 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div id="modal-root"></div>
 
     <noscript>
       <p style="padding: 2rem; font-family: system-ui">
