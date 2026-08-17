@@ -164,6 +164,17 @@ describe("summary attribute", () => {
     expect(summaryAttribute({ platform: "11", extra: null })?.key).toBe("platform");
   });
 
+  it("prefers an identifying string over a number that happens to come first", () => {
+    // A segment summarised as "sequence 2" tells you nothing; "EC 173" does.
+    expect(summaryAttribute({ sequence: 2, service_number: "EC 173" })?.key).toBe(
+      "service_number",
+    );
+  });
+
+  it("still uses a number when there is no string at all", () => {
+    expect(summaryAttribute({ sequence: 2, distance_km: 141.2 })?.key).toBe("sequence");
+  });
+
   it("skips nulls, empty strings and nested values", () => {
     expect(summaryAttribute({ name: null, title: "", nested: { a: 1 }, code: "EC" })?.key).toBe(
       "code",

@@ -1372,6 +1372,46 @@ kbd {
 .toplevel__summary {
   padding: var(--sp-5) var(--sp-6);
   cursor: pointer;
+  list-style: none;
+}
+
+.toplevel__summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Without a caret these rows read as inert bars rather than things to open.
+   The summaries are flex containers, so the caret needs to be a sized, flex-none
+   box — otherwise the rotation lands it out of alignment. */
+.toplevel__summary::after,
+.absent-list__summary::after {
+  content: "";
+  display: block;
+  flex: none;
+  box-sizing: content-box;
+  width: 0.3rem;
+  height: 0.3rem;
+  margin-left: var(--sp-4);
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  rotate: 45deg;
+  translate: 0 -0.15rem;
+  opacity: 0.55;
+  transition: rotate 140ms var(--ease), translate 140ms var(--ease);
+}
+
+.toplevel__summary::after {
+  margin-left: auto;
+}
+
+.toplevel[open] > .toplevel__summary::after,
+.absent-list[open] > .absent-list__summary::after {
+  rotate: -135deg;
+  translate: 0 0.15rem;
+}
+
+.toplevel__summary:hover,
+.absent-list__summary:hover {
+  color: var(--text);
 }
 
 .toplevel__body {
@@ -1493,19 +1533,22 @@ kbd {
    real DOM node, so `#fragment` anchors, `:target` and browser find all keep
    working, while the browser skips layout and paint for off-screen rows.
 
-   `contain-intrinsic-size: auto 37px` is what keeps the scrollbar honest. 37px
-   is the measured height of a real collapsed row, not a guess — the row never
-   wraps (the summary value is `nowrap` with an ellipsis), so the figure is
-   stable. Overestimating here is what causes scrollbar thrash: at 50,000 rows,
-   being 5px per row too generous invents 250,000px of phantom scroll height
-   that then shrinks as rows are measured. The `auto` keyword makes the browser
-   remember each row's real size once it has been rendered, so expanded rows
-   keep their true height even after scrolling away.
+   `contain-intrinsic-size: auto 35.6px` is what keeps the scrollbar honest.
+   That figure is measured, not guessed: a collapsed row is 36.6px border-box
+   (6px padding twice, a 23.6px chip line, and this element's 1px bottom
+   border), and `contain-intrinsic-size` specifies the *content* box, so the
+   border is excluded. Getting it wrong is what causes scrollbar thrash — at
+   56,821 rows, being 1.4px per row too generous invents ~80,000px of phantom
+   scroll height that then shrinks as rows are measured. The row never wraps
+   (the summary value is `nowrap` with an ellipsis), so the figure is stable.
+   The `auto` keyword makes the browser remember each row's real size once it
+   has been rendered, so an expanded row keeps its true height after you scroll
+   away from it.
    ======================================================================== */
 
 .res {
   content-visibility: auto;
-  contain-intrinsic-size: auto 37px;
+  contain-intrinsic-size: auto 35.6px;
   scroll-margin-top: calc(var(--header-h) + 3.25rem);
   border-bottom: 1px solid var(--line);
 }
@@ -2089,6 +2132,11 @@ kbd {
   .topbar {
     padding-inline: var(--sp-5);
     gap: var(--sp-4);
+  }
+
+  /* The tagline is the first thing to go: the actions must stay reachable. */
+  .brand__tag {
+    display: none;
   }
 
   .topbar__doc {
