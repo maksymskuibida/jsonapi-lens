@@ -279,7 +279,15 @@ function renderDocumentView(loaded: Loaded, parseMs: number): void {
   groups.innerHTML = groupsHtml(index);
   main.append(groups);
 
-  docEl.replaceChildren(renderRail(index), main);
+  // An errors-only or meta-only document has no types to jump between, so the
+  // rail would be an empty column headed "Types 0".
+  if (index.groups.length > 0) {
+    docEl.classList.remove("doc--no-rail");
+    docEl.replaceChildren(renderRail(index), main);
+  } else {
+    docEl.classList.add("doc--no-rail");
+    docEl.replaceChildren(main);
+  }
 
   // Small documents get their detail built up front: expanding is then instant,
   // and "Expand all" on a group is a single reflow rather than N builds — which

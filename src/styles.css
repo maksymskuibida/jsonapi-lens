@@ -854,6 +854,13 @@ kbd {
   margin-inline: auto;
 }
 
+/* No types to jump between — give the content the full width and keep it to a
+   comfortable measure rather than stretching it across the page. */
+.doc--no-rail {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 72rem;
+}
+
 /* -------------------------------------------------------------- rail ----- */
 
 .rail {
