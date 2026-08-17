@@ -2846,3 +2846,89 @@ body.has-modal {
   align-items: baseline;
   gap: var(--sp-4);
 }
+
+/* ==========================================================================
+   Viewport behaviour
+   --------------------------------------------------------------------------
+   The topbar is the tightest constraint: a brand plus four controls does not
+   fit a phone. Rather than hiding controls — every one of them is a way to get
+   at your data — the labels shrink and the brand yields space first.
+   ========================================================================== */
+
+.topbar__actions {
+  min-width: 0;
+}
+
+.brand {
+  min-width: 0;
+}
+
+.brand__mark {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Words that earn their place on a wide screen and not on a narrow one. */
+@media (max-width: 52rem) {
+  .btn__wide {
+    display: none;
+  }
+
+  .topbar {
+    gap: var(--sp-4);
+    padding-inline: var(--sp-4);
+  }
+
+  .topbar__actions {
+    gap: var(--sp-2);
+  }
+
+  .btn {
+    padding-inline: 0.5rem;
+  }
+}
+
+/* Below this the brand is the least useful thing on the bar. */
+@media (max-width: 26rem) {
+  .brand__mark {
+    font-size: var(--fs-2xs);
+  }
+
+  .topbar {
+    padding-inline: var(--sp-3);
+  }
+}
+
+/* --------------------------------------------------------------- ultrawide */
+
+/* On a very wide monitor the temptation is to let the page fill the glass. That
+   is the wrong instinct here: a resource row is a chip on the left and a couple
+   of tags on the right, so stretching it to 1,800px just puts a hand's width of
+   empty space between the id and the thing that describes it. The column is
+   capped instead, and the extra room goes to margin.
+
+   The rail gets a little wider, because long type names are the one thing that
+   genuinely benefits. */
+@media (min-width: 100rem) {
+  :root {
+    --rail-w: 20rem;
+  }
+
+  .doc {
+    gap: var(--sp-9);
+  }
+
+  /* Attribute rows spend the extra width on the key column rather than
+     stretching the value away from it. */
+  .kv {
+    grid-template-columns: minmax(8rem, 18rem) minmax(0, 1fr);
+  }
+
+  /* Keep prose at a readable measure even when the column is wide. */
+  .overview__note,
+  .absent-list__note,
+  .err__detail {
+    max-width: var(--measure);
+  }
+}

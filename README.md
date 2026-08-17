@@ -260,7 +260,10 @@ Driven in a real browser, not asserted:
 - Unhappy paths all produce a specific, actionable message: malformed JSON (with a line number),
   valid JSON that is not JSON:API (naming the keys it did find), a bare array, a doubly-encoded
   payload, a Python dict repr, a log line with a prefix, `{}`, and `data` + `errors` together.
-- Light and dark mode, and layouts from 375 px to ultrawide.
+- Light and dark mode, and every viewport from 320 px to 3440 px: no horizontal overflow at any
+  width, the topbar keeps all four controls by shrinking their labels, the rail becomes a card below
+  60rem, and past 100rem the column is capped and centred rather than stretched — a resource row
+  spread across 1,800 px puts a hand's width between an id and the tags describing it.
 
 One caveat on find-in-page: text that exists **only inside a collapsed `<details>`** is located but
 not revealed by the legacy `window.find` API used for testing. Whether a browser's own find bar

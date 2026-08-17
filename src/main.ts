@@ -95,7 +95,13 @@ const THEME_KEY = "jsonapi-lens:theme";
 function applyTheme(theme: Theme): void {
   if (theme === "auto") document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme", theme);
-  themeEl.textContent = `Theme: ${theme}`;
+  // The word is a separate element so narrow viewports can drop it and keep
+  // the value, rather than the whole control overflowing the bar.
+  themeEl.replaceChildren(
+    el("span", { class: "btn__wide", text: "Theme:" }),
+    el("span", { text: theme }),
+  );
+  themeEl.title = `Theme: ${theme}. Click to change.`;
 }
 
 function readTheme(): Theme {
