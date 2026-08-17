@@ -84,12 +84,24 @@ jobs:
         run: |
           set -euo pipefail
           BASE=https://jsonapi.mstool.dev
+
           for i in $(seq 1 10); do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$BASE/api/health" || echo 000)
             [ "$code" = "200" ] && break
-            echo "attempt $i: $code"; sleep 6
+            echo "waiting for the deployment, attempt $i: $code"
+            sleep 6
           done
-          curl -sf --max-time 15 "$BASE/api/health" | grep -q '"ok":true'
-          curl -sf --max-time 15 "$BASE/" | grep -q '<title>'
-          curl -sf --max-time 15 "$BASE/view" | grep -q '<title>'
+
+          # Download first, then match. Piping curl into `grep -q` makes grep
+          # close the pipe on its first match, which curl reports as a write
+          # error (exit 23) and `pipefail` turns into a failed deploy.
+          check() {
+            curl -sf --max-time 15 "$1" -o /tmp/smoke.out
+            grep -q "$2" /tmp/smoke.out || { echo "missing '$2' at $1"; exit 1; }
+            echo "ok: $1"
+          }
+
+          check "$BASE/api/health" '"ok":true'
+          check "$BASE/" '<title>'
+          check "$BASE/view" '<title>'
           echo "Deployment healthy."
