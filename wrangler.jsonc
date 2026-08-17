@@ -11,8 +11,8 @@
 
   "routes": [
     {
-      "pattern": "jsonapi.mskuibida.com",
-      "zone_name": "mskuibida.com",
+      "pattern": "jsonapi.mstool.dev",
+      "zone_name": "mstool.dev",
       "custom_domain": true
     }
   ],

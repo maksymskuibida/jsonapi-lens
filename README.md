@@ -92,7 +92,7 @@ npm run fixtures
 
 ## Deploying
 
-Live at **https://jsonapi.mskuibida.com**.
+Live at **https://jsonapi.mstool.dev**.
 
 Cloudflare Workers static assets. There is deliberately **no Worker script** — no `main` in
 [`wrangler.jsonc`](wrangler.jsonc), no API, no bindings. Just `dist/` uploaded as assets, with the
