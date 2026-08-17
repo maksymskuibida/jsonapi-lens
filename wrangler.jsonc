@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "jsonapi-lens",
+
+  // There is deliberately no `main` here. jsonapi-lens is a pure static-asset
+  // Worker: no Worker script, no API, no runtime fetches. Pasted payloads are
+  // parsed, indexed and rendered entirely in the browser and never leave it.
+  // Adding `main` (and an assets `binding`) is the seam if a server-side
+  // feature is ever wanted — but nothing here needs one.
+  "compatibility_date": "2026-08-17",
+
+  "assets": {
+    "directory": "./dist",
+    // Hash fragments never reach the server, so every request resolves to the
+    // single page. This makes stray paths land on the app instead of a 404.
+    "not_found_handling": "single-page-application"
+  }
+}

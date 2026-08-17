@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- A pointer that lands: a filled node, an arrow, and the node it resolves to. -->
+  <rect width="32" height="32" rx="5" fill="#2f2b53" />
+  <circle cx="8.5" cy="16" r="3.5" fill="#a99bff" />
+  <path
+    d="M13.5 16h8"
+    stroke="#a99bff"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-dasharray="2.5 3"
+  />
+  <rect x="21" y="10.5" width="6" height="11" rx="1.5" fill="none" stroke="#6ee7d0" stroke-width="2" />
+</svg>

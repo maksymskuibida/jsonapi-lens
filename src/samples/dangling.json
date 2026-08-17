@@ -1,0 +1,71 @@
+{
+  "jsonapi": { "version": "1.1" },
+  "meta": {
+    "note": "The request asked for include=segments but not segments.station, so every station pointer resolves to nothing."
+  },
+  "links": {
+    "self": "https://api.example.com/v2/bookings/bk-4471?include=segments"
+  },
+  "data": {
+    "type": "bookings",
+    "id": "bk-4471",
+    "attributes": {
+      "reference": "QX7T2M",
+      "status": "confirmed",
+      "created_at": "2026-09-01T14:22:31Z",
+      "passenger_count": 2,
+      "total": { "amount": 8980, "currency": "EUR" }
+    },
+    "relationships": {
+      "segments": {
+        "data": [
+          { "type": "segments", "id": "seg-a" },
+          { "type": "segments", "id": "seg-b" }
+        ]
+      },
+      "passengers": {
+        "data": [
+          { "type": "passengers", "id": "pax-1" },
+          { "type": "passengers", "id": "pax-2" }
+        ]
+      },
+      "payment": { "data": { "type": "payments", "id": "pay-9931" } },
+      "refund": { "data": null },
+      "invoice": {
+        "links": { "related": "https://api.example.com/v2/bookings/bk-4471/invoice" }
+      }
+    }
+  },
+  "included": [
+    {
+      "type": "segments",
+      "id": "seg-a",
+      "attributes": {
+        "sequence": 1,
+        "departure_time": "2026-09-14T07:34:00+02:00",
+        "arrival_time": "2026-09-14T09:12:00+02:00",
+        "service_number": "EC 173"
+      },
+      "relationships": {
+        "origin_station": { "data": { "type": "stations", "id": "station-BLN" } },
+        "destination_station": { "data": { "type": "stations", "id": "station-DRS" } },
+        "operating_carrier": { "data": { "type": "carriers", "id": "carrier-db" } }
+      }
+    },
+    {
+      "type": "segments",
+      "id": "seg-b",
+      "attributes": {
+        "sequence": 2,
+        "departure_time": "2026-09-14T09:44:00+02:00",
+        "arrival_time": "2026-09-14T11:56:00+02:00",
+        "service_number": "EC 173"
+      },
+      "relationships": {
+        "origin_station": { "data": { "type": "stations", "id": "station-DRS" } },
+        "destination_station": { "data": { "type": "stations", "id": "station-PRG" } },
+        "operating_carrier": { "data": { "type": "carriers", "id": "carrier-db" } }
+      }
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+{
+  "jsonapi": { "version": "1.1" },
+  "meta": {
+    "note": "Every id here is legal JSON:API and hostile to URL fragments: slashes, spaces, #, colons, percent signs, non-ASCII and an emoji. There is also a deliberately duplicated identity."
+  },
+  "data": {
+    "type": "trip/legs",
+    "id": "2026-09-14/EC 173#1",
+    "attributes": {
+      "name": "Leg with a slash, a space and a hash in its id",
+      "service": "EC 173",
+      "load_factor": 0.87,
+      "notes": "",
+      "cancelled": false
+    },
+    "relationships": {
+      "origin": { "data": { "type": "stations", "id": "zürich-hbf" } },
+      "destination": { "data": { "type": "stations", "id": "praha-hlavní" } },
+      "passengers": {
+        "data": [
+          { "type": "passengers", "id": "pax 2" },
+          { "type": "passengers", "id": "urn:example:pax:9" },
+          { "type": "passengers", "id": "100%" }
+        ]
+      },
+      "vehicle": { "data": { "type": "vehicles", "id": "🚆-express" } },
+      "replacement_for": { "data": { "type": "trip/legs", "id": "2026-09-13/EC 173#1" } }
+    }
+  },
+  "included": [
+    {
+      "type": "stations",
+      "id": "zürich-hbf",
+      "attributes": {
+        "name": "Zürich Hauptbahnhof",
+        "code": "ZRHHBF",
+        "timezone": "Europe/Zurich",
+        "platforms": 26
+      },
+      "relationships": {
+        "country": { "data": { "type": "countries", "id": "CH" } }
+      }
+    },
+    {
+      "type": "stations",
+      "id": "praha-hlavní",
+      "attributes": {
+        "name": "Praha hlavní nádraží",
+        "code": "PRGHLN",
+        "timezone": "Europe/Prague",
+        "platforms": 7
+      },
+      "relationships": {
+        "country": { "data": { "type": "countries", "id": "CZ" } }
+      }
+    },
+    {
+      "type": "passengers",
+      "id": "pax 2",
+      "attributes": { "name": "Ada Lovelace", "age_band": "adult", "seat": "12A" },
+      "relationships": {
+        "leg": { "data": { "type": "trip/legs", "id": "2026-09-14/EC 173#1" } }
+      }
+    },
+    {
+      "type": "passengers",
+      "id": "urn:example:pax:9",
+      "attributes": { "name": "Grace Hopper", "age_band": "adult", "seat": "12B" },
+      "relationships": {
+        "leg": { "data": { "type": "trip/legs", "id": "2026-09-14/EC 173#1" } }
+      }
+    },
+    {
+      "type": "passengers",
+      "id": "100%",
+      "attributes": { "name": "Percent Sign", "age_band": "child", "seat": null },
+      "relationships": {
+        "leg": { "data": { "type": "trip/legs", "id": "2026-09-14/EC 173#1" } }
+      }
+    },
+    {
+      "type": "passengers",
+      "id": "pax 2",
+      "attributes": {
+        "name": "Ada Lovelace (duplicate identity — the spec forbids this)",
+        "age_band": "adult",
+        "seat": "12A"
+      }
+    },
+    {
+      "type": "vehicles",
+      "id": "🚆-express",
+      "attributes": { "kind": "train", "model": "Emoji Express", "coaches": 4 },
+      "relationships": {
+        "operator": { "data": { "type": "carriers", "id": "carrier–en-dash" } }
+      }
+    },
+    {
+      "type": "countries",
+      "id": "CH",
+      "attributes": { "name": "Switzerland", "iso_alpha2": "CH", "currency": "CHF" },
+      "relationships": {}
+    },
+    {
+      "type": "countries",
+      "id": "CZ",
+      "attributes": { "name": "Czechia", "iso_alpha2": "CZ", "currency": "CZK" },
+      "relationships": {}
+    }
+  ]
+}
