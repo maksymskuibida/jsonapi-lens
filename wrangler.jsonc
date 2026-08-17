@@ -9,6 +9,14 @@
   // feature is ever wanted — but nothing here needs one.
   "compatibility_date": "2026-08-17",
 
+  "routes": [
+    {
+      "pattern": "jsonapi.mskuibida.com",
+      "zone_name": "mskuibida.com",
+      "custom_domain": true
+    }
+  ],
+
   "assets": {
     "directory": "./dist",
     // Hash fragments never reach the server, so every request resolves to the

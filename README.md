@@ -92,8 +92,11 @@ npm run fixtures
 
 ## Deploying
 
+Live at **https://jsonapi.mskuibida.com**.
+
 Cloudflare Workers static assets. There is deliberately **no Worker script** — no `main` in
-[`wrangler.jsonc`](wrangler.jsonc), no API, no bindings. Just `dist/` uploaded as assets.
+[`wrangler.jsonc`](wrangler.jsonc), no API, no bindings. Just `dist/` uploaded as assets, with the
+custom domain declared as a route.
 
 ```bash
 npm run deploy
