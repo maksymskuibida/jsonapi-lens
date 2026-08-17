@@ -119,7 +119,17 @@ async function readShare(id: number, env: Env): Promise<Response> {
   });
 }
 
-/** Delete shares whose expiry has passed. */
+/**
+ * Delete shares whose expiry has passed.
+ *
+ * This is only a storage tidy-up: `readShare` already deletes an expired share
+ * the moment anyone asks for it, so a link stops working on time whether or not
+ * this ever runs. It exists so blobs nobody returns to do not accumulate.
+ *
+ * It runs opportunistically on a small fraction of writes rather than on a cron
+ * trigger, because the account is at Cloudflare's free-plan limit of five cron
+ * triggers. `waitUntil` keeps it off the response path.
+ */
 async function sweep(env: Env): Promise<number> {
   const { results } = await env.DB.prepare(
     "SELECT id FROM shares WHERE expires_at IS NOT NULL AND expires_at <= ? LIMIT 1000",
@@ -140,15 +150,26 @@ async function sweep(env: Env): Promise<number> {
   return ids.length;
 }
 
+/** Roughly one in every twenty-five share creations also sweeps. */
+const SWEEP_PROBABILITY = 0.04;
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // Only `/api/*` is routed here; anything else means the config drifted.
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
     if (url.pathname === "/api/shares" && request.method === "POST") {
-      return createShare(request, env);
+      const response = await createShare(request, env);
+      if (Math.random() < SWEEP_PROBABILITY) {
+        ctx.waitUntil(
+          sweep(env)
+            .then((n) => n && console.info(`[jsonapi-lens] swept ${n} expired share(s)`))
+            .catch((cause) => console.error("[jsonapi-lens] sweep failed", cause)),
+        );
+      }
+      return response;
     }
 
     const match = /^\/api\/shares\/(\d{1,18})$/.exec(url.pathname);
@@ -163,8 +184,4 @@ export default {
     return json({ error: "Not found." }, 404);
   },
 
-  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
-    const deleted = await sweep(env);
-    console.info(`[jsonapi-lens] swept ${deleted} expired share(s)`);
-  },
 };

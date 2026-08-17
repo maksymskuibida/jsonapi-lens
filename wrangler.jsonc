@@ -43,11 +43,6 @@
     }
   ],
 
-  // Expiring shares are deleted lazily when someone requests them; this sweeps
-  // the ones nobody comes back for.
-  "triggers": {
-    "crons": ["17 3 * * *"]
-  },
 
   "observability": {
     "enabled": true,

@@ -117,8 +117,10 @@ Opt-in, and the only thing that touches a server.
    (15 minutes, 6 hours, 1 day, 1 week, 1 month, or no expiry — remembered for next time).
 
 The Worker stores an opaque blob, a byte count and an expiry. No label, no type names, no filename —
-those are all inside the ciphertext. Expired links are deleted on access, and a nightly cron sweeps
-the ones nobody returns to.
+those are all inside the ciphertext. An expired link is deleted the moment anyone asks for it, so it
+stops working on time regardless; a sweep for blobs nobody returns to runs opportunistically on a
+small fraction of writes, off the response path. (It is not a cron trigger because the account is at
+Cloudflare's free-plan limit of five.)
 
 **The secret is 10 characters, and that is deliberate.** A written-out 256-bit key is 43 characters
 and makes a link that wraps across lines. Ten base64url characters is 60 bits, which on its own
