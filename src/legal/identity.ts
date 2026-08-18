@@ -53,16 +53,17 @@ export interface Identity {
 }
 
 export const IDENTITY: Identity = {
-  name: "[FULL LEGAL NAME]",
-  street: "[STREET AND HOUSE NUMBER]",
-  postalCode: "[POSTCODE]",
-  city: "[CITY]",
-  email: "[you@example.com]",
-  phone: "[+49 …]",
-  vatId: null,
+  name: "Maksym Skuibida",
+  street: "Fleischwangerstr. 12",
+  postalCode: "88370",
+  city: "Ebenweiler",
+  email: "info@mskuibida.com",
+  phone: "+49 151 20444673",
+  vatId: "DE364688059",
   authority: {
-    name: "[Landesbeauftragte(r) für Datenschutz — your Bundesland]",
-    url: "[https://…]",
+    // Baden-Württemberg, where the provider is established.
+    name: "Der Landesbeauftragte für den Datenschutz und die Informationsfreiheit Baden-Württemberg",
+    url: "https://www.baden-wuerttemberg.datenschutz.de/",
   },
 };
 
