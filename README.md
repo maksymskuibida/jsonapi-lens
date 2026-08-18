@@ -117,9 +117,26 @@ browser.
 **Keyboard** — `?` lists them all. `/` or `g` finds a resource by type or id, `s` saves, `r` raw,
 `e` exports, `l` opens saved documents, `Shift+Esc` leaves the document, `Esc` closes a dialog.
 
-The list only contains bindings this app actually implements. Tab order, Enter/Space on a focused
+That list only contains bindings this app actually implements. Tab order, Enter/Space on a focused
 row and the browser's own find all work, but they work because the markup is ordinary HTML — listing
 them made the app look like it had done something and buried the real bindings.
+
+**Back and Forward are the exception**, and get their own section in the same dialog. They are the
+browser's keys rather than this app's, but they are how you climb back out of a relationship chain —
+the most useful key here — and hardly anyone knows them, because the spelling depends on the OS:
+
+| | macOS | Windows and Linux |
+| --- | --- | --- |
+| Back | `⌘ + [` or `⌘ + ←` | `Alt + ←` |
+| Forward | `⌘ + ]` or `⌘ + →` | `Alt + →` |
+| Relationship in a new tab | `⌘ + click` | `Ctrl + click` |
+
+The dialog shows the row for the platform it detects, names it ("From your browser — Mac keys"), and
+still prints the other platform's spelling underneath — the question usually gets asked over someone
+else's shoulder. It also mentions the trackpad swipe and mouse side buttons, which are the easier
+sell. Platform detection is `navigator.userAgentData.platform`, falling back to `navigator.platform`
+and then the UA string, in [`src/platform.ts`](src/platform.ts); the same value picks `⌘` or `Ctrl`
+for the `⌘ + Enter` hint on the paste view.
 
 ## Share links
 
@@ -302,6 +319,7 @@ src/
   clipboard.ts        copy and download
   ui.ts               toast and modal
   panels.ts           raw view, saved documents, save, shortcuts
+  platform.ts         ⌘ vs Ctrl, and the browser's own history keys per OS
   jump.ts             go-to-resource palette
   dom.ts              element helper and the single audited HTML-escaping point
   render-value.ts     value trees with copy affordances

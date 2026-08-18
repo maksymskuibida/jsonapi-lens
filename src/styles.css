@@ -2773,6 +2773,36 @@ body.has-modal {
 
 /* ----------------------------------------------------------- shortcuts --- */
 
+.keys-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-7);
+}
+
+.keys-group__title {
+  margin-bottom: var(--sp-5);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: var(--fs-3xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.keys-group__note {
+  margin-top: var(--sp-5);
+  max-width: var(--measure);
+  font-size: var(--fs-2xs);
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+.keys-group__note + .keys-group__note {
+  margin-top: var(--sp-3);
+}
+
 .keys {
   display: grid;
   grid-template-columns: auto 1fr;

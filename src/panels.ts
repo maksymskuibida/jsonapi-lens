@@ -1,6 +1,8 @@
 import { copyBlob, downloadText } from "./clipboard.js";
 import { el } from "./dom.js";
 import { formatBytes } from "./format.js";
+import { browserNavKeys, IS_APPLE, MOD_KEY, otherPlatformNote, pointerNavNote } from "./platform.js";
+import type { KeyHint } from "./platform.js";
 import { deleteFromLibrary, listLibrary, renameInLibrary } from "./store.js";
 import type { LibraryEntry } from "./store.js";
 import { openModal, toast } from "./ui.js";
@@ -223,22 +225,32 @@ export function openSaveModal(defaultLabel: string, onSave: (label: string) => v
  * once. They all work, but they work because the markup is ordinary HTML — not
  * because anything here implements them. Listing them made the app look like it
  * had done something, and made the real bindings harder to find.
+ *
+ * Back and Forward are the exception, and they are listed in their own section
+ * below. They are also the browser's rather than this app's, but they are how
+ * you walk back up a relationship chain — the single most useful key in the
+ * app — and their spelling depends on the OS, so leaving them out taught nobody
+ * anything.
  */
-const SHORTCUTS: [string[], string][] = [
-  [["?"], "Show this list"],
-  [["/", "g"], "Find a resource by type or id"],
-  [["s"], "Save the document to this browser"],
-  [["r"], "Show the whole document as raw JSON"],
-  [["e"], "Export the document to a file"],
-  [["l"], "Open saved documents"],
-  [["Shift + Esc"], "Leave the document and go back to the paste view"],
-  [["Esc"], "Close a dialog"],
-  [["⌘/Ctrl + Enter"], "Read the pasted document"],
+const SHORTCUTS: KeyHint[] = [
+  { combos: ["?"], description: "Show this list" },
+  { combos: ["/", "g"], description: "Find a resource by type or id" },
+  { combos: ["s"], description: "Save the document to this browser" },
+  { combos: ["r"], description: "Show the whole document as raw JSON" },
+  { combos: ["e"], description: "Export the document to a file" },
+  { combos: ["l"], description: "Open saved documents" },
+  {
+    combos: ["Shift + Esc"],
+    description: "Leave the document and go back to the paste view",
+  },
+  { combos: ["Esc"], description: "Close a dialog" },
+  { combos: [`${MOD_KEY} + Enter`], description: "Read the pasted document" },
 ];
 
-export function openShortcutsModal(): void {
+/** One `dl` of key/description rows. */
+function keyList(hints: KeyHint[]): HTMLElement {
   const list = el("dl", { class: "keys" });
-  for (const [combos, description] of SHORTCUTS) {
+  for (const { combos, description } of hints) {
     const dt = el("dt", { class: "keys__key" });
     combos.forEach((combo, comboIndex) => {
       if (comboIndex > 0) dt.append(el("span", { class: "keys__or", text: "or" }));
@@ -249,9 +261,33 @@ export function openShortcutsModal(): void {
     });
     list.append(dt, el("dd", { class: "keys__desc", text: description }));
   }
+  return list;
+}
 
+function group(title: string, body: Node, ...notes: string[]): HTMLElement {
+  return el(
+    "section",
+    { class: "keys-group" },
+    el("h3", { class: "keys-group__title", text: title }),
+    body,
+    ...notes.map((note) => el("p", { class: "keys-group__note", text: note })),
+  );
+}
+
+export function openShortcutsModal(): void {
   openModal({
     title: "Keyboard shortcuts",
-    body: list,
+    body: el(
+      "div",
+      { class: "keys-groups" },
+      group("In this app", keyList(SHORTCUTS)),
+      group(
+        IS_APPLE ? "From your browser — Mac keys" : "From your browser",
+        keyList(browserNavKeys()),
+        "This app pushes a real history entry for every relationship you follow, so Back and Forward move through the document itself — returning you to the exact resource and scroll position you left. They are your browser's keys, not this app's.",
+        pointerNavNote(),
+        otherPlatformNote(),
+      ),
+    ),
   });
 }

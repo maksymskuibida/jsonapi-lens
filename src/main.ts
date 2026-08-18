@@ -9,6 +9,7 @@ import { formatBytes, formatDuration } from "./format.js";
 import { domId, parseDomId, resourceKey } from "./ident.js";
 import { openJumpModal } from "./jump.js";
 import { openLibraryModal, openRawModal, openSaveModal, openShortcutsModal } from "./panels.js";
+import { IS_APPLE, MOD_KEY } from "./platform.js";
 import { DocumentError, readDocument } from "./parse.js";
 import { resolve as resolvePointer } from "./pointer.js";
 import {
@@ -822,6 +823,10 @@ function loadFromInput(): void {
 }
 
 /* ----------------------------------------------------------- paste view --- */
+
+// The markup ships the Mac spelling because it is the shorter of the two and
+// has to be *something*; on everything else it becomes Ctrl.
+if (!IS_APPLE) need("hint-mod").textContent = MOD_KEY;
 
 function updateDropMeta(): void {
   const length = inputEl.value.length;
