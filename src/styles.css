@@ -840,6 +840,66 @@ kbd {
   font-weight: 600;
 }
 
+/* FAQ — the questions people arrive with, answered on the page rather than in a
+   modal. Two columns where there is room, because six short answers in one
+   column reads as a wall and nobody scrolls a wall. */
+
+.faq {
+  margin-top: var(--sp-9);
+  padding-top: var(--sp-7);
+  border-top: 1px solid var(--line);
+}
+
+.faq__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+}
+
+.faq__lede {
+  margin-top: var(--sp-3);
+  max-width: var(--measure);
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.faq__list {
+  margin-top: var(--sp-7);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: var(--sp-7) var(--sp-8);
+}
+
+.faq__item {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+}
+
+.faq__q {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--text);
+  text-wrap: balance;
+}
+
+.faq__a {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-wrap: pretty;
+}
+
+.faq__a code {
+  padding: 0.1em 0.35em;
+  border-radius: 2px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 0.88em;
+}
+
 /* ------------------------------------------------------------- doc view --- */
 
 .doc {

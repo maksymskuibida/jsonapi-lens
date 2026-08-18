@@ -96,8 +96,25 @@ function fromQuery(): Locale | null {
   return isLocale(value) ? value : null;
 }
 
+/**
+ * Was the active language asked for by URL, rather than remembered or guessed?
+ *
+ * `src/seo.ts` needs this to decide whether the canonical URL carries `?lang=`:
+ * a page that was asked for in German is its own indexable URL, whereas `/`
+ * serves whichever language the visitor's browser prefers and cannot claim to be
+ * any one of them. It is recorded at negotiation time because the param is
+ * stripped from the address bar immediately afterwards, so asking `location`
+ * later would always answer no.
+ */
+let requested = false;
+
 function negotiate(): Locale {
-  return fromQuery() ?? stored() ?? fromNavigator() ?? FALLBACK;
+  const asked = fromQuery();
+  if (asked !== null) {
+    requested = true;
+    return asked;
+  }
+  return stored() ?? fromNavigator() ?? FALLBACK;
 }
 
 /**
@@ -114,6 +131,12 @@ let current: Locale | null = null;
 export function locale(): Locale {
   if (current === null) current = negotiate();
   return current;
+}
+
+/** See `requested` above. Resolves the language first, since that sets it. */
+export function localeWasRequested(): boolean {
+  locale();
+  return requested;
 }
 
 /** The active catalogue. Called at every use site, so a swap cannot go stale. */
@@ -150,14 +173,13 @@ export function setLocale(next: Locale): void {
  * `lang` is what tells a screen reader which voice to use and the browser which
  * hyphenation and quotation rules apply, so it has to track the catalogue
  * rather than stay at the `en` baked into `index.html`.
+ *
+ * The title and the description are deliberately not set here: they depend on
+ * which page is showing as well as which language it is in, so `src/seo.ts`
+ * owns them and is called on every route change.
  */
 export function applyDocumentLanguage(): void {
-  const messages = t();
-  document.documentElement.lang = messages.meta.lang;
-  document.title = messages.meta.title;
-  document
-    .querySelector<HTMLMetaElement>('meta[name="description"]')
-    ?.setAttribute("content", messages.meta.description);
+  document.documentElement.lang = t().meta.lang;
 
   // A `?lang=` that has been honoured and stored should not stay in the URL,
   // for the same reason `setLocale` strips it.

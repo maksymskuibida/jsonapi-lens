@@ -120,6 +120,69 @@ export const de: Messages = {
     localOnlyId: "lokal",
   },
 
+  faq: {
+    heading: "Fragen",
+    lede: "Was man fragt, bevor man einen Payload in das Werkzeug eines anderen einfügt.",
+    items: [
+      {
+        q: "Verlässt etwas, das ich einfüge, meinen Browser?",
+        a: () =>
+          frag(
+            "Nein. Lesen, Indizieren und Darstellen passieren auf dieser Seite, und das Dokument liegt in der IndexedDB Ihres Browsers. Es gibt keinen Upload und kein Konto. Die einzige Ausnahme geschieht nur auf Ihren Wunsch: Ein Share-Link wird zuerst in Ihrem Browser verschlüsselt, und der Schlüssel steckt im Link selbst — der Server speichert also nur Chiffrat, das er nicht lesen kann.",
+          ),
+      },
+      {
+        q: "Was ist ein JSON:API-Dokument?",
+        a: () =>
+          frag(
+            "Eine Antwort in der Form, die die JSON:API-Spezifikation vorgibt: ein ",
+            el("code", { text: "data" }),
+            "-Schlüssel auf oberster Ebene mit Ressourcenobjekten, deren ",
+            el("code", { text: "relationships" }),
+            " ",
+            el("code", { text: "{type, id}" }),
+            "-Pointer sind, und ein benachbartes ",
+            el("code", { text: "included" }),
+            "-Array mit den Ressourcen, die diese Pointer benennen. Einer Beziehung von Hand zu folgen heißt, eine UUID im ganzen Payload zu suchen.",
+          ),
+      },
+      {
+        q: "Wie folge ich einer Beziehung?",
+        a: () =>
+          frag(
+            "Anklicken. Jeder Pointer, der aufgeht, ist ein echter Anker auf dieselbe Seite — „Zurück“ und „Vorwärts“, Deep Links, Seitensuche und „Linkadresse kopieren“ verhalten sich also wie überall sonst.",
+          ),
+      },
+      {
+        q: "Was bedeutet „nicht im Dokument“ neben einem Pointer?",
+        a: () =>
+          frag(
+            "Die Beziehung benennt eine Ressource, die weder in ",
+            el("code", { text: "data" }),
+            " noch in ",
+            el("code", { text: "included" }),
+            " steht. Meist fehlt ein ",
+            el("code", { text: "include" }),
+            "-Parameter in der Anfrage, oder ein Server hat etwas weggelassen — und genau diesen Unterschied zu sehen ist normalerweise der Grund, aus dem Sie den Payload geöffnet haben.",
+          ),
+      },
+      {
+        q: "Wie groß darf ein Dokument sein?",
+        a: () =>
+          frag(
+            "25,7 MB mit 56.821 Ressourcen sind in etwa 1,6 Sekunden dargestellt (Chrome, Apple Silicon) und lassen sich danach flüssig scrollen. Die Grenze ist die Zahl der DOM-Knoten, nicht die Größe des Payloads — praktisch liegt sie bei rund 100.000 Ressourcen.",
+          ),
+      },
+      {
+        q: "Gibt es eine API, einen Server oder eine Anmeldung?",
+        a: () =>
+          frag(
+            "Nichts davon. Es ist eine statische Seite — Markup, ein JavaScript-Bundle und selbst gehostete Schriften — ohne Analytics, ohne Cookies, ohne Anfragen an Dritte. Der einzige serverseitige Code im Projekt speichert verschlüsselte Share-Blobs, die er nicht entschlüsseln kann.",
+          ),
+      },
+    ],
+  },
+
   overview: {
     shape: "Form",
     resources: "Ressourcen",

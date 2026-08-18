@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img"
+     aria-label="jsonapi-lens — follow the pointer. A chain of three relationship pointers, the last of them missing from the document.">
+  <!--
+    The link-preview card, and the source public/og.png is rendered from.
+
+    It is drawn rather than screenshotted so it can be edited: the palette is the
+    app's own (background, surface and accent tokens plus three hues from the
+    identity ring in styles.css, converted out of oklch), and the chain of chips
+    is the signature device the tool is built around: a pointer that resolves,
+    another that resolves, and one that does not.
+
+    Fonts are named, not embedded. scripts/render-og.sh inlines this file into a
+    page that declares the three woff2 faces and screenshots it, so the type on
+    the card is the type on the site. Opened on its own the file falls back to a
+    default monospace, which is harmless: the PNG is what ships.
+  -->
+  <defs>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a1f2b" />
+      <stop offset="0.55" stop-color="#0e1015" />
+      <stop offset="1" stop-color="#0c0e13" />
+    </linearGradient>
+
+    <radialGradient id="glow" cx="0.12" cy="0.08" r="0.75">
+      <stop offset="0" stop-color="#4751ca" stop-opacity="0.38" />
+      <stop offset="1" stop-color="#4751ca" stop-opacity="0" />
+    </radialGradient>
+
+    <radialGradient id="glow2" cx="0.92" cy="0.88" r="0.62">
+      <stop offset="0" stop-color="#6ee7d0" stop-opacity="0.13" />
+      <stop offset="1" stop-color="#6ee7d0" stop-opacity="0" />
+    </radialGradient>
+
+    <marker id="tip" viewBox="0 0 8 8" refX="6.4" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0.6 0.9 L7 4 L0.6 7.1 Z" fill="#5c6577" />
+    </marker>
+
+    <style>
+      /* The site's three faces, under the names styles.css gives them. */
+      .display { font-family: "Martian Mono Variable", monospace; font-weight: 800; }
+      .display-semi { font-family: "Martian Mono Variable", monospace; font-weight: 600; }
+      .sans { font-family: "Instrument Sans Variable", sans-serif; font-weight: 400; }
+      .sans-semi { font-family: "Instrument Sans Variable", sans-serif; font-weight: 600; }
+      .mono { font-family: "JetBrains Mono Variable", monospace; font-weight: 500; }
+      .chip-type { font-family: "JetBrains Mono Variable", monospace; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#sheen)" />
+  <rect width="1200" height="630" fill="url(#glow)" />
+  <rect width="1200" height="630" fill="url(#glow2)" />
+  <rect x="0" y="0" width="1200" height="4" fill="#4751ca" opacity="0.85" />
+
+  <!-- brand -->
+  <g transform="translate(76 104)">
+    <text class="display" font-size="31" fill="#edeef2" letter-spacing="-0.02em">
+      jsonapi<tspan fill="#93a1ff">·</tspan>lens
+    </text>
+    <text class="display-semi" y="33" font-size="12.5" fill="#7c8496" letter-spacing="0.2em">
+      FOLLOW THE POINTER
+    </text>
+  </g>
+
+  <!-- headline -->
+  <g transform="translate(76 250)">
+    <text class="sans-semi" font-size="46" fill="#f2f3f7" letter-spacing="-0.035em">
+      <tspan x="0" dy="0">Paste a JSON:API document.</tspan>
+      <tspan x="0" dy="56">Click through the graph.</tspan>
+    </text>
+
+    <text class="sans" font-size="20" fill="#aeb6c4">
+      <tspan x="0" dy="112">Every {type, id} pointer becomes a real link — with Back,</tspan>
+      <tspan x="0" dy="30">deep links and find-in-page. Nothing leaves your browser.</tspan>
+    </text>
+  </g>
+
+  <!-- what it is measured at, in the vocabulary a developer scans for -->
+  <g class="mono" font-size="13" fill="#9aa3b4">
+    <g transform="translate(76 452)">
+      <rect width="164" height="32" rx="8" fill="#161a22" stroke="#272c38" />
+      <text x="15" y="21">25.7 MB in ~1.6 s</text>
+    </g>
+    <g transform="translate(252 452)">
+      <rect width="140" height="32" rx="8" fill="#161a22" stroke="#272c38" />
+      <text x="15" y="21">reverse lookup</text>
+    </g>
+    <g transform="translate(404 452)">
+      <rect width="196" height="32" rx="8" fill="#161a22" stroke="#272c38" />
+      <text x="15" y="21">encrypted share links</text>
+    </g>
+  </g>
+
+  <!-- the pointer chain: two that resolve, one that does not -->
+  <g>
+    <g transform="translate(728 150)">
+      <rect width="336" height="52" rx="9" fill="#1b2030" stroke="#3f4a7a" />
+      <rect x="10" y="11" width="30" height="30" rx="6" fill="#a99bff" opacity="0.18" />
+      <text class="chip-type" x="17.5" y="31.5" font-size="14" fill="#a99bff">AR</text>
+      <text class="chip-type" x="54" y="32" font-size="17" fill="#e7e9f0">articles</text>
+      <text class="mono" x="156" y="32" font-size="17" fill="#8e97ab">1a2f7c04</text>
+      <text class="mono" x="278" y="32" font-size="12.5" fill="#6ee7d0" letter-spacing="0.06em">→ 1</text>
+    </g>
+
+    <path d="M744 202 V 236 Q 744 250 758 250 H 772" fill="none" stroke="#5c6577"
+          stroke-width="2" stroke-dasharray="3 4.5" stroke-linecap="round" marker-end="url(#tip)" />
+
+    <g transform="translate(780 224)">
+      <rect width="336" height="52" rx="9" fill="#1b2734" stroke="#2f6a86" />
+      <rect x="10" y="11" width="30" height="30" rx="6" fill="#6cc0f5" opacity="0.18" />
+      <text class="chip-type" x="17.5" y="31.5" font-size="14" fill="#6cc0f5">CO</text>
+      <text class="chip-type" x="54" y="32" font-size="17" fill="#e7e9f0">comments</text>
+      <text class="mono" x="178" y="32" font-size="17" fill="#8e97ab">8ff1c2be</text>
+      <text class="mono" x="292" y="32" font-size="12.5" fill="#6ee7d0" letter-spacing="0.06em">→ 4</text>
+    </g>
+
+    <path d="M796 276 V 310 Q 796 324 810 324 H 824" fill="none" stroke="#5c6577"
+          stroke-width="2" stroke-dasharray="3 4.5" stroke-linecap="round" marker-end="url(#tip)" />
+
+    <g transform="translate(832 298)">
+      <rect width="296" height="52" rx="9" fill="#171a21" stroke="#343a47" stroke-dasharray="5 4" />
+      <rect x="10" y="11" width="30" height="30" rx="6" fill="#6b7486" opacity="0.16" />
+      <text class="chip-type" x="17.5" y="31.5" font-size="14" fill="#8b93a5">PE</text>
+      <text class="chip-type" x="54" y="32" font-size="17" fill="#9aa3b4">people</text>
+      <text class="mono" x="132" y="32" font-size="17" fill="#6d7688">2a9d40f7</text>
+      <g transform="translate(232 14)">
+        <rect width="54" height="24" rx="6" fill="#23272f" />
+        <text class="mono" x="8" y="16.5" font-size="10.5" fill="#98a0b1" letter-spacing="0.02em">absent</text>
+      </g>
+    </g>
+
+    <text class="sans" x="832" y="382" font-size="15.5" fill="#78808f">
+      a pointer that resolves to nothing says so
+    </text>
+  </g>
+
+  <!-- footline -->
+  <g transform="translate(76 552)">
+    <text class="mono" font-size="20" fill="#93a1ff" letter-spacing="-0.01em">jsonapi.mstool.dev</text>
+    <text class="sans" x="272" font-size="16.5" fill="#6f7787">
+      no account · no upload · English, Deutsch, Українська
+    </text>
+  </g>
+</svg>

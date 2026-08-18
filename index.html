@@ -3,14 +3,230 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
     <title>jsonapi-lens — follow the pointer</title>
     <meta
       name="description"
       content="Read a JSON:API document as the graph it actually is. Every relationship becomes a link you can click. Runs entirely in your browser."
     />
+
+    <!-- Findability.
+         The page is one HTML file and one bundle, and everything a crawler is
+         told here is also true of what it renders: `src/seo.ts` keeps the
+         canonical, the robots directive and the Open Graph URL in step with the
+         route and the language, so a share link or a saved document never
+         claims to be the front page. `/robots.txt`, `/sitemap.xml` and
+         `/llms.txt` are the same statements for readers that never parse a
+         `<head>`. -->
+    <link rel="canonical" href="https://jsonapi.mstool.dev/" />
+    <meta
+      name="robots"
+      content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1"
+    />
+    <meta
+      name="keywords"
+      content="JSON:API, JSON:API viewer, JSON:API document viewer, JSON API relationships, included array, jsonapi.org, JSON viewer, API response viewer, REST payload inspector, API debugging, resource graph, client-side, no upload"
+    />
+    <meta name="author" content="Maksym Skuibida" />
+    <meta name="application-name" content="jsonapi-lens" />
+
+    <!-- The interface speaks three languages, negotiated from `?lang=`, then
+         stored, then the browser's own preferences. Each `?lang=` URL renders
+         that language and says so, and `/` is the negotiated entry point, which
+         is what `x-default` names. -->
+    <link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/?lang=en" />
+    <link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/?lang=de" />
+    <link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/?lang=uk" />
+    <link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/" />
+
+    <!-- Link preview. `og.png` is generated from `og.svg`, which is in the
+         repository so the card can be edited rather than redrawn. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="jsonapi-lens" />
+    <meta property="og:title" content="jsonapi-lens — follow the pointer" />
+    <meta property="og:description" content="Read a JSON:API document as the graph it actually is. Every relationship becomes a link you can click. Runs entirely in your browser." />
+    <meta property="og:url" content="https://jsonapi.mstool.dev/" />
+    <meta property="og:image" content="https://jsonapi.mstool.dev/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="jsonapi-lens: a relationship pointer on the left, an arrow, and the resource it resolves to on the right."
+    />
+    <meta property="og:locale" content="en_GB" />
+    <meta property="og:locale:alternate" content="de_DE" />
+    <meta property="og:locale:alternate" content="uk_UA" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="jsonapi-lens — follow the pointer" />
+    <meta name="twitter:description" content="Read a JSON:API document as the graph it actually is. Every relationship becomes a link you can click. Runs entirely in your browser." />
+    <meta name="twitter:image" content="https://jsonapi.mstool.dev/og.png" />
+    <meta
+      name="twitter:image:alt"
+      content="jsonapi-lens: a relationship pointer on the left, an arrow, and the resource it resolves to on the right."
+    />
+
     <meta name="color-scheme" content="light dark" />
-    <meta name="robots" content="noindex" />
+    <!-- Matches `--bg` in each scheme, so the browser chrome does not flash a
+         colour the page never uses. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9fafc" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1015" />
+
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- What the page is, in the vocabulary a search engine and an assistant
+         both read. The six answers are the six on the page; `test/seo.test.ts`
+         compares them to the catalogue so this copy cannot drift. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://jsonapi.mstool.dev/#website",
+            "url": "https://jsonapi.mstool.dev/",
+            "name": "jsonapi-lens",
+            "alternateName": "JSON:API document viewer",
+            "description": "Read a JSON:API document as the graph it actually is. Every relationship becomes a link you can click. Runs entirely in your browser.",
+            "inLanguage": [
+              "en",
+              "de",
+              "uk"
+            ],
+            "publisher": {
+              "@id": "https://jsonapi.mstool.dev/#author"
+            }
+          },
+          {
+            "@type": [
+              "WebApplication",
+              "SoftwareApplication"
+            ],
+            "@id": "https://jsonapi.mstool.dev/#app",
+            "name": "jsonapi-lens",
+            "alternateName": [
+              "JSON:API viewer",
+              "JSON:API document viewer"
+            ],
+            "url": "https://jsonapi.mstool.dev/",
+            "description": "Read a JSON:API document as the graph it actually is. Every relationship becomes a link you can click. Runs entirely in your browser.",
+            "applicationCategory": "DeveloperApplication",
+            "applicationSubCategory": "API debugging",
+            "operatingSystem": "Any — runs in a modern web browser",
+            "browserRequirements": "Requires JavaScript. No account, no installation.",
+            "softwareVersion": "1.0.0",
+            "isAccessibleForFree": true,
+            "license": "https://opensource.org/license/mit",
+            "image": "https://jsonapi.mstool.dev/og.png",
+            "screenshot": "https://jsonapi.mstool.dev/og.png",
+            "inLanguage": [
+              "en",
+              "de",
+              "uk"
+            ],
+            "sameAs": "https://github.com/maksymskuibida/jsonapi-lens",
+            "keywords": "JSON:API, JSON:API viewer, relationships, included, API debugging, JSON viewer",
+            "featureList": [
+              "Renders every resource from data and included, deduped and grouped by type",
+              "Turns each {type, id} relationship pointer into a clickable anchor on the same page",
+              "Marks a pointer whose resource is missing from the document, which is usually a missing include parameter",
+              "Real browser history: Back, Forward, deep links, find-in-page and copy link address",
+              "Reverse lookup: which resources point at this one",
+              "Reads JSON:API error documents as well as data documents",
+              "Keeps the document in IndexedDB, so a reload restores the deep link",
+              "Optional end-to-end encrypted share links with an expiry",
+              "English, German and Ukrainian interface"
+            ],
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "EUR"
+            },
+            "author": {
+              "@id": "https://jsonapi.mstool.dev/#author"
+            },
+            "publisher": {
+              "@id": "https://jsonapi.mstool.dev/#author"
+            },
+            "about": {
+              "@type": "Thing",
+              "name": "JSON:API",
+              "url": "https://jsonapi.org",
+              "description": "A specification for building APIs in JSON, in which relationships are {type, id} pointers and related resources travel in a sibling included array."
+            }
+          },
+          {
+            "@type": "Person",
+            "@id": "https://jsonapi.mstool.dev/#author",
+            "name": "Maksym Skuibida",
+            "url": "https://jsonapi.mstool.dev/impressum"
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://jsonapi.mstool.dev/#faq",
+            "isPartOf": {
+              "@id": "https://jsonapi.mstool.dev/#website"
+            },
+            "inLanguage": "en",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Does anything I paste leave my browser?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. Parsing, indexing and rendering all happen on this page, and the document is kept in your browser's IndexedDB. There is no upload step and no account. The one exception is opt-in: a share link is encrypted in your browser first, and the key travels in the link itself, so the server only ever stores ciphertext it cannot read."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What is a JSON:API document?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "A response shaped by the JSON:API specification: a top-level data key holding resource objects, whose relationships are {type, id} pointers, and a sibling included array holding the resources those pointers name. Following one relationship by hand means searching the whole payload for a UUID."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "How do I follow a relationship?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Click it. Every pointer that resolves is a real anchor to that resource on the same page, so Back and Forward, deep links, find-in-page and “copy link address” all behave the way they do everywhere else."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What does “not in document” next to a pointer mean?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "The relationship names a resource that is in neither data nor included. Usually that is a missing include parameter in the request, or a server that dropped something — and telling that apart from a resource that is present is normally why you opened the payload."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "How large a document can it read?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "25.7 MB and 56,821 resources render in about 1.6 seconds in Chrome on Apple Silicon, and scroll smoothly afterwards. The binding constraint is DOM node count rather than payload size, so the practical ceiling is around 100,000 resources."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Is there an API, a server or a sign-up?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "None of the three. It is a static page — markup, one JavaScript bundle and self-hosted fonts — with no analytics, no cookies and no third-party requests. The only server-side code in the project stores encrypted share blobs it cannot decrypt."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+
     <script type="module" src="/src/main.ts"></script>
   </head>
 
@@ -175,6 +391,83 @@
                 </p>
               </div>
             </div>
+
+            <!-- Answered on the page rather than in a help modal: these are the
+                 first things anyone asks about a tool you paste a production
+                 payload into, and they are the part a search engine or an
+                 assistant can quote. The head carries the same six answers as
+                 FAQPage structured data, and a test holds the two together. -->
+            <section class="faq" aria-labelledby="faq-title">
+              <h2 class="faq__title" id="faq-title">Questions</h2>
+              <p class="faq__lede" id="faq-lede">
+                What people ask before pasting a payload into somebody else's tool.
+              </p>
+
+              <div class="faq__list">
+                <div class="faq__item">
+                  <h3 class="faq__q" id="faq-q1">Does anything I paste leave my browser?</h3>
+                  <p class="faq__a" id="faq-a1">
+                    No. Parsing, indexing and rendering all happen on this page, and the document
+                    is kept in your browser's IndexedDB. There is no upload step and no account.
+                    The one exception is opt-in: a share link is encrypted in your browser first,
+                    and the key travels in the link itself, so the server only ever stores
+                    ciphertext it cannot read.
+                  </p>
+                </div>
+
+                <div class="faq__item">
+                  <h3 class="faq__q" id="faq-q2">What is a JSON:API document?</h3>
+                  <p class="faq__a" id="faq-a2">
+                    A response shaped by the JSON:API specification: a top-level <code>data</code>
+                    key holding resource objects, whose <code>relationships</code> are
+                    <code>{type, id}</code> pointers, and a sibling <code>included</code> array
+                    holding the resources those pointers name. Following one relationship by hand
+                    means searching the whole payload for a UUID.
+                  </p>
+                </div>
+
+                <div class="faq__item">
+                  <h3 class="faq__q" id="faq-q3">How do I follow a relationship?</h3>
+                  <p class="faq__a" id="faq-a3">
+                    Click it. Every pointer that resolves is a real anchor to that resource on the
+                    same page, so Back and Forward, deep links, find-in-page and &ldquo;copy link
+                    address&rdquo; all behave the way they do everywhere else.
+                  </p>
+                </div>
+
+                <div class="faq__item">
+                  <h3 class="faq__q" id="faq-q4">
+                    What does &ldquo;not in document&rdquo; next to a pointer mean?
+                  </h3>
+                  <p class="faq__a" id="faq-a4">
+                    The relationship names a resource that is in neither <code>data</code> nor
+                    <code>included</code>. Usually that is a missing <code>include</code> parameter
+                    in the request, or a server that dropped something &mdash; and telling that
+                    apart from a resource that is present is normally why you opened the payload.
+                  </p>
+                </div>
+
+                <div class="faq__item">
+                  <h3 class="faq__q" id="faq-q5">How large a document can it read?</h3>
+                  <p class="faq__a" id="faq-a5">
+                    25.7 MB and 56,821 resources render in about 1.6 seconds in Chrome on Apple
+                    Silicon, and scroll smoothly afterwards. The binding constraint is DOM node
+                    count rather than payload size, so the practical ceiling is around 100,000
+                    resources.
+                  </p>
+                </div>
+
+                <div class="faq__item">
+                  <h3 class="faq__q" id="faq-q6">Is there an API, a server or a sign-up?</h3>
+                  <p class="faq__a" id="faq-a6">
+                    None of the three. It is a static page &mdash; markup, one JavaScript bundle
+                    and self-hosted fonts &mdash; with no analytics, no cookies and no third-party
+                    requests. The only server-side code in the project stores encrypted share
+                    blobs it cannot decrypt.
+                  </p>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
 

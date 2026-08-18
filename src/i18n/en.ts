@@ -138,6 +138,83 @@ export const en = {
     localOnlyId: "only",
   },
 
+  /*
+   * The questions people arrive with.
+   *
+   * They are here because they are genuinely the first things anyone asks about
+   * a tool you paste a production payload into — and, mirrored as `FAQPage`
+   * structured data in `index.html`, they are also what a search engine or an
+   * assistant quotes when somebody asks *it* instead of asking the page. The
+   * mirror is checked by a test rather than trusted, because a third copy of
+   * the same prose is a third place for it to drift.
+   *
+   * Answers return DOM for the same reason the rest of the catalogue does:
+   * `data`, `included` and `include` are code when they appear in a sentence.
+   */
+  faq: {
+    heading: "Questions",
+    /** Sits under the heading; says why the answers are worth reading. */
+    lede: "What people ask before pasting a payload into somebody else's tool.",
+    items: [
+      {
+        q: "Does anything I paste leave my browser?",
+        a: () =>
+          frag(
+            "No. Parsing, indexing and rendering all happen on this page, and the document is kept in your browser's IndexedDB. There is no upload step and no account. The one exception is opt-in: a share link is encrypted in your browser first, and the key travels in the link itself, so the server only ever stores ciphertext it cannot read.",
+          ),
+      },
+      {
+        q: "What is a JSON:API document?",
+        a: () =>
+          frag(
+            "A response shaped by the JSON:API specification: a top-level ",
+            el("code", { text: "data" }),
+            " key holding resource objects, whose ",
+            el("code", { text: "relationships" }),
+            " are ",
+            el("code", { text: "{type, id}" }),
+            " pointers, and a sibling ",
+            el("code", { text: "included" }),
+            " array holding the resources those pointers name. Following one relationship by hand means searching the whole payload for a UUID.",
+          ),
+      },
+      {
+        q: "How do I follow a relationship?",
+        a: () =>
+          frag(
+            "Click it. Every pointer that resolves is a real anchor to that resource on the same page, so Back and Forward, deep links, find-in-page and “copy link address” all behave the way they do everywhere else.",
+          ),
+      },
+      {
+        q: "What does “not in document” next to a pointer mean?",
+        a: () =>
+          frag(
+            "The relationship names a resource that is in neither ",
+            el("code", { text: "data" }),
+            " nor ",
+            el("code", { text: "included" }),
+            ". Usually that is a missing ",
+            el("code", { text: "include" }),
+            " parameter in the request, or a server that dropped something — and telling that apart from a resource that is present is normally why you opened the payload.",
+          ),
+      },
+      {
+        q: "How large a document can it read?",
+        a: () =>
+          frag(
+            "25.7 MB and 56,821 resources render in about 1.6 seconds in Chrome on Apple Silicon, and scroll smoothly afterwards. The binding constraint is DOM node count rather than payload size, so the practical ceiling is around 100,000 resources.",
+          ),
+      },
+      {
+        q: "Is there an API, a server or a sign-up?",
+        a: () =>
+          frag(
+            "None of the three. It is a static page — markup, one JavaScript bundle and self-hosted fonts — with no analytics, no cookies and no third-party requests. The only server-side code in the project stores encrypted share blobs it cannot decrypt.",
+          ),
+      },
+    ],
+  },
+
   /* ------------------------------------------------- document overview --- */
 
   overview: {

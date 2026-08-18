@@ -5,6 +5,9 @@ relationship becomes a link you can click.
 
 Live at **https://jsonapi.mstool.dev**.
 
+![Paste a JSON:API document, click through the graph: a chain of relationship pointers, the last of
+them missing from the document.](public/og.png)
+
 JSON:API documents are deliberately flat: `data` holds resource objects whose `relationships` are
 `{type, id}` pointers, and the resources those point at sit in a sibling `included` array.
 Following a relationship by hand means Ctrl-F'ing a UUID through a few thousand lines. This renders
@@ -216,6 +219,40 @@ anything else that handles the link — unlike a `#fragment`, which browsers nev
 strips the secret from the address bar as soon as a link opens, and accepts `/d/<id>#<secret>` if you
 prefer the fragment form, but links are minted in the path form.
 
+## Findability
+
+The site is one HTML file and one bundle, which means everything a crawler is told has to be told
+deliberately. Four surfaces do it, and each has a test holding it to the others:
+
+| | |
+|---|---|
+| [`index.html`](index.html) head | canonical, `robots`, keywords, `hreflang` for all three languages, Open Graph and Twitter cards, and a JSON-LD `@graph`: `WebSite`, `WebApplication`, `Person` and the `FAQPage` mirroring the six questions on the page |
+| [`src/seo.ts`](src/seo.ts) | keeps that head in step with the route and the language at runtime |
+| [`public/robots.txt`](public/robots.txt), [`sitemap.xml`](public/sitemap.xml), [`_headers`](public/_headers) | what to crawl, every indexable URL once per language, and `X-Robots-Tag` for the two paths that must never be indexed |
+| [`public/llms.txt`](public/llms.txt), [`llms-full.txt`](public/llms-full.txt) | the same description in prose, for assistants and answer engines that never parse a `<head>` |
+
+Two rules run through all of it:
+
+- **A route either has a canonical URL or is `noindex`.** `/view` renders a document from the
+  visitor's own IndexedDB, so for anyone else it is an empty page; `/d/<id>:<secret>` carries a
+  decryption key in the URL, so a crawler that runs JavaScript could render a document meant for one
+  recipient. Both are excluded in `robots.txt`, sent `X-Robots-Tag: noindex` by `_headers`, and given
+  no canonical by `src/seo.ts` — three layers because a `Disallow` is a request and a header is not.
+- **The canonical URL carries `?lang=` exactly when the language was asked for.** `/?lang=de` really
+  does render German, so it is its own indexable URL; a bare `/` negotiates from the browser, which
+  is what `x-default` describes.
+
+`/impressum` and `/privacy` are also written out as real files at build time by the `seo-routes`
+plugin in [`vite.config.ts`](vite.config.ts), so a crawler that does not run JavaScript gets their
+titles, descriptions, canonicals and structured data rather than the front page's. Every replacement
+in that plugin is asserted, so an edit to `index.html` that breaks one fails the build instead of
+quietly emitting a page that describes the wrong thing.
+
+The link preview is [`public/og.svg`](public/og.svg), drawn in the app's own palette and typeface and
+rasterised to `og.png` by [`scripts/render-og.sh`](scripts/render-og.sh) (`npm run og`). It is a
+script rather than a build step because it changes about once a year and needs a browser to read the
+woff2 faces.
+
 ## Running it
 
 ```bash
@@ -350,7 +387,8 @@ Ctrl-F. Summary rows — type, id and a summary attribute for every resource —
 src/
   ident.ts            fragment/DOM-id encoding, type hue + sigil
   pointer.ts          RFC 6901 pointers: escape, join, parse, resolve
-  router.ts           the three paths, parsed by hand
+  router.ts           the five paths, parsed by hand
+  seo.ts              the head: canonical, robots, hreflang and cards per route
   parse.ts            validation with specific errors, one-pass index, reverse index
   types.ts            structural types for the parts of JSON:API this reads
   format.ts           value classification and typed formatting
@@ -369,9 +407,22 @@ src/
   main.ts             boot, routing, hash resolution, lazy bodies, shortcuts
   styles.css          design tokens and all styling
   samples/            the five documents behind the "Or try" buttons
+  i18n/               three catalogues, the typed binding table for the shipped markup
+  legal/              Impressum and privacy policy as data, in three languages
+  views/legal.ts      the renderer both legal pages share
   worker.ts           the share API (the only server-side code)
+public/
+  robots.txt          what to crawl; search and AI agents named explicitly
+  sitemap.xml         every indexable URL, once per language
+  llms.txt            the short description, for assistants
+  llms-full.txt       the long one: features, limits, privacy model, questions
+  og.svg → og.png     the link preview, drawn and then rasterised
+  site.webmanifest    name, icons, theme colour
+  _headers            X-Robots-Tag for /view and /d/*, plus two safety headers
 migrations/           D1 schema
-scripts/gen-fixture.mjs
+scripts/
+  gen-fixture.mjs     the 25.7 MB performance fixture
+  render-og.sh        rasterises og.svg with headless Chrome
 test/
 ```
 

@@ -1,0 +1,29 @@
+{
+  "name": "jsonapi-lens — JSON:API document viewer",
+  "short_name": "jsonapi-lens",
+  "description": "Read a JSON:API document as the graph it actually is. Every relationship becomes a link you can click. Runs entirely in your browser.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["developer", "utilities", "productivity"],
+  "display": "minimal-ui",
+  "orientation": "any",
+  "theme_color": "#0e1015",
+  "background_color": "#0e1015",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any" },
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ],
+  "screenshots": [
+    {
+      "src": "/og.png",
+      "type": "image/png",
+      "sizes": "1200x630",
+      "form_factor": "wide",
+      "label": "A chain of relationship pointers, the last of them missing from the document."
+    }
+  ]
+}

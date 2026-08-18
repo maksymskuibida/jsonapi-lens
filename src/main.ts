@@ -36,6 +36,7 @@ import {
 import { buildResourceBody } from "./render-resource.js";
 import { currentRoute, navigate, parseRoute, PASTE_PATH, VIEW_PATH } from "./router.js";
 import type { LegalRoute, Route } from "./router.js";
+import { applyPageMeta, applyRouteMeta, documentMeta, metaForRoute } from "./seo.js";
 import { renderLegalPage } from "./views/legal.js";
 import { fetchShare, openShareModal } from "./share.js";
 import { ShareError } from "./crypto.js";
@@ -115,6 +116,11 @@ const languageEl = need<HTMLSelectElement>("language");
  */
 applyDocumentLanguage();
 localiseStaticDom();
+
+// The head describes a page, not just a language: which title, description,
+// canonical and robots directive are right depends on the route. Applied here
+// for the route the page was loaded with, and again on every change below.
+applyRouteMeta(currentRoute());
 
 for (const code of LOCALES) {
   languageEl.append(el("option", { value: code, text: LOCALE_NAMES[code] }));
@@ -643,7 +649,9 @@ function renderDocumentView(loaded: Loaded, parseMs: number): void {
     bodies: eager ? "eager" : "lazy (on expand)",
   });
 
-  document.title = t().meta.documentTitle(loaded.label);
+  // `/view` shows a document held in this browser alone, so the head stops
+  // claiming to be an indexable page for as long as one is open.
+  applyPageMeta(documentMeta(loaded.label));
 }
 
 /* Lazy bodies. `toggle` does not bubble, so this listens in the capture phase,
@@ -832,7 +840,7 @@ function saveCurrent(): void {
     }
     loaded.label = label;
     topbarLabelEl.textContent = label;
-    document.title = t().meta.documentTitle(label);
+    applyPageMeta(documentMeta(label));
     void refreshLibraryCount();
     toast(t().save.done(label));
   });
@@ -856,7 +864,9 @@ function showLegal(page: LegalRoute): void {
   const pages = legal();
   legalEl.replaceChildren(renderLegalPage(page === "impressum" ? pages.impressum : pages.privacy));
   showView("legal");
-  document.title = `${(page === "impressum" ? pages.impressum : pages.privacy).title} — jsonapi-lens`;
+  // These two are the only paths besides `/` that a search engine should hold,
+  // and each has its own title and description in each language.
+  applyPageMeta(metaForRoute({ kind: "legal", page }));
   window.scrollTo(0, 0);
 }
 
@@ -1028,6 +1038,7 @@ window.addEventListener("drop", (event) => event.preventDefault());
 function leaveDocument(): void {
   if (docEl.hidden) return;
   navigate(PASTE_PATH);
+  applyRouteMeta({ kind: "paste" });
   showView("paste");
   offerResume();
   window.scrollTo(0, 0);
@@ -1042,7 +1053,7 @@ newDocEl.addEventListener("click", () => {
   updateDropMeta();
   resumeEl.hidden = true;
   navigate(PASTE_PATH);
-  document.title = t().meta.title;
+  applyRouteMeta({ kind: "paste" });
   showView("paste");
   inputEl.focus();
 });
@@ -1066,6 +1077,7 @@ function offerResume(): void {
       });
       button.addEventListener("click", () => {
         navigate(VIEW_PATH);
+        if (current) applyPageMeta(documentMeta(current.label));
         showView("doc");
       });
       return button;
@@ -1158,6 +1170,7 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
     toast(t().share.opened);
   } catch (error) {
     navigate(PASTE_PATH, { replace: true });
+    applyRouteMeta({ kind: "paste" });
     showView("paste");
     showError(error);
   }
@@ -1165,6 +1178,7 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
 
 async function applyRoute(): Promise<void> {
   const route = currentRoute();
+  applyRouteMeta(route);
 
   if (route.kind === "share") {
     await loadSharedDocument(route);
@@ -1179,6 +1193,7 @@ async function applyRoute(): Promise<void> {
   if (route.kind === "unknown") {
     toast(t().toast.noPage(route.pathname));
     navigate(PASTE_PATH, { replace: true });
+    applyRouteMeta({ kind: "paste" });
     showView("paste");
     offerResume();
     return;
@@ -1200,10 +1215,14 @@ async function applyRoute(): Promise<void> {
       // The browser tried to scroll to the fragment before any of this existed,
       // so that attempt hit nothing. Now the sections are in the DOM.
       if (ok) resolveHash(savedEntryState());
-      else navigate(PASTE_PATH, { replace: true });
+      else {
+        navigate(PASTE_PATH, { replace: true });
+        applyRouteMeta({ kind: "paste" });
+      }
       return;
     }
     navigate(PASTE_PATH, { replace: true });
+    applyRouteMeta({ kind: "paste" });
     showView("paste");
     toast(t().toast.noDocument);
     return;

@@ -1,0 +1,53 @@
+# jsonapi-lens — https://jsonapi.mstool.dev
+#
+# Three paths are worth reading and they are all static: the paste view, the
+# Impressum and the privacy policy. Everything else is either a shell with no
+# content of its own or somebody's document.
+#
+#   /view   the document view. Without a document in *your* browser's IndexedDB
+#           it renders nothing, so a crawler would only ever index an empty page.
+#   /d/…    a share link. The decryption key is part of the URL, so a crawler
+#           that runs JavaScript could render a document somebody meant for one
+#           recipient. Never index these. `_headers` says the same thing with an
+#           `X-Robots-Tag`, because a Disallow is a request and a header is not.
+#   /api/…  the share endpoint. JSON, and `no-store`.
+
+User-agent: *
+Allow: /
+Disallow: /view
+Disallow: /d/
+Disallow: /api/
+
+# Assistants and answer engines are welcome to the same three pages, and are
+# named explicitly because several of them read a missing group as a refusal —
+# and because the two "-Extended" agents below are the documented way to say yes
+# to being used for answers rather than only for a search index. The exclusions
+# are repeated in each group: a named group replaces the wildcard one above
+# rather than adding to it.
+
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: anthropic-ai
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot
+User-agent: Applebot-Extended
+User-agent: Bingbot
+User-agent: DuckAssistBot
+User-agent: MistralAI-User
+User-agent: Meta-ExternalAgent
+User-agent: Amazonbot
+User-agent: cohere-ai
+User-agent: CCBot
+User-agent: YouBot
+Allow: /
+Disallow: /view
+Disallow: /d/
+Disallow: /api/
+
+Sitemap: https://jsonapi.mstool.dev/sitemap.xml

@@ -1,0 +1,56 @@
+# jsonapi-lens
+
+> A single-page viewer for JSON:API documents. Paste a payload and every
+> relationship pointer becomes a link you can click. Parsing, indexing and
+> rendering happen in the browser; nothing is uploaded.
+
+JSON:API documents are deliberately flat. `data` holds resource objects whose
+`relationships` are `{type, id}` pointers, and the resources those point at sit
+in a sibling `included` array — so following one relationship by hand means
+searching a few thousand lines for a UUID. jsonapi-lens renders every resource
+in the document onto one page, each with a stable DOM id, so a pointer is an
+ordinary anchor: `<a href="#type--id">`. Browser history, deep links,
+find-in-page and "copy link address" then work without any routing code.
+
+A pointer whose resource is not in the document is drawn differently and says
+"not in document" — usually a missing `include` parameter in the request, or a
+server that dropped something. Telling that apart from a resource that is
+present is the common reason for opening a payload at all.
+
+Use it for: reading a JSON:API response, debugging a missing `include`, walking a
+relationship chain, checking what points *at* a resource, or reading a JSON:API
+error document.
+
+## Pages
+
+- [Viewer](https://jsonapi.mstool.dev/): the whole tool. Paste, drop a `.json`
+  file, or load one of five sample documents (article feed, single resource,
+  missing include, error response, awkward ids).
+- [Impressum](https://jsonapi.mstool.dev/impressum): provider information under
+  § 5 DDG.
+- [Privacy](https://jsonapi.mstool.dev/privacy): what is stored, where, and for
+  how long.
+- [Full description](https://jsonapi.mstool.dev/llms-full.txt): features,
+  measured limits, the privacy model and the answers to common questions, in one
+  file.
+- [Source](https://github.com/maksymskuibida/jsonapi-lens): MIT.
+
+## Facts worth quoting
+
+- Nothing is uploaded. There is no account and no analytics; the page makes no
+  third-party requests.
+- Share links are opt-in and end-to-end encrypted in the browser. The server
+  stores ciphertext it cannot read, and the key travels in the link.
+- Measured: 25.7 MB and 56,821 resources render in about 1.6 seconds in Chrome
+  on Apple Silicon. The practical ceiling is DOM node count, around 100,000
+  resources.
+- Interface languages: English, German, Ukrainian. Add `?lang=en`, `?lang=de` or
+  `?lang=uk` to any URL.
+- Free, MIT-licensed, no installation.
+
+## Not worth crawling
+
+- `/view` renders a document held in the visitor's own browser storage, so it is
+  empty for anyone else.
+- `/d/<id>:<secret>` is a share link. The key is in the URL; please do not fetch,
+  index or quote these.

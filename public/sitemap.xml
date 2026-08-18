@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Every indexable URL, once per language.
+
+  The interface speaks three languages and picks one from `?lang=`, then
+  `localStorage`, then the browser's own preferences — so each `?lang=` URL
+  renders exactly that language, and the bare path is the negotiated entry point
+  that `x-default` names. The set below is therefore the same set `index.html`
+  declares with `<link rel="alternate">`, and `test/seo.test.ts` holds this file,
+  that head and `src/router.ts` to the same paths so none of the three can drift.
+
+  Missing on purpose: `/view` and `/d/<id>:<secret>`. Neither has content of its
+  own — see `robots.txt`.
+-->
+<urlset
+  xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:xhtml="http://www.w3.org/1999/xhtml"
+>
+  <url>
+    <loc>https://jsonapi.mstool.dev/</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/?lang=en</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/?lang=de</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/?lang=uk</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/impressum</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/impressum?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/impressum?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/impressum?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/impressum" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/impressum?lang=en</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/impressum?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/impressum?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/impressum?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/impressum" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/impressum?lang=de</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/impressum?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/impressum?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/impressum?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/impressum" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/impressum?lang=uk</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/impressum?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/impressum?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/impressum?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/impressum" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/privacy</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/privacy?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/privacy?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/privacy?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/privacy" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/privacy?lang=en</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/privacy?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/privacy?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/privacy?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/privacy" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/privacy?lang=de</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/privacy?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/privacy?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/privacy?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/privacy" />
+  </url>
+  <url>
+    <loc>https://jsonapi.mstool.dev/privacy?lang=uk</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://jsonapi.mstool.dev/privacy?lang=en" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://jsonapi.mstool.dev/privacy?lang=de" />
+    <xhtml:link rel="alternate" hreflang="uk" href="https://jsonapi.mstool.dev/privacy?lang=uk" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://jsonapi.mstool.dev/privacy" />
+  </url>
+</urlset>

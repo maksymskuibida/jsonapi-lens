@@ -16,6 +16,7 @@
  */
 
 import { MOD_KEY } from "../platform.js";
+import { en } from "./en.js";
 import { t } from "./index.js";
 import type { Messages } from "./en.js";
 
@@ -45,6 +46,35 @@ const both =
   (node, m) => {
     for (const apply of applies) apply(node, m);
   };
+
+/**
+ * The FAQ, whose length lives in the catalogue rather than here.
+ *
+ * Six question/answer pairs would be twelve hand-written rows in the table
+ * below, and adding a seventh question would mean remembering to add two more.
+ * Generating them from the English catalogue's own item count means a new
+ * question is written twice — once as copy, once as markup — and nowhere else.
+ * A translation with the wrong number of items would silently leave a question
+ * in English, so `test/i18n.test.ts` holds every catalogue to this count.
+ */
+const FAQ_BINDINGS: [selector: string, apply: Apply][] = en.faq.items.flatMap(
+  (_, index): [selector: string, apply: Apply][] => [
+    [
+      `#faq-q${index + 1}`,
+      (node, m) => {
+        const item = m.faq.items[index];
+        if (item) node.textContent = item.q;
+      },
+    ],
+    [
+      `#faq-a${index + 1}`,
+      (node, m) => {
+        const item = m.faq.items[index];
+        if (item) node.replaceChildren(item.a());
+      },
+    ],
+  ],
+);
 
 /**
  * Every localisable node in `index.html`, by selector.
@@ -102,6 +132,11 @@ export const STATIC_BINDINGS: [selector: string, apply: Apply][] = [
   ["#legend-chip-absent", text((m) => m.legend.notInDocument)],
   ["#legend-chip-type", text((m) => m.legend.localOnlyType)],
   ["#legend-chip-id", text((m) => m.legend.localOnlyId)],
+
+  /* faq */
+  ["#faq-title", text((m) => m.faq.heading)],
+  ["#faq-lede", text((m) => m.faq.lede)],
+  ...FAQ_BINDINGS,
 
   /* footer */
   ["#footer-tagline", text((m) => m.footer.tagline)],

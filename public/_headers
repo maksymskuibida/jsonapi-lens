@@ -1,0 +1,28 @@
+# Response headers for the static assets, read natively by Workers assets.
+#
+# `robots.txt` asks crawlers to stay out of the two paths below; these headers
+# tell the ones that arrive anyway not to index what they found. A Disallow is a
+# request, an `X-Robots-Tag` is an instruction to the indexer.
+
+/*
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Content-Type-Options: nosniff
+
+# A share link carries its decryption key in the URL. Nothing about it should
+# reach an index, and nothing should follow it further.
+/d/*
+  X-Robots-Tag: noindex, nofollow, noarchive
+
+# The document view renders whatever is in the visitor's own IndexedDB, so for a
+# crawler it is an empty shell.
+/view
+  X-Robots-Tag: noindex
+
+/sitemap.xml
+  Cache-Control: public, max-age=3600
+/robots.txt
+  Cache-Control: public, max-age=3600
+/llms.txt
+  Cache-Control: public, max-age=3600
+/llms-full.txt
+  Cache-Control: public, max-age=3600

@@ -4,6 +4,35 @@
   "private": true,
   "type": "module",
   "description": "Single-page JSON:API document viewer — paste a payload, click through relationships via native URL anchors. Static, client-side, no backend.",
+  "keywords": [
+    "json:api",
+    "jsonapi",
+    "json-api",
+    "json-api-viewer",
+    "json-viewer",
+    "api-response-viewer",
+    "api-debugging",
+    "relationships",
+    "included",
+    "resource-graph",
+    "developer-tools",
+    "client-side",
+    "no-backend",
+    "indexeddb",
+    "content-visibility",
+    "typescript",
+    "vite",
+    "cloudflare-workers"
+  ],
+  "homepage": "https://jsonapi.mstool.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maksymskuibida/jsonapi-lens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/maksymskuibida/jsonapi-lens/issues"
+  },
+  "author": "Maksym Skuibida",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
@@ -12,6 +41,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "fixtures": "node scripts/gen-fixture.mjs",
+    "og": "scripts/render-og.sh",
     "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {

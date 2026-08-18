@@ -1,0 +1,158 @@
+# jsonapi-lens — full description
+
+> A single-page viewer for JSON:API documents. Paste a payload and every
+> relationship pointer becomes a link you can click. Runs entirely in the
+> browser: no account, no upload, no analytics.
+
+Home: https://jsonapi.mstool.dev
+Source: https://github.com/maksymskuibida/jsonapi-lens (MIT)
+Author: Maksym Skuibida
+Languages: English, German (Deutsch), Ukrainian (Українська)
+
+## The problem it solves
+
+JSON:API (https://jsonapi.org) documents are flat by design. A response looks
+like this:
+
+    {
+      "data": [{ "type": "articles", "id": "1a2f",
+                 "relationships": { "author": { "data": { "type": "people", "id": "9c" } } } }],
+      "included": [{ "type": "people", "id": "9c", "attributes": { "name": "…" } }]
+    }
+
+A relationship is a `{type, id}` pointer, and the resource it names sits
+somewhere in the sibling `included` array. Following one by hand means searching
+the whole payload for a UUID; following four in a row means doing that four
+times and losing your place.
+
+jsonapi-lens renders every resource from `data` and `included` onto a single
+page, each as a `<section>` with a stable DOM id derived from its type and id.
+Each pointer renders as a plain `<a href="#…">`. Clicking one lets the browser
+scroll and push a history entry, so Back, Forward, deep links, find-in-page and
+"copy link address" all work without a router.
+
+A pointer whose target is in neither `data` nor `included` is drawn as absent and
+labelled "not in document" — normally a missing `include` parameter in the
+request, or a server that dropped something.
+
+## What it does
+
+Reading
+- Every resource from `data` and `included`, deduped by identity and grouped by
+  type.
+- Per-type colour identity from a fixed ten-hue ring, so one type is the same
+  colour everywhere in a document.
+- Top-level `meta`, `links` and `jsonapi` members.
+- JSON:API error documents (`errors`), including `source.pointer`.
+- A summary of the document's shape: `data: null`, `data{1}`, or a count.
+
+Navigating
+- Every resolvable pointer is a real anchor with real browser history.
+- Reverse lookup: which resources point at the one you are looking at.
+- A jump-to-resource palette, keyboard shortcuts, and a type rail.
+- Filter to a single type, expand or collapse groups, copy any subtree as JSON.
+
+Keeping
+- The current document is stored in the browser's IndexedDB, so a reload
+  restores it and a deep link keeps working.
+- A local library of saved documents, renameable, entirely on the device.
+
+Sharing (opt-in)
+- A share link gzips the document, encrypts it in the browser with a key
+  generated locally, and uploads only the ciphertext.
+- The key lives in the link. The server stores an opaque blob, a byte count and
+  an expiry — no label, no type names, no filename.
+- Lifetimes: 15 minutes, 6 hours, 1 day, 1 week, 1 month, or no expiry. Expired
+  shares are deleted when requested and swept afterwards.
+
+Interface
+- Light, dark and automatic themes.
+- English, German and Ukrainian, negotiated from `?lang=`, then a stored choice,
+  then the browser's own languages.
+
+## Privacy model
+
+- Reading a document is entirely local: parsing, indexing and rendering happen
+  in the page, and the document never leaves the browser unless a share link is
+  created deliberately.
+- No cookies, no analytics, no third-party requests. Fonts are self-hosted.
+- The only server-side code in the project is the share endpoint, and it is
+  incapable of reading what it stores.
+- Provider information: https://jsonapi.mstool.dev/impressum
+- Privacy policy: https://jsonapi.mstool.dev/privacy
+
+## Measured limits
+
+Chrome 148, Apple Silicon, on a generated fixture of 25.7 MB / 56,821 resources
+across 7 types with roughly 207,000 relationship pointers:
+
+- Parse and index: 198–235 ms.
+- Build and insert the DOM: 1.19–1.62 s.
+- Paste to interactive: about 1.6 s.
+- 56,821 sections, 750,727 elements; 57–83 MB JS heap after render.
+- Jump to a resource 1.9 million pixels down: 147 ms.
+
+Off-screen resources use `content-visibility: auto`, which is what makes a DOM
+that large usable while keeping anchors, `:target` and find-in-page working. The
+binding constraint is DOM node count rather than payload bytes, so the practical
+ceiling is around 100,000 resources.
+
+## Paths
+
+- `/` — the paste view.
+- `/view` — the document view; relationship anchors are fragments on this path.
+  Renders a document from the visitor's own browser storage, so it has no content
+  for anyone else.
+- `/d/<id>:<secret>` — a share link, which loads and then becomes `/view`. The
+  decryption key is part of the URL; these should not be crawled, indexed or
+  quoted.
+- `/impressum` — provider information under § 5 DDG. Also `/imprint`, `/legal`.
+- `/privacy` — the privacy policy. Also `/datenschutz`.
+
+Add `?lang=en`, `?lang=de` or `?lang=uk` to any path to force a language.
+
+## Questions
+
+Does anything I paste leave my browser?
+No. Parsing, indexing and rendering all happen on the page, and the document is
+kept in the browser's IndexedDB. There is no upload step and no account. The one
+exception is opt-in: a share link is encrypted in the browser first, and the key
+travels in the link itself, so the server only ever stores ciphertext it cannot
+read.
+
+What is a JSON:API document?
+A response shaped by the JSON:API specification: a top-level `data` key holding
+resource objects, whose `relationships` are `{type, id}` pointers, and a sibling
+`included` array holding the resources those pointers name. Following one
+relationship by hand means searching the whole payload for a UUID.
+
+How do I follow a relationship?
+Click it. Every pointer that resolves is a real anchor to that resource on the
+same page, so Back and Forward, deep links, find-in-page and "copy link address"
+all behave the way they do everywhere else.
+
+What does "not in document" next to a pointer mean?
+The relationship names a resource that is in neither `data` nor `included`.
+Usually that is a missing `include` parameter in the request, or a server that
+dropped something — and telling that apart from a resource that is present is
+normally why you opened the payload.
+
+How large a document can it read?
+25.7 MB and 56,821 resources render in about 1.6 seconds in Chrome on Apple
+Silicon, and scroll smoothly afterwards. The binding constraint is DOM node
+count rather than payload size, so the practical ceiling is around 100,000
+resources.
+
+Is there an API, a server or a sign-up?
+None of the three. It is a static page — markup, one JavaScript bundle and
+self-hosted fonts — with no analytics, no cookies and no third-party requests.
+The only server-side code in the project stores encrypted share blobs it cannot
+decrypt.
+
+## How it is built
+
+Plain TypeScript, no framework: Vite for the bundle, a hand-written 40-line
+router for five paths, DOM built with a small `el()` helper rather than
+`innerHTML`. Hosted as static assets on Cloudflare Workers; the share endpoint
+uses D1 for the row and R2 for the ciphertext. Tests run in Vitest, and the
+browser behaviour above is verified by driving a real browser.
