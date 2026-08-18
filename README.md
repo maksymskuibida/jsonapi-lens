@@ -62,9 +62,11 @@ browser.
   read back from IndexedDB, so the browser's initial scroll-to-fragment hits nothing. The app
   rebuilds first, then resolves `location.hash` itself. (`:target` needs no help — it starts
   matching as soon as an element with that id exists.)
-- **Opening a row shifts everything below it**, which stales the scroll offsets the browser saved
-  for later history entries. Every hash navigation therefore re-scrolls to its target, so Back and
-  Forward land exactly where they should.
+- **Opening a row shifts everything below it**, which stales any scroll offset saved before that
+  growth. So the browser's own `scrollRestoration` is turned off and each entry's position is kept in
+  `history.state`, written synchronously on the way out — a capture-phase click on any in-page anchor,
+  plus `pagehide` — rather than only from a debounced scroll listener that may still be pending when
+  the navigation happens. On the way back the row is opened *first*, then the position is restored.
 - **Cloudflare's asset router percent-encodes the colon** in `/d/1:KEY`, 307-ing to `/d/1%3AKEY`, so
   the router decodes the pathname before matching.
 - **Duplicate identities.** A document that repeats `type:id` violates the spec, but rendering it
@@ -102,10 +104,15 @@ browser.
 **Keeping things**
 - **Saved documents** live in IndexedDB, with rename and delete. Nothing is uploaded.
 - The last document you opened is restored on reload; `/` offers a way back into it.
+- Back and Forward restore the exact scroll position of each history entry, not just the fragment —
+  including your position part-way down a long expanded resource.
 
-**Keyboard** — `?` lists them all. `g` jumps to a resource by type or id, `/` focuses the type
-filter, `s` saves, `r` raw, `e` exports, `l` opens saved documents, `Shift+Esc` leaves the document,
-`Esc` closes a dialog.
+**Keyboard** — `?` lists them all. `/` or `g` finds a resource by type or id, `s` saves, `r` raw,
+`e` exports, `l` opens saved documents, `Shift+Esc` leaves the document, `Esc` closes a dialog.
+
+The list only contains bindings this app actually implements. Tab order, Enter/Space on a focused
+row and the browser's own find all work, but they work because the markup is ordinary HTML — listing
+them made the app look like it had done something and buried the real bindings.
 
 ## Share links
 
@@ -252,6 +259,8 @@ Driven in a real browser, not asserted:
   selects it and scrolls to it.
 - Ids containing `/`, a space, `#`, `%`, `ü`, `í` and an emoji all resolve, match `:target`, and
   round-trip through `location.hash` unchanged.
+- Back three times through a four-deep chain returns to each entry's exact scroll position (200,
+  2137, 3351 px), and Forward does the same.
 - A share link created in one browser state, then opened with IndexedDB wiped, decrypts and renders;
   the secret is stripped from the URL; a single altered character in the key is rejected with a
   specific message.
@@ -293,7 +302,7 @@ src/
   render-document.ts  jump rail, overview, errors, type groups
   main.ts             boot, routing, hash resolution, lazy bodies, shortcuts
   styles.css          design tokens and all styling
-  samples/            the four documents behind the "Or try" buttons
+  samples/            the five documents behind the "Or try" buttons
   worker.ts           the share API (the only server-side code)
 migrations/           D1 schema
 scripts/gen-fixture.mjs

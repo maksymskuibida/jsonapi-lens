@@ -60,7 +60,10 @@ function relativeTime(epochMs: number): string {
   return new Date(epochMs).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
-export async function openLibraryModal(onOpen: (entry: LibraryEntry) => void): Promise<void> {
+export async function openLibraryModal(
+  onOpen: (entry: LibraryEntry) => void,
+  onChange: () => void = () => {},
+): Promise<void> {
   const entries = await listLibrary();
 
   const body = el("div", { class: "library" });
@@ -118,6 +121,7 @@ export async function openLibraryModal(onOpen: (entry: LibraryEntry) => void): P
         if (entry.id !== undefined && (await renameInLibrary(entry.id, trimmed))) {
           entry.label = trimmed;
           render(list);
+          onChange();
           toast(`Renamed to ${trimmed}`);
         } else {
           toast("Could not rename that document.", "error");
@@ -136,6 +140,7 @@ export async function openLibraryModal(onOpen: (entry: LibraryEntry) => void): P
         if (entry.id !== undefined && (await deleteFromLibrary(entry.id))) {
           const remaining = list.filter((e) => e.id !== entry.id);
           render(remaining);
+          onChange();
           toast(`Deleted ${entry.label}`);
         } else {
           toast("Could not delete that document.", "error");
@@ -211,35 +216,38 @@ export function openSaveModal(defaultLabel: string, onSave: (label: string) => v
 
 /* ------------------------------------------------------------ shortcuts --- */
 
-const SHORTCUTS: [string, string][] = [
-  ["?", "Show this list"],
-  ["Shift + Esc", "Leave the document and go back to the paste view"],
-  ["Esc", "Close a dialog"],
-  ["⌘/Ctrl + Enter", "Read the pasted document"],
-  ["/", "Focus the type filter"],
-  ["g", "Go to a resource by type and id"],
-  ["s", "Save the document to this browser"],
-  ["r", "Show the whole document as raw JSON"],
-  ["e", "Export the document to a file"],
-  ["Tab / Shift + Tab", "Move between rows and links"],
-  ["Enter / Space", "Expand or collapse the focused row"],
-  ["⌘/Ctrl + F", "Find in page — reaches every summary row"],
+/**
+ * Only what this app actually binds.
+ *
+ * Tab, Enter/Space on a focused row and the browser's own find were listed here
+ * once. They all work, but they work because the markup is ordinary HTML — not
+ * because anything here implements them. Listing them made the app look like it
+ * had done something, and made the real bindings harder to find.
+ */
+const SHORTCUTS: [string[], string][] = [
+  [["?"], "Show this list"],
+  [["/", "g"], "Find a resource by type or id"],
+  [["s"], "Save the document to this browser"],
+  [["r"], "Show the whole document as raw JSON"],
+  [["e"], "Export the document to a file"],
+  [["l"], "Open saved documents"],
+  [["Shift + Esc"], "Leave the document and go back to the paste view"],
+  [["Esc"], "Close a dialog"],
+  [["⌘/Ctrl + Enter"], "Read the pasted document"],
 ];
 
 export function openShortcutsModal(): void {
   const list = el("dl", { class: "keys" });
-  for (const [keys, description] of SHORTCUTS) {
-    list.append(
-      el(
-        "dt",
-        { class: "keys__key" },
-        ...keys.split(" + ").flatMap((part, index) => [
-          index > 0 ? el("span", { class: "keys__plus", text: "+" }) : null,
-          el("kbd", { text: part }),
-        ]),
-      ),
-      el("dd", { class: "keys__desc", text: description }),
-    );
+  for (const [combos, description] of SHORTCUTS) {
+    const dt = el("dt", { class: "keys__key" });
+    combos.forEach((combo, comboIndex) => {
+      if (comboIndex > 0) dt.append(el("span", { class: "keys__or", text: "or" }));
+      combo.split(" + ").forEach((part, index) => {
+        if (index > 0) dt.append(el("span", { class: "keys__plus", text: "+" }));
+        dt.append(el("kbd", { text: part }));
+      });
+    });
+    list.append(dt, el("dd", { class: "keys__desc", text: description }));
   }
 
   openModal({

@@ -139,6 +139,15 @@ export async function listLibrary(): Promise<LibraryEntry[]> {
   }
 }
 
+/** How many saved documents there are, without reading their contents. */
+export async function countLibrary(): Promise<number> {
+  try {
+    return await tx<number>(LIBRARY_STORE, "readonly", (store) => store.count());
+  } catch {
+    return 0;
+  }
+}
+
 export async function getFromLibrary(id: number): Promise<LibraryEntry | null> {
   try {
     const entry = await tx<LibraryEntry | undefined>(LIBRARY_STORE, "readonly", (store) =>

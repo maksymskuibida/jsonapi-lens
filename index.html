@@ -30,7 +30,7 @@
 
         <div class="topbar__actions">
           <button class="btn btn--ghost" type="button" id="open-library" title="Saved documents">
-            Saved
+            Saved<span class="btn__badge" id="library-count" hidden></span>
           </button>
           <button
             class="btn btn--ghost btn--icon"
@@ -116,6 +116,7 @@
               <span class="samples__label">Or try</span>
               <div class="samples__list">
                 <button class="btn" type="button" data-sample="articles">Article feed</button>
+                <button class="btn" type="button" data-sample="single">Single resource</button>
                 <button class="btn" type="button" data-sample="dangling">Missing include</button>
                 <button class="btn" type="button" data-sample="errors">Error response</button>
                 <button class="btn" type="button" data-sample="edge">Awkward ids</button>

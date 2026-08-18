@@ -81,6 +81,16 @@ describe("buildIndex — document shapes", () => {
     expect(index.counts.total).toBe(1);
     expect(index.primary).toEqual([{ type: "articles", id: "1" }]);
     expect(index.primaryIsNull).toBe(false);
+    // A single resource is an object, so its pointer has no array index.
+    expect(index.byKey.get("articles:1")?.pointer).toBe("/data");
+  });
+
+  it("keeps a single resource distinct from a one-element array", () => {
+    const single = buildIndex(doc({ data: { type: "articles", id: "1" } }));
+    const array = buildIndex(doc({ data: [{ type: "articles", id: "1" }] }));
+    expect(single.counts.total).toBe(array.counts.total);
+    expect(single.byKey.get("articles:1")?.pointer).toBe("/data");
+    expect(array.byKey.get("articles:1")?.pointer).toBe("/data/0");
   });
 
   it("handles data as an array", () => {

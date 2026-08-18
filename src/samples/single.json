@@ -1,0 +1,102 @@
+{
+  "jsonapi": { "version": "1.1" },
+  "links": {
+    "self": "https://api.example.com/v2/articles/art-8f21ab?include=author.employer,comments"
+  },
+  "meta": {
+    "note": "Fetching one resource by id gives a single object at `data`, not an array. A to-one relationship that relates to nothing is `data: null`, which is also not an array — and not an error.",
+    "request_id": "5c1d9f02-77a4-4a51-bd6e-9f3b0a2e6f18"
+  },
+  "data": {
+    "type": "articles",
+    "id": "art-8f21ab",
+    "attributes": {
+      "title": "Following a pointer through a flat document",
+      "slug": "following-a-pointer",
+      "published_at": "2026-09-14T07:34:00+02:00",
+      "reading_minutes": 12,
+      "published": true,
+      "word_count": 2480,
+      "retracted_reason": null,
+      "keywords": ["json-api", "tooling", "graphs"],
+      "metrics": { "views": 18420, "shares": 96, "average_scroll_depth": 0.78 }
+    },
+    "relationships": {
+      "author": { "data": { "type": "people", "id": "per-ada" } },
+      "comments": {
+        "data": [
+          { "type": "comments", "id": "cmt-01" },
+          { "type": "comments", "id": "cmt-02" }
+        ]
+      },
+      "retraction": { "data": null },
+      "revisions": {
+        "links": { "related": "https://api.example.com/v2/articles/art-8f21ab/revisions" }
+      }
+    },
+    "links": { "self": "https://api.example.com/v2/articles/art-8f21ab" }
+  },
+  "included": [
+    {
+      "type": "people",
+      "id": "per-ada",
+      "attributes": {
+        "name": "Ada Lovelace",
+        "handle": "ada",
+        "email": "ada@example.com",
+        "joined": "2024-01-15",
+        "verified": true
+      },
+      "relationships": {
+        "employer": { "data": { "type": "organizations", "id": "org-acme" } }
+      }
+    },
+    {
+      "type": "organizations",
+      "id": "org-acme",
+      "attributes": {
+        "name": "Acme Research",
+        "short_name": "Acme",
+        "founded": "1994-01-01",
+        "employee_count": 412
+      },
+      "relationships": {
+        "country": { "data": { "type": "countries", "id": "GB" } }
+      }
+    },
+    {
+      "type": "countries",
+      "id": "GB",
+      "attributes": { "name": "United Kingdom", "iso_alpha2": "GB", "currency": "GBP" },
+      "relationships": {}
+    },
+    {
+      "type": "comments",
+      "id": "cmt-01",
+      "attributes": {
+        "body": "The part about anchors doing the routing for free is the bit I keep coming back to.",
+        "created_at": "2026-09-14T09:12:00+02:00",
+        "score": 14
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "per-ada" } },
+        "article": { "data": { "type": "articles", "id": "art-8f21ab" } },
+        "in_reply_to": { "data": null }
+      }
+    },
+    {
+      "type": "comments",
+      "id": "cmt-02",
+      "attributes": {
+        "body": "Worth noting that content-visibility does not help if you remove the nodes.",
+        "created_at": "2026-09-14T09:44:00+02:00",
+        "score": 8
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "per-ada" } },
+        "article": { "data": { "type": "articles", "id": "art-8f21ab" } },
+        "in_reply_to": { "data": { "type": "comments", "id": "cmt-01" } }
+      }
+    }
+  ]
+}

@@ -28,6 +28,7 @@ import { fetchShare, openShareModal } from "./share.js";
 import { ShareError } from "./crypto.js";
 import {
   clearDocument,
+  countLibrary,
   loadDocument,
   saveDocument,
   saveToLibrary,
@@ -37,12 +38,14 @@ import { closeModal, modalIsOpen, toast } from "./ui.js";
 import type { DocumentIndex, JsonValue, Resource } from "./types.js";
 
 import sampleArticles from "./samples/articles.json?raw";
+import sampleSingle from "./samples/single.json?raw";
 import sampleDangling from "./samples/dangling.json?raw";
 import sampleErrors from "./samples/errors.json?raw";
 import sampleEdge from "./samples/edge.json?raw";
 
 const SAMPLES: Record<string, { text: string; label: string }> = {
   articles: { text: sampleArticles, label: "articles.json" },
+  single: { text: sampleSingle, label: "single-resource.json" },
   dangling: { text: sampleDangling, label: "missing-include.json" },
   errors: { text: sampleErrors, label: "error-response.json" },
   edge: { text: sampleEdge, label: "awkward-ids.json" },
@@ -74,6 +77,8 @@ const topbarDocEl = need("topbar-doc");
 const topbarLabelEl = need("topbar-label");
 const topbarStatsEl = need("topbar-stats");
 const themeEl = need<HTMLButtonElement>("theme-toggle");
+const libraryEl = need<HTMLButtonElement>("open-library");
+const libraryCountEl = need("library-count");
 
 /* ---------------------------------------------------------------- state --- */
 
@@ -126,6 +131,19 @@ themeEl.addEventListener("click", () => {
     /* ignore */
   }
 });
+
+/* -------------------------------------------------------- library badge --- */
+
+/**
+ * Show how many documents are saved, and nothing when there are none — a "0"
+ * badge is just noise on a button that already says what it does.
+ */
+async function refreshLibraryCount(): Promise<void> {
+  const count = await countLibrary();
+  libraryCountEl.textContent = count > 0 ? String(count) : "";
+  libraryCountEl.hidden = count === 0;
+  libraryEl.title = count > 0 ? `Saved documents (${count})` : "Saved documents";
+}
 
 /* ----------------------------------------------------------- view state --- */
 
@@ -202,18 +220,26 @@ function openSection(section: Element): void {
  * because the DOM did not exist yet) and on `hashchange` (where the browser has
  * scrolled, but the target may be collapsed or filtered out).
  *
- * The target is always scrolled into position here, even when the browser has
- * just done it. Opening a row grows the page below it, which stales the scroll
- * offsets the browser saved for later history entries — so a Back or Forward
- * into one of those would land a row or two off. Re-scrolling to the fragment
- * makes every landing deterministic.
+ * `restoreY` is the scroll position saved for the history entry being returned
+ * to. When it is present — Back or Forward — it wins, so you land exactly where
+ * you were rather than at the top of whatever the fragment names. When it is
+ * absent — following a link for the first time — the fragment is scrolled to.
+ *
+ * Either way the target's row is opened *first*, so the scroll happens against
+ * final layout. Opening a row grows the page below it, and restoring a position
+ * before that growth would land short.
  *
  * The highlight needs no help from here: `:target` starts matching as soon as an
  * element with that id exists, including one rendered long after the navigation.
  */
-function resolveHash(): void {
+function resolveHash(restoreY: number | null = null): void {
   const raw = location.hash;
-  if (!raw || raw === "#") return;
+
+  if (!raw || raw === "#") {
+    // No fragment, but there may still be a position to return to.
+    if (restoreY !== null) window.scrollTo(0, restoreY);
+    return;
+  }
 
   let fragment = raw.slice(1);
   try {
@@ -226,6 +252,7 @@ function resolveHash(): void {
   if (!target) {
     const identity = parseDomId(fragment);
     if (identity) toast(`No ${identity.type} with id ${identity.id} in this document.`);
+    if (restoreY !== null) window.scrollTo(0, restoreY);
     return;
   }
 
@@ -239,10 +266,97 @@ function resolveHash(): void {
 
   // Open before scrolling, so the scroll lands against final layout.
   if (target.classList.contains("res")) openSection(target);
-  target.scrollIntoView({ block: "start" });
+
+  if (restoreY !== null) window.scrollTo(0, restoreY);
+  else target.scrollIntoView({ block: "start" });
 }
 
-window.addEventListener("hashchange", resolveHash);
+/* --------------------------------------------------- scroll restoration --- */
+
+/**
+ * Where you were, per history entry.
+ *
+ * The browser's own restoration is turned off, because it fights the fragment
+ * scrolling above and it cannot know that expanding a row changed the layout.
+ * Instead the current position is written into `history.state` as you scroll,
+ * so Back and Forward can put you back exactly where you left — including the
+ * position inside a long resource, not just the top of its row.
+ *
+ * It survives a reload too: `history.state` persists, so returning to `/view`
+ * lands where you were rather than at the top.
+ */
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
+let saveScrollTimer: number | undefined;
+
+function rememberScroll(): void {
+  try {
+    const state = (history.state ?? {}) as Record<string, unknown>;
+    history.replaceState({ ...state, y: Math.round(window.scrollY) }, "");
+  } catch {
+    /* replaceState can throw if called too often; losing one sample is fine */
+  }
+}
+
+window.addEventListener(
+  "scroll",
+  () => {
+    window.clearTimeout(saveScrollTimer);
+    saveScrollTimer = window.setTimeout(rememberScroll, 120);
+  },
+  { passive: true },
+);
+
+/*
+ * The debounced listener above keeps the entry roughly current, but the moment
+ * that actually matters is the instant before the page navigates away — and a
+ * debounce can easily still be pending then. So the position is also captured
+ * synchronously on the way out:
+ *
+ *  - a capture-phase click on any in-page anchor, which runs before the browser
+ *    performs the fragment navigation and pushes the new entry;
+ *  - `pagehide`, which covers reloads and closing the tab.
+ *
+ * This is what makes Back land where you were rather than where the last
+ * debounce happened to fire.
+ */
+document.addEventListener(
+  "click",
+  (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const anchor = target.closest<HTMLAnchorElement>('a[href^="#"]');
+    if (anchor) rememberScroll();
+  },
+  true,
+);
+
+window.addEventListener("pagehide", rememberScroll);
+
+function savedScrollY(): number | null {
+  const y = (history.state as { y?: unknown } | null)?.y;
+  return typeof y === "number" ? y : null;
+}
+
+/**
+ * A history traversal fires `popstate` and, if the fragment changed,
+ * `hashchange` as well. Both funnel here, and the shared timer means the work
+ * runs once after whichever arrives last — so the two cannot fight over the
+ * scroll position, whatever order the browser delivers them in.
+ */
+let pendingRestoreY: number | null = null;
+let settleTimer: number | undefined;
+
+function scheduleSettle(): void {
+  window.clearTimeout(settleTimer);
+  settleTimer = window.setTimeout(() => {
+    const y = pendingRestoreY;
+    pendingRestoreY = null;
+    resolveHash(y);
+  }, 0);
+}
+
+window.addEventListener("hashchange", scheduleSettle);
 
 /* --------------------------------------------------------------- render --- */
 
@@ -547,15 +661,21 @@ function saveCurrent(): void {
     loaded.label = label;
     topbarLabelEl.textContent = label;
     document.title = `${label} — jsonapi-lens`;
+    void refreshLibraryCount();
     toast(`Saved "${label}" to this browser`);
   });
 }
 
 function openLibrary(): void {
-  void openLibraryModal((entry) => {
-    closeModal();
-    void load(entry.text, entry.label, { persist: true, push: true });
-  });
+  void openLibraryModal(
+    (entry) => {
+      closeModal();
+      void load(entry.text, entry.label, { persist: true, push: true });
+    },
+    // Renames and deletes happen inside the modal, so the badge is refreshed
+    // from there rather than guessed at here.
+    () => void refreshLibraryCount(),
+  );
 }
 
 /* ------------------------------------------------------------- loading --- */
@@ -778,15 +898,10 @@ document.addEventListener("keydown", (event) => {
   if (isTyping(event.target)) return;
 
   switch (event.key) {
-    case "/": {
-      const search = docEl.querySelector<HTMLInputElement>("#rail-search");
-      if (search) {
-        event.preventDefault();
-        search.focus();
-        search.select();
-      }
-      break;
-    }
+    // `/` used to focus the rail's type filter, which only renders above eight
+    // types — so on most documents it silently did nothing. It now opens the
+    // resource finder, which always exists and is the search you actually want.
+    case "/":
     case "g":
       if (current) {
         event.preventDefault();
@@ -867,7 +982,7 @@ async function applyRoute(): Promise<void> {
       const ok = await load(stored.text, stored.label ?? "stored document", { persist: false });
       // The browser tried to scroll to the fragment before any of this existed,
       // so that attempt hit nothing. Now the sections are in the DOM.
-      if (ok) resolveHash();
+      if (ok) resolveHash(savedScrollY());
       else navigate(PASTE_PATH, { replace: true });
       return;
     }
@@ -881,7 +996,11 @@ async function applyRoute(): Promise<void> {
   offerResume();
 }
 
-window.addEventListener("popstate", () => void applyRoute());
+window.addEventListener("popstate", (event) => {
+  const y = (event.state as { y?: unknown } | null)?.y;
+  pendingRestoreY = typeof y === "number" ? y : null;
+  void applyRoute().then(scheduleSettle);
+});
 
 /* ------------------------------------------------------------------ boot -- */
 
@@ -928,4 +1047,5 @@ async function boot(): Promise<void> {
   }
 }
 
+void refreshLibraryCount();
 void boot();

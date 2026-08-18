@@ -2932,3 +2932,25 @@ body.has-modal {
     max-width: var(--measure);
   }
 }
+
+.keys__or {
+  margin-inline: var(--sp-2);
+  font-size: var(--fs-3xs);
+  color: var(--text-3);
+}
+
+/* Count of saved documents. Absent rather than "0" when there are none. */
+.btn__badge {
+  margin-left: 0.35em;
+  padding: 0 0.3em;
+  min-width: 1.15em;
+  display: inline-block;
+  text-align: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: var(--fs-3xs);
+  font-weight: 600;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
