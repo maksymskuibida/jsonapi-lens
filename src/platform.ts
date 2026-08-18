@@ -41,38 +41,34 @@ export interface KeyHint {
   description: string;
 }
 
+/** Which browser navigation key a row describes, so a catalogue can name it. */
+export type BrowserNavKey = "back" | "forward" | "newTab";
+
 /**
  * The browser's history keys, per platform.
  *
  * Deliberately short. Back and Forward are the whole point; opening a
  * relationship in a new tab is here because every pointer in this app is an
  * ordinary link, so it is the one other thing worth knowing.
+ *
+ * Only the *spelling* lives here — ⌘, Alt and the arrows are symbols, not
+ * words, and they are the same in every language. The descriptions come from
+ * the message catalogue, keyed by `id`, so this module has no copy to
+ * translate.
  */
-export function browserNavKeys(apple: boolean = IS_APPLE): KeyHint[] {
+export function browserNavKeys(
+  apple: boolean = IS_APPLE,
+): { id: BrowserNavKey; combos: string[] }[] {
   if (apple) {
     return [
-      { combos: ["⌘ + [", "⌘ + ←"], description: "Back — to the resource you came from" },
-      { combos: ["⌘ + ]", "⌘ + →"], description: "Forward — back down the chain you retraced" },
-      { combos: ["⌘ + click"], description: "Open a relationship in a new tab" },
+      { id: "back", combos: ["⌘ + [", "⌘ + ←"] },
+      { id: "forward", combos: ["⌘ + ]", "⌘ + →"] },
+      { id: "newTab", combos: ["⌘ + click"] },
     ];
   }
   return [
-    { combos: ["Alt + ←"], description: "Back — to the resource you came from" },
-    { combos: ["Alt + →"], description: "Forward — back down the chain you retraced" },
-    { combos: ["Ctrl + click"], description: "Open a relationship in a new tab" },
+    { id: "back", combos: ["Alt + ←"] },
+    { id: "forward", combos: ["Alt + →"] },
+    { id: "newTab", combos: ["Ctrl + click"] },
   ];
-}
-
-/** How the *other* platform spells them, so the list still helps on a loaner. */
-export function otherPlatformNote(apple: boolean = IS_APPLE): string {
-  return apple
-    ? "On Windows and Linux the same two are Alt + ← and Alt + →."
-    : "On a Mac the same two are ⌘ + [ and ⌘ + ] (or ⌘ + ← and ⌘ + →).";
-}
-
-/** Pointing-device equivalents, which are often the easier sell. */
-export function pointerNavNote(apple: boolean = IS_APPLE): string {
-  return apple
-    ? "A two-finger swipe left or right on the trackpad does the same thing, as do your mouse's side buttons."
-    : "Your mouse's side buttons do the same thing, as does swiping left or right on a trackpad.";
 }

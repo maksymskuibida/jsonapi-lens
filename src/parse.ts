@@ -1,5 +1,6 @@
 import { domId, resourceKey, typeHue, typeSigil } from "./ident.js";
 import { join as pointerJoin } from "./pointer.js";
+import { t } from "./i18n/index.js";
 import type {
   DocumentIndex,
   JsonApiError,
@@ -56,7 +57,7 @@ function lineFromSyntaxError(message: string, source: string): number | undefine
 export function parseJson(text: string): JsonValue {
   const trimmed = text.trim();
   if (!trimmed) {
-    throw new DocumentError("Nothing to parse.", "Paste a JSON:API document into the box above.");
+    throw new DocumentError(t().parseErrors.empty.headline, t().parseErrors.empty.hint);
   }
 
   try {
@@ -67,21 +68,21 @@ export function parseJson(text: string): JsonValue {
 
     if (/^'/.test(trimmed) || /'\s*:\s*/.test(trimmed.slice(0, 400))) {
       throw new DocumentError(
-        "That looks like a Python dict, not JSON.",
-        "Single-quoted keys and `None`/`True` are not valid JSON. Re-dump it with `json.dumps(...)`.",
+        t().parseErrors.pythonDict.headline,
+        t().parseErrors.pythonDict.hint,
         line,
       );
     }
     if (/^\s*[A-Za-z]{3,}\s/.test(trimmed) && !trimmed.startsWith("{") && !trimmed.startsWith("[")) {
       throw new DocumentError(
-        "That does not start like JSON.",
-        "A JSON:API document starts with `{`. If you copied a log line, trim the prefix before the first `{`.",
+        t().parseErrors.notJsonStart.headline,
+        t().parseErrors.notJsonStart.hint,
         line,
       );
     }
     throw new DocumentError(
-      "That is not valid JSON.",
-      `The parser stopped here: ${message.replace(/^JSON\.parse:\s*/, "")}`,
+      t().parseErrors.invalidJson.headline,
+      t().parseErrors.invalidJson.hint(message.replace(/^JSON\.parse:\s*/, "")),
       line,
     );
   }
@@ -97,20 +98,20 @@ export function parseJson(text: string): JsonValue {
 export function assertJsonApi(value: JsonValue): JsonObject {
   if (Array.isArray(value)) {
     throw new DocumentError(
-      "This is a bare JSON array, not a JSON:API document.",
-      "A JSON:API document is an object with a top-level `data` key. Wrap the array: `{ \"data\": [...] }`.",
+      t().parseErrors.bareArray.headline,
+      t().parseErrors.bareArray.hint,
     );
   }
   if (typeof value === "string") {
     throw new DocumentError(
-      "This is a JSON string containing JSON.",
-      "The payload has been encoded twice. Unwrap the outer string, then paste the inner document.",
+      t().parseErrors.doubleEncoded.headline,
+      t().parseErrors.doubleEncoded.hint,
     );
   }
   if (!isPlainObject(value)) {
     throw new DocumentError(
-      `This is a JSON ${value === null ? "null" : typeof value}, not a JSON:API document.`,
-      "Paste the whole response body — an object with a top-level `data`, `errors` or `meta` key.",
+      t().parseErrors.wrongType.headline(value === null ? "null" : typeof value),
+      t().parseErrors.wrongType.hint,
     );
   }
 
@@ -122,17 +123,17 @@ export function assertJsonApi(value: JsonValue): JsonObject {
     const keys = Object.keys(value);
     const preview = keys.slice(0, 6).map((k) => `\`${k}\``).join(", ");
     throw new DocumentError(
-      "This is valid JSON, but not a JSON:API document.",
+      t().parseErrors.notJsonApi.headline,
       keys.length
-        ? `It has no \`data\`, \`errors\` or \`meta\` at the top level — only ${preview}${keys.length > 6 ? ", …" : ""}. If the document is nested inside one of those, paste that part.`
-        : "The object is empty. A JSON:API document needs at least one of `data`, `errors` or `meta`.",
+        ? t().parseErrors.notJsonApi.hintKeys(preview, keys.length > 6)
+        : t().parseErrors.notJsonApi.hintEmpty,
     );
   }
 
   if (hasData && hasErrors) {
     throw new DocumentError(
-      "This document has both `data` and `errors`.",
-      "The spec forbids that combination. Showing it anyway would misrepresent the response — check which one the server actually meant to send.",
+      t().parseErrors.dataAndErrors.headline,
+      t().parseErrors.dataAndErrors.hint,
     );
   }
 

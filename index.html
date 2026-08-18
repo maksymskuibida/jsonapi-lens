@@ -30,7 +30,8 @@
 
         <div class="topbar__actions">
           <button class="btn btn--ghost" type="button" id="open-library" title="Saved documents">
-            Saved<span class="btn__badge" id="library-count" hidden></span>
+            <span id="library-label">Saved</span
+            ><span class="btn__badge" id="library-count" hidden></span>
           </button>
           <button
             class="btn btn--ghost btn--icon"
@@ -41,11 +42,16 @@
           >
             ?
           </button>
+          <label class="lang">
+            <span class="visually-hidden" id="language-label">Language</span>
+            <select class="lang__select" id="language" aria-labelledby="language-label"></select>
+          </label>
           <button class="btn btn--ghost" type="button" id="theme-toggle" aria-live="polite">
             <span class="btn__wide">Theme:</span><span>auto</span>
           </button>
           <button class="btn" type="button" id="new-doc" hidden title="Start a new document">
-            New<span class="btn__wide">&nbsp;document</span>
+            <span id="new-doc-label">New</span
+            ><span class="btn__wide" id="new-doc-rest">&nbsp;document</span>
           </button>
         </div>
       </header>
@@ -60,11 +66,11 @@
 
         <div class="paste" id="paste" hidden>
           <div class="paste__inner">
-            <p class="paste__eyebrow">JSON:API document viewer</p>
+            <p class="paste__eyebrow" id="paste-eyebrow">JSON:API document viewer</p>
 
-            <h1 class="paste__title">Follow the <em>pointer</em>.</h1>
+            <h1 class="paste__title" id="paste-title">Follow the <em>pointer</em>.</h1>
 
-            <p class="paste__lede">
+            <p class="paste__lede" id="paste-lede">
               JSON:API keeps related resources in a sibling <code>included</code> array, so
               following a relationship means hunting a UUID through the whole payload. Paste a
               document and every pointer becomes a link you can click — with real browser
@@ -75,7 +81,7 @@
 
             <div class="drop" id="drop">
               <div class="drop__head">
-                <span class="drop__label">Paste a document, or drop a <code>.json</code> file</span>
+                <span class="drop__label" id="drop-label">Paste a document, or drop a <code>.json</code> file</span>
                 <span class="drop__meta" id="drop-meta"></span>
               </div>
 
@@ -88,7 +94,7 @@
                 placeholder='{ "data": { "type": "trips", "id": "…", "relationships": { … } }, "included": [ … ] }'
               ></textarea>
 
-              <div class="drop__overlay">Drop to read</div>
+              <div class="drop__overlay" id="drop-overlay">Drop to read</div>
 
               <div class="drop__foot">
                 <button class="btn btn--primary btn--lg" type="button" id="parse">
@@ -101,7 +107,7 @@
                   accept="application/json,.json,.txt"
                   class="visually-hidden"
                 />
-                <span class="drop__hint"><kbd id="hint-mod">⌘</kbd> <kbd>↵</kbd> to read</span>
+                <span class="drop__hint" id="drop-hint"><kbd>⌘</kbd> <kbd>↵</kbd> to read</span>
               </div>
             </div>
 
@@ -113,7 +119,7 @@
             </div>
 
             <div class="samples">
-              <span class="samples__label">Or try</span>
+              <span class="samples__label" id="samples-label">Or try</span>
               <div class="samples__list">
                 <button class="btn" type="button" data-sample="articles">Article feed</button>
                 <button class="btn" type="button" data-sample="single">Single resource</button>
@@ -132,7 +138,7 @@
                     <span class="chip__id">8ff1c2be</span>
                   </a>
                 </div>
-                <p class="legend__text">
+                <p class="legend__text" id="legend-resolves">
                   <b>A pointer that resolves</b> is a link. Clicking it scrolls to that resource
                   and adds a history entry, so Back returns you to where you were.
                 </p>
@@ -144,10 +150,10 @@
                     <b class="chip__sigil">ST</b>
                     <span class="chip__type">stations</span>
                     <span class="chip__id">2a9d40f7</span>
-                    <span class="chip__absent">not in document</span>
+                    <span class="chip__absent" id="legend-chip-absent">not in document</span>
                   </span>
                 </div>
-                <p class="legend__text">
+                <p class="legend__text" id="legend-absent">
                   <b>A pointer that resolves to nothing</b> says so. That distinction is usually
                   the thing you are looking for — a missing <code>include</code> parameter, or a
                   server that dropped something.
@@ -158,11 +164,11 @@
                 <div class="legend__demo">
                   <span class="chip" data-hue="5">
                     <b class="chip__sigil">LO</b>
-                    <span class="chip__type">local</span>
-                    <span class="chip__id">only</span>
+                    <span class="chip__type" id="legend-chip-type">local</span>
+                    <span class="chip__id" id="legend-chip-id">only</span>
                   </span>
                 </div>
-                <p class="legend__text">
+                <p class="legend__text" id="legend-local">
                   <b>Nothing leaves your browser.</b> Parsing, indexing and rendering all happen
                   on this page, and the document is stored in local IndexedDB so a reload keeps
                   your deep links working. There is no server to send it to.
@@ -173,14 +179,29 @@
         </div>
 
         <div class="doc" id="doc" hidden></div>
+
+        <div class="legal-view" id="legal" hidden></div>
       </main>
+
+      <!-- Part of the shell rather than any one view, so the Impressum stays
+           reachable from every path — which is what § 5 DDG's "ständig
+           verfügbar" asks for. -->
+      <footer class="footer">
+        <p class="footer__tagline" id="footer-tagline">
+          A JSON:API document viewer. Runs in your browser.
+        </p>
+        <nav class="footer__links" aria-label="Legal">
+          <a class="footer__link" href="/impressum" id="footer-impressum">Impressum</a>
+          <a class="footer__link" href="/privacy" id="footer-privacy">Privacy</a>
+        </nav>
+      </footer>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <div id="modal-root"></div>
 
     <noscript>
-      <p style="padding: 2rem; font-family: system-ui">
+      <p id="noscript-message" style="padding: 2rem; font-family: system-ui">
         jsonapi-lens parses and renders documents in the browser, so it needs JavaScript enabled.
       </p>
     </noscript>

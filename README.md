@@ -40,16 +40,24 @@ over `data` + `included`, so following a pointer is a map hit, never a scan.
 
 ### Paths
 
-Three, parsed by hand in [`src/router.ts`](src/router.ts) — no router library:
+Five, parsed by hand in [`src/router.ts`](src/router.ts) — no router library:
 
 | Path | |
 |---|---|
 | `/` | the paste view |
 | `/view` | the document view; relationship anchors are fragments on this path |
 | `/d/<id>:<secret>` | a share link, which loads and then replaces itself with `/view` |
+| `/impressum` | provider information under § 5 DDG |
+| `/privacy` | the privacy policy |
 
 The server returns `index.html` for every path except `/api/*`, so all of this is resolved in the
 browser.
+
+`/impressum` keeps the German word in every language: § 5 DDG requires the provider information to
+be *leicht erkennbar*, and the case law is built around that term, so it is what a German visitor
+scans a footer for. `/privacy` has no such constraint — no law says what a privacy policy link is
+called — so it matches the rest of the UI. `/imprint`, `/legal`, `/datenschutz` and
+`/datenschutzerklaerung` all resolve to the right one, because these are paths people type by hand.
 
 ### Things that are easy to get wrong
 
@@ -87,6 +95,39 @@ browser.
   cover the heading you just jumped to.
 - **Author `display` beats the UA `[hidden]` rule**, so `[hidden]` is enforced once in the reset.
   Without it the view-switching mechanism leaks every view at once.
+
+## Languages
+
+English, German and Ukrainian, negotiated from `?lang=` → `localStorage` → `navigator.languages` →
+English, and switchable from the topbar.
+
+[`src/i18n/en.ts`](src/i18n/en.ts) is the source of truth: `Messages` is derived from it with
+`typeof`, and `de` and `uk` are typed as `Messages`. A key that one catalogue has and another does
+not, or a message whose arguments have drifted, does not compile — so a translation cannot silently
+fall behind the app.
+
+Two conventions do most of the work:
+
+- **Messages that take values are functions**, not templates with `{holes}`. There is no
+  interpolation engine, the compiler checks every call site, and a language that wants the number
+  somewhere else can put it there. Counts go through `Intl.PluralRules`, because Ukrainian needs
+  four forms and `n === 1` gets 2 ресурси wrong.
+- **Messages with emphasis inside them return DOM**, not HTML strings. German and Ukrainian move the
+  stressed word, so `<em>` cannot live in the markup around a message — and building nodes keeps the
+  catalogues out of `innerHTML`.
+
+Numbers and dates are formatted in the chosen language rather than the browser's, which is what
+`toLocaleString()` with no argument had been doing.
+
+The copy in `index.html` — the shell and the paste view, which paint before the module graph loads —
+is bound to the catalogue by a typed table in [`src/i18n/static-dom.ts`](src/i18n/static-dom.ts).
+The English text left in the markup is a genuine pre-JavaScript fallback rather than a second source
+of truth: a test asserts that localising the shipped markup into English is a no-op.
+
+Switching language reloads the page. The document is in IndexedDB, the scroll position is in
+`history.state` and the fragment is in the URL, so a reload restores everything visible — re-running
+every render path by hand would buy a few hundred milliseconds on an action taken about once per
+visitor.
 
 ## What it does
 

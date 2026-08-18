@@ -1,3 +1,4 @@
+import { t } from "./i18n/index.js";
 import { toast } from "./ui.js";
 
 /**
@@ -11,9 +12,9 @@ export async function copyText(text: string, what: string): Promise<boolean> {
   const ok = await write(text);
   if (ok) {
     const preview = text.length > 48 ? text.slice(0, 47) + "…" : text;
-    toast(`Copied ${what}: ${preview.replace(/\s+/g, " ")}`);
+    toast(t().toast.copied(what, preview.replace(/\s+/g, " ")));
   } else {
-    toast(`Could not copy ${what}. Your browser blocked clipboard access.`, "error");
+    toast(t().toast.copyFailed(what), "error");
   }
   return ok;
 }
@@ -22,9 +23,7 @@ export async function copyText(text: string, what: string): Promise<boolean> {
 export async function copyBlob(text: string, what: string): Promise<boolean> {
   const ok = await write(text);
   toast(
-    ok
-      ? `Copied ${what} (${text.length.toLocaleString()} characters)`
-      : `Could not copy ${what}. Your browser blocked clipboard access.`,
+    ok ? t().toast.copiedLarge(what, text.length) : t().toast.copyFailed(what),
     ok ? "info" : "error",
   );
   return ok;

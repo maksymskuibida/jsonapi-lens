@@ -1,5 +1,6 @@
 import { el, escapeHtml } from "./dom.js";
 import { humanizeKey, previewValue, summaryAttribute } from "./format.js";
+import { t } from "./i18n/index.js";
 import { domId, resourceHref, resourceKey, typeHue, typeSigil } from "./ident.js";
 import { referencesTo } from "./parse.js";
 import { join as pointerJoin } from "./pointer.js";
@@ -38,7 +39,7 @@ function chipHtml(type: string, id: string, resolved: boolean, options: ChipOpti
     `<b class="chip__sigil">${escapeHtml(typeSigil(type))}</b>` +
     (options.implyType ? "" : `<span class="chip__type">${escapeHtml(type)}</span>`) +
     `<span class="chip__id">${escapeHtml(id)}</span>` +
-    (resolved ? "" : `<span class="chip__absent">not in document</span>`);
+    (resolved ? "" : `<span class="chip__absent">${escapeHtml(t().resource.notInDocument)}</span>`);
 
   // `domId` output is `[A-Za-z0-9_]` by construction, so it is safe unquoted —
   // it is still emitted inside quotes for uniformity with the escaped values.
@@ -62,7 +63,7 @@ export function chip(
     ? el("a", { class: classes, href: resourceHref(type, id) })
     : el("span", {
         class: classes,
-        title: `No resource with type "${type}" and id "${id}" appears in this document`,
+        title: t().resource.absentChipTitle(type, id),
       });
 
   node.dataset["hue"] = String(typeHue(type));
@@ -82,21 +83,23 @@ function tagsHtml(resource: Resource): string {
   const tags: string[] = [];
 
   if (resource.origin === "data") {
-    tags.push(`<span class="tag tag--primary" title="Part of the document's primary data">primary</span>`);
+    tags.push(
+      `<span class="tag tag--primary" title="${escapeHtml(t().resource.primaryTagTitle)}">${escapeHtml(t().resource.primaryTag)}</span>`,
+    );
   }
   if (resource.relationships.length) {
     tags.push(
-      `<span class="tag" title="${resource.relationships.length} relationship${resource.relationships.length === 1 ? "" : "s"}">${resource.relationships.length} rel</span>`,
+      `<span class="tag" title="${escapeHtml(t().resource.relTagTitle(resource.relationships.length))}">${escapeHtml(t().resource.relTag(resource.relationships.length))}</span>`,
     );
   }
   if (resource.danglingCount) {
     tags.push(
-      `<span class="tag tag--absent" title="${resource.danglingCount} pointer${resource.danglingCount === 1 ? "" : "s"} on this resource resolve to nothing in this document">${resource.danglingCount} unresolved</span>`,
+      `<span class="tag tag--absent" title="${escapeHtml(t().resource.unresolvedTagTitle(resource.danglingCount))}">${escapeHtml(t().resource.unresolvedTag(resource.danglingCount))}</span>`,
     );
   }
   if (resource.duplicated) {
     tags.push(
-      `<span class="tag tag--dupe" title="This type/id appeared more than once in the document; the occurrences were merged">duplicated</span>`,
+      `<span class="tag tag--dupe" title="${escapeHtml(t().resource.duplicatedTagTitle)}">${escapeHtml(t().resource.duplicatedTag)}</span>`,
     );
   }
 
@@ -115,7 +118,9 @@ function rowHtml(resource: Resource): string {
   const summaryHtml = summary
     ? `<span class="res__sum"><span class="res__sum-key">${escapeHtml(humanizeKey(summary.key))}</span>` +
       `<span class="res__sum-val">${escapeHtml(previewValue(summary.value, 90))}</span></span>`
-    : `<span class="res__sum res__sum--none">${resource.attributes ? "no summary attribute" : "no attributes"}</span>`;
+    : `<span class="res__sum res__sum--none">${escapeHtml(
+        resource.attributes ? t().resource.noSummaryAttribute : t().resource.noAttributes,
+      )}</span>`;
 
   return (
     `<section class="res" id="${domId(resource.type, resource.id)}" data-type="${escapeHtml(resource.type)}">` +
@@ -157,7 +162,7 @@ function relationshipTargets(rel: RelationshipEntry, index: DocumentIndex): HTML
     const more = el("button", {
       class: "rel__more",
       type: "button",
-      text: `Show ${remaining} more`,
+      text: t().resource.showMore(remaining),
     });
     more.addEventListener("click", () => {
       more.remove();
@@ -170,15 +175,16 @@ function relationshipTargets(rel: RelationshipEntry, index: DocumentIndex): HTML
 }
 
 function relationshipCardinality(rel: RelationshipEntry): string {
+  const m = t().relationships;
   switch (rel.kind) {
     case "to-one":
-      return "to-one";
+      return m.toOne;
     case "to-many":
-      return `to-many · ${rel.targets.length}`;
+      return m.toMany(rel.targets.length);
     case "empty":
-      return "to-one · null";
+      return m.toOneNull;
     case "no-linkage":
-      return "no linkage";
+      return m.noLinkage;
   }
 }
 
@@ -188,13 +194,13 @@ function renderRelationships(resource: Resource, index: DocumentIndex): HTMLElem
     el(
       "h4",
       { class: "block__title" },
-      "Relationships",
-      el("span", { class: "block__count", text: String(resource.relationships.length) }),
+      t().relationships.title,
+      el("span", { class: "block__count", text: t().num(resource.relationships.length) }),
     ),
   );
 
   if (!resource.relationships.length) {
-    block.append(el("p", { class: "block__empty", text: "No relationships." }));
+    block.append(el("p", { class: "block__empty", text: t().relationships.empty }));
     return block;
   }
 
@@ -214,14 +220,14 @@ function renderRelationships(resource: Resource, index: DocumentIndex): HTMLElem
       item.append(
         el("p", {
           class: "rel__note",
-          text: "Linkage is explicitly null — related to nothing.",
+          text: t().relationships.nullNote,
         }),
       );
     } else if (rel.kind === "no-linkage") {
       item.append(
         el("p", {
           class: "rel__note",
-          text: "No linkage data. The server did not say what this relates to; fetch the related link to find out.",
+          text: t().relationships.noLinkageNote,
         }),
       );
     } else {
@@ -229,8 +235,12 @@ function renderRelationships(resource: Resource, index: DocumentIndex): HTMLElem
     }
 
     const relPointer = pointerJoin(resource.pointer, "relationships", rel.name);
-    if (rel.links) item.append(renderObjectBlock("Links", rel.links, pointerJoin(relPointer, "links"), "sub"));
-    if (rel.meta) item.append(renderObjectBlock("Meta", rel.meta, pointerJoin(relPointer, "meta"), "sub"));
+    if (rel.links) {
+      item.append(renderObjectBlock(t().block.links, rel.links, pointerJoin(relPointer, "links"), "sub"));
+    }
+    if (rel.meta) {
+      item.append(renderObjectBlock(t().block.meta, rel.meta, pointerJoin(relPointer, "meta"), "sub"));
+    }
 
     block.append(item);
   }
@@ -252,11 +262,8 @@ function renderReferencedBy(resource: Resource, index: DocumentIndex): HTMLEleme
 
   if (references === null) {
     block.append(
-      el("h4", { class: "block__title" }, "Referenced by"),
-      el("p", {
-        class: "block__empty",
-        text: "This document has too many pointers to index in reverse.",
-      }),
+      el("h4", { class: "block__title" }, t().referencedBy.title),
+      el("p", { class: "block__empty", text: t().referencedBy.tooMany }),
     );
     return block;
   }
@@ -265,8 +272,8 @@ function renderReferencedBy(resource: Resource, index: DocumentIndex): HTMLEleme
     el(
       "h4",
       { class: "block__title" },
-      "Referenced by",
-      el("span", { class: "block__count", text: String(references.length) }),
+      t().referencedBy.title,
+      el("span", { class: "block__count", text: t().num(references.length) }),
     ),
   );
 
@@ -274,7 +281,7 @@ function renderReferencedBy(resource: Resource, index: DocumentIndex): HTMLEleme
     block.append(
       el("p", {
         class: "block__empty",
-        text: "Nothing in this document points at this resource.",
+        text: t().referencedBy.none,
       }),
     );
     return block;
@@ -299,7 +306,7 @@ function renderReferencedBy(resource: Resource, index: DocumentIndex): HTMLEleme
         el("span", { class: "rel__name", text: name }),
         el("span", {
           class: "rel__card",
-          text: `${group.length} inbound`,
+          text: t().referencedBy.inbound(group.length),
         }),
       ),
     );
@@ -315,7 +322,7 @@ function renderReferencedBy(resource: Resource, index: DocumentIndex): HTMLEleme
       const more = el("button", {
         class: "rel__more",
         type: "button",
-        text: `Show ${remaining} more`,
+        text: t().resource.showMore(remaining),
       });
       more.addEventListener("click", () => {
         more.remove();
@@ -394,7 +401,7 @@ export function buildResourceBody(resource: Resource, index: DocumentIndex): Doc
 
   body.append(
     renderObjectBlock(
-      "Attributes",
+      t().block.attributes,
       resource.attributes ?? {},
       pointerJoin(resource.pointer, "attributes"),
     ),
@@ -402,10 +409,14 @@ export function buildResourceBody(resource: Resource, index: DocumentIndex): Doc
   body.append(renderRelationships(resource, index));
   body.append(renderReferencedBy(resource, index));
   if (resource.links) {
-    body.append(renderObjectBlock("Links", resource.links, pointerJoin(resource.pointer, "links")));
+    body.append(
+      renderObjectBlock(t().block.links, resource.links, pointerJoin(resource.pointer, "links")),
+    );
   }
   if (resource.meta) {
-    body.append(renderObjectBlock("Meta", resource.meta, pointerJoin(resource.pointer, "meta")));
+    body.append(
+      renderObjectBlock(t().block.meta, resource.meta, pointerJoin(resource.pointer, "meta")),
+    );
   }
 
   return body;

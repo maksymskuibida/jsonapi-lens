@@ -1,13 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { parseRoute, PASTE_PATH, VIEW_PATH } from "../src/router.js";
+import { IMPRESSUM_PATH, parseRoute, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
 import { escapeToken, join, parse, resolve, unescapeToken } from "../src/pointer.js";
 
 describe("parseRoute", () => {
-  it("maps the three real paths", () => {
+  it("maps the app's own paths", () => {
     expect(parseRoute("/")).toEqual({ kind: "paste" });
     expect(parseRoute("")).toEqual({ kind: "paste" });
     expect(parseRoute(VIEW_PATH)).toEqual({ kind: "view" });
     expect(parseRoute(VIEW_PATH + "/")).toEqual({ kind: "view" });
+    expect(parseRoute(IMPRESSUM_PATH)).toEqual({ kind: "legal", page: "impressum" });
+    expect(parseRoute(PRIVACY_PATH)).toEqual({ kind: "legal", page: "privacy" });
+  });
+
+  it("honours the spellings people actually type for the legal pages", () => {
+    // These get typed into address bars and pasted out of emails far more than
+    // the app's own paths do, so the aliases are worth having.
+    for (const path of ["/imprint", "/legal", "/impressum/", "/Impressum"]) {
+      expect(parseRoute(path), path).toEqual({ kind: "legal", page: "impressum" });
+    }
+    for (const path of ["/datenschutz", "/datenschutzerklaerung", "/privacy/", "/Datenschutz"]) {
+      expect(parseRoute(path), path).toEqual({ kind: "legal", page: "privacy" });
+    }
+  });
+
+  it("does not mistake a share link for a legal page", () => {
+    expect(parseRoute("/d/1:AAAAAAAAAAAAAAAAAAAA").kind).toBe("share");
+    expect(parseRoute("/impressum/extra").kind).toBe("unknown");
   });
 
   it("reads a share link", () => {

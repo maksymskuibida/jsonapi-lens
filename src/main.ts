@@ -6,10 +6,13 @@ import "./styles.css";
 import { copyBlob, copyText, downloadText } from "./clipboard.js";
 import { el } from "./dom.js";
 import { formatBytes, formatDuration } from "./format.js";
+import { applyDocumentLanguage, LOCALE_NAMES, LOCALES, locale, setLocale, t } from "./i18n/index.js";
+import type { Locale } from "./i18n/index.js";
+import { localiseStaticDom } from "./i18n/static-dom.js";
+import { legal } from "./legal/index.js";
 import { domId, parseDomId, resourceKey } from "./ident.js";
 import { openJumpModal } from "./jump.js";
 import { openLibraryModal, openRawModal, openSaveModal, openShortcutsModal } from "./panels.js";
-import { IS_APPLE, MOD_KEY } from "./platform.js";
 import { DocumentError, readDocument } from "./parse.js";
 import { resolve as resolvePointer } from "./pointer.js";
 import {
@@ -23,8 +26,9 @@ import {
   renderTopLevel,
 } from "./render-document.js";
 import { buildResourceBody } from "./render-resource.js";
-import { currentRoute, navigate, PASTE_PATH, VIEW_PATH } from "./router.js";
-import type { Route } from "./router.js";
+import { currentRoute, navigate, parseRoute, PASTE_PATH, VIEW_PATH } from "./router.js";
+import type { LegalRoute, Route } from "./router.js";
+import { renderLegalPage } from "./views/legal.js";
 import { fetchShare, openShareModal } from "./share.js";
 import { ShareError } from "./crypto.js";
 import {
@@ -44,13 +48,23 @@ import sampleDangling from "./samples/dangling.json?raw";
 import sampleErrors from "./samples/errors.json?raw";
 import sampleEdge from "./samples/edge.json?raw";
 
-const SAMPLES: Record<string, { text: string; label: string }> = {
-  articles: { text: sampleArticles, label: "articles.json" },
-  single: { text: sampleSingle, label: "single-resource.json" },
-  dangling: { text: sampleDangling, label: "missing-include.json" },
-  errors: { text: sampleErrors, label: "error-response.json" },
-  edge: { text: sampleEdge, label: "awkward-ids.json" },
-};
+/**
+ * The sample payloads, with the label each one gets once loaded.
+ *
+ * A function rather than a constant because the labels are translated, and a
+ * constant would freeze whichever language happened to be active when this
+ * module first ran.
+ */
+function samples(): Record<string, { text: string; label: string }> {
+  const m = t().samples;
+  return {
+    articles: { text: sampleArticles, label: m.articlesFile },
+    single: { text: sampleSingle, label: m.singleFile },
+    dangling: { text: sampleDangling, label: m.danglingFile },
+    errors: { text: sampleErrors, label: m.errorsFile },
+    edge: { text: sampleEdge, label: m.edgeFile },
+  };
+}
 
 /* ------------------------------------------------------------- elements --- */
 
@@ -80,6 +94,27 @@ const topbarStatsEl = need("topbar-stats");
 const themeEl = need<HTMLButtonElement>("theme-toggle");
 const libraryEl = need<HTMLButtonElement>("open-library");
 const libraryCountEl = need("library-count");
+const legalEl = need("legal");
+const languageEl = need<HTMLSelectElement>("language");
+
+/* ------------------------------------------------------------- language --- */
+
+/*
+ * Runs before the theme, the library badge or any view, because all three write
+ * copy and would otherwise write it in whatever language `index.html` shipped
+ * with. `applyDocumentLanguage` also puts the chosen tag on `<html lang>`, so
+ * screen readers and hyphenation follow the switch.
+ */
+applyDocumentLanguage();
+localiseStaticDom();
+
+for (const code of LOCALES) {
+  languageEl.append(el("option", { value: code, text: LOCALE_NAMES[code] }));
+}
+languageEl.value = locale();
+languageEl.addEventListener("change", () => {
+  setLocale(languageEl.value as Locale);
+});
 
 /* ---------------------------------------------------------------- state --- */
 
@@ -103,11 +138,12 @@ function applyTheme(theme: Theme): void {
   else document.documentElement.setAttribute("data-theme", theme);
   // The word is a separate element so narrow viewports can drop it and keep
   // the value, rather than the whole control overflowing the bar.
+  const name = t().topbar.themeName(theme);
   themeEl.replaceChildren(
-    el("span", { class: "btn__wide", text: "Theme:" }),
-    el("span", { text: theme }),
+    el("span", { class: "btn__wide", text: t().topbar.themeLabel }),
+    el("span", { text: name }),
   );
-  themeEl.title = `Theme: ${theme}. Click to change.`;
+  themeEl.title = t().topbar.themeTitle(name);
 }
 
 function readTheme(): Theme {
@@ -141,20 +177,21 @@ themeEl.addEventListener("click", () => {
  */
 async function refreshLibraryCount(): Promise<void> {
   const count = await countLibrary();
-  libraryCountEl.textContent = count > 0 ? String(count) : "";
+  libraryCountEl.textContent = count > 0 ? t().num(count) : "";
   libraryCountEl.hidden = count === 0;
-  libraryEl.title = count > 0 ? `Saved documents (${count})` : "Saved documents";
+  libraryEl.title = count > 0 ? t().topbar.savedTitleCount(count) : t().topbar.savedTitle;
 }
 
 /* ----------------------------------------------------------- view state --- */
 
-function showView(which: "boot" | "paste" | "doc", bootMessage = "Reading stored document"): void {
+function showView(which: "boot" | "paste" | "doc" | "legal", bootMessage?: string): void {
   bootEl.hidden = which !== "boot";
   pasteEl.hidden = which !== "paste";
   docEl.hidden = which !== "doc";
+  legalEl.hidden = which !== "legal";
   newDocEl.hidden = which !== "doc";
   topbarDocEl.hidden = which !== "doc";
-  if (which === "boot") bootMessageEl.textContent = bootMessage;
+  if (which === "boot") bootMessageEl.textContent = bootMessage ?? t().boot.reading;
 }
 
 function showError(error: unknown): void {
@@ -164,14 +201,14 @@ function showError(error: unknown): void {
       : error instanceof ShareError
         ? new DocumentError(error.headline, error.hint)
         : new DocumentError(
-            "Something went wrong reading that document.",
+            t().parseErrors.unknown.headline,
             error instanceof Error ? error.message : String(error),
           );
 
   errorHeadlineEl.textContent = documentError.headline;
   errorHintEl.textContent = documentError.hint;
   if (documentError.line !== undefined) {
-    errorWhereEl.textContent = `around line ${documentError.line}`;
+    errorWhereEl.textContent = t().paste.errorWhere(documentError.line);
     errorWhereEl.hidden = false;
   } else {
     errorWhereEl.hidden = true;
@@ -258,7 +295,7 @@ function resolveHash(restore: EntryState | null = null): void {
   const target = document.getElementById(fragment);
   if (!target) {
     const identity = parseDomId(fragment);
-    if (identity) toast(`No ${identity.type} with id ${identity.id} in this document.`);
+    if (identity) toast(t().toast.noResource(identity.type, identity.id));
     if (restoreY !== null) window.scrollTo(0, restoreY);
     return;
   }
@@ -268,7 +305,7 @@ function resolveHash(restore: EntryState | null = null): void {
   const group = target.closest<HTMLElement>(".group");
   if (group?.hasAttribute("data-filtered")) {
     setSolo(null);
-    toast(`Showing all types so ${group.dataset["type"]} could be reached.`);
+    toast(t().toast.filterCleared(group.dataset["type"] ?? ""));
   }
 
   // Open before scrolling, so the scroll lands against final layout.
@@ -481,15 +518,17 @@ function documentActions(): HTMLElement {
     return node;
   };
 
+  const m = t().overview;
+
   return el(
     "div",
     { class: "overview__actions" },
-    button("Share link", "Create an encrypted share link", () => shareDocument(), true),
-    button("Save", "Keep this document in this browser", () => saveCurrent()),
-    button("Export", "Download the document as a file", () => exportCurrent()),
-    button("Raw", "Show the whole document as raw JSON", () => rawDocument()),
-    button("Copy", "Copy the whole document", () => {
-      if (current) void copyBlob(current.text, "document");
+    button(m.shareLink, m.shareLinkTitle, () => shareDocument(), true),
+    button(m.save, m.saveTitle, () => saveCurrent()),
+    button(m.export, m.exportTitle, () => exportCurrent()),
+    button(m.raw, m.rawTitle, () => rawDocument()),
+    button(m.copy, m.copyTitle, () => {
+      if (current) void copyBlob(current.text, t().copyKinds.document);
     }),
   );
 }
@@ -550,7 +589,11 @@ function renderDocumentView(loaded: Loaded, parseMs: number): void {
   applyFilter();
 
   topbarLabelEl.textContent = loaded.label;
-  topbarStatsEl.textContent = `${index.counts.total.toLocaleString()} resources · ${index.groups.length} types · ${formatBytes(loaded.bytes)}`;
+  topbarStatsEl.textContent = t().overview.stats(
+    index.counts.total,
+    index.groups.length,
+    formatBytes(loaded.bytes),
+  );
 
   // Numbers worth having in front of you when a payload feels slow.
   console.info("[jsonapi-lens] timings", {
@@ -562,7 +605,7 @@ function renderDocumentView(loaded: Loaded, parseMs: number): void {
     bodies: eager ? "eager" : "lazy (on expand)",
   });
 
-  document.title = `${loaded.label} — jsonapi-lens`;
+  document.title = t().meta.documentTitle(loaded.label);
 }
 
 /* Lazy bodies. `toggle` does not bubble, so this listens in the capture phase,
@@ -595,18 +638,18 @@ function handleValueCopy(button: HTMLElement): void {
   if (!pointer) return;
 
   if (button.dataset["copy"] === "path") {
-    void copyText(pointer, "JSON Pointer");
+    void copyText(pointer, t().copyKinds.pointer);
     return;
   }
 
   const value = resolvePointer(current.index.root, pointer);
   if (value === undefined) {
-    toast(`Nothing resolves at ${pointer} any more.`, "error");
+    toast(t().toast.pointerGone(pointer), "error");
     return;
   }
   const text = valueForClipboard(value as JsonValue);
-  if (text.length > 400) void copyBlob(text, "value");
-  else void copyText(text, "value");
+  if (text.length > 400) void copyBlob(text, t().copyKinds.value);
+  else void copyText(text, t().copyKinds.value);
 }
 
 function handleObjectAction(button: HTMLElement): void {
@@ -623,15 +666,18 @@ function handleObjectAction(button: HTMLElement): void {
       });
       break;
     case "copy-object":
-      void copyBlob(JSON.stringify(resource.raw, null, 2), `${resource.type} ${resource.id}`);
+      void copyBlob(
+        JSON.stringify(resource.raw, null, 2),
+        t().copyKinds.resource(resource.type, resource.id),
+      );
       break;
     case "copy-pointer":
-      void copyText(resource.pointer, "JSON Pointer");
+      void copyText(resource.pointer, t().copyKinds.pointer);
       break;
     case "copy-link":
       void copyText(
         `${location.origin}${VIEW_PATH}#${domId(resource.type, resource.id)}`,
-        "deep link",
+        t().copyKinds.deepLink,
       );
       break;
   }
@@ -679,7 +725,7 @@ docEl.addEventListener("click", (event) => {
     const opening = expand.dataset["state"] !== "open";
     for (const row of rows) row.open = opening;
     expand.dataset["state"] = opening ? "open" : "closed";
-    expand.textContent = opening ? "Collapse all" : "Expand all";
+    expand.textContent = opening ? t().group.collapseAll : t().group.expandAll;
   }
 });
 
@@ -704,14 +750,14 @@ function exportCurrent(): void {
   if (!current) return;
   const filename = safeFilename(current.label);
   downloadText(current.text, filename);
-  toast(`Downloading ${filename}`);
+  toast(t().toast.downloading(filename));
 }
 
 function rawDocument(): void {
   if (!current) return;
   openRawModal({
     title: current.label,
-    subtitle: "whole document",
+    subtitle: t().raw.wholeDocument,
     value: current.index.root,
     filename: safeFilename(current.label),
   });
@@ -743,14 +789,14 @@ function saveCurrent(): void {
     };
     const id = await saveToLibrary(entry);
     if (id === null) {
-      toast("Could not save to this browser's storage.", "error");
+      toast(t().save.failed, "error");
       return;
     }
     loaded.label = label;
     topbarLabelEl.textContent = label;
-    document.title = `${label} — jsonapi-lens`;
+    document.title = t().meta.documentTitle(label);
     void refreshLibraryCount();
-    toast(`Saved "${label}" to this browser`);
+    toast(t().save.done(label));
   });
 }
 
@@ -765,6 +811,39 @@ function openLibrary(): void {
     () => void refreshLibraryCount(),
   );
 }
+
+/* ---------------------------------------------------------------- legal --- */
+
+function showLegal(page: LegalRoute): void {
+  const pages = legal();
+  legalEl.replaceChildren(renderLegalPage(page === "impressum" ? pages.impressum : pages.privacy));
+  showView("legal");
+  document.title = `${(page === "impressum" ? pages.impressum : pages.privacy).title} — jsonapi-lens`;
+  window.scrollTo(0, 0);
+}
+
+/*
+ * The footer links and the cross-link between the two pages are ordinary
+ * anchors, so they work with middle-click, "open in new tab" and no JavaScript.
+ * This intercepts the plain left-click case only, to keep the loaded document
+ * and the scroll history intact — everything else falls through to the browser.
+ */
+document.addEventListener("click", (event) => {
+  if (event.defaultPrevented || event.button !== 0) return;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const anchor = target.closest<HTMLAnchorElement>("a[href]");
+  if (!anchor || anchor.target === "_blank" || anchor.origin !== location.origin) return;
+
+  const route = parseRoute(anchor.pathname);
+  if (route.kind !== "legal") return;
+
+  event.preventDefault();
+  navigate(anchor.pathname);
+  showLegal(route.page);
+});
 
 /* ------------------------------------------------------------- loading --- */
 
@@ -805,7 +884,7 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   if (options.persist) {
     window.scrollTo(0, 0);
     const saved = await saveDocument({ text, savedAt: Date.now(), label });
-    if (!saved) toast("This document could not be stored, so a reload will lose it.");
+    if (!saved) toast(t().toast.notStored);
   }
 
   return true;
@@ -815,22 +894,18 @@ function loadFromInput(): void {
   const text = inputEl.value;
   if (!text.trim()) {
     showError(
-      new DocumentError("Nothing to read yet.", "Paste a JSON:API document, or drop a file."),
+      new DocumentError(t().parseErrors.nothingYet.headline, t().parseErrors.nothingYet.hint),
     );
     return;
   }
-  void load(text, "pasted document", { persist: true, push: true });
+  void load(text, t().labels.pastedDocument, { persist: true, push: true });
 }
 
 /* ----------------------------------------------------------- paste view --- */
 
-// The markup ships the Mac spelling because it is the shorter of the two and
-// has to be *something*; on everything else it becomes Ctrl.
-if (!IS_APPLE) need("hint-mod").textContent = MOD_KEY;
-
 function updateDropMeta(): void {
   const length = inputEl.value.length;
-  dropMetaEl.textContent = length ? `${length.toLocaleString()} characters` : "";
+  dropMetaEl.textContent = length ? t().paste.characters(length) : "";
 }
 
 inputEl.addEventListener("input", () => {
@@ -865,14 +940,17 @@ async function readFile(file: File): Promise<void> {
     await load(text, file.name, { persist: true, push: true });
   } catch {
     showError(
-      new DocumentError("That file could not be read.", "Try opening it and pasting the contents."),
+      new DocumentError(
+        t().parseErrors.fileUnreadable.headline,
+        t().parseErrors.fileUnreadable.hint,
+      ),
     );
   }
 }
 
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-sample]")) {
   button.addEventListener("click", () => {
-    const sample = SAMPLES[button.dataset["sample"] ?? ""];
+    const sample = samples()[button.dataset["sample"] ?? ""];
     if (!sample) return;
     inputEl.value = sample.text;
     updateDropMeta();
@@ -926,7 +1004,7 @@ newDocEl.addEventListener("click", () => {
   updateDropMeta();
   resumeEl.hidden = true;
   navigate(PASTE_PATH);
-  document.title = "jsonapi-lens — follow the pointer";
+  document.title = t().meta.title;
   showView("paste");
   inputEl.focus();
 });
@@ -941,12 +1019,12 @@ function offerResume(): void {
     return;
   }
   resumeEl.replaceChildren(
-    el("span", { class: "resume__text" }, `Still open: `, el("b", { text: current.label })),
+    el("span", { class: "resume__text" }, t().resume.stillOpen(current.label)),
     (() => {
       const button = el("button", {
         class: "btn btn--primary btn--sm",
         type: "button",
-        text: "Back to document",
+        text: t().resume.back,
       });
       button.addEventListener("click", () => {
         navigate(VIEW_PATH);
@@ -1029,15 +1107,17 @@ document.addEventListener("keydown", (event) => {
 
 /** Load a document that arrived as a share link. */
 async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Promise<void> {
-  showView("boot", "Fetching and decrypting the shared document");
+  showView("boot", t().boot.fetchingShare);
 
   try {
     const payload = await fetchShare(route.id, route.secret);
     // Drop the key from the visible URL and from history before rendering, so
     // it does not sit in the address bar or leak through a later Referer.
     navigate(VIEW_PATH, { replace: true });
-    await load(payload.text, payload.label || `shared document ${route.id}`, { persist: true });
-    toast("Opened a shared document. It is now stored in this browser.");
+    await load(payload.text, payload.label || t().labels.sharedDocument(route.id), {
+      persist: true,
+    });
+    toast(t().share.opened);
   } catch (error) {
     navigate(PASTE_PATH, { replace: true });
     showView("paste");
@@ -1053,8 +1133,13 @@ async function applyRoute(): Promise<void> {
     return;
   }
 
+  if (route.kind === "legal") {
+    showLegal(route.page);
+    return;
+  }
+
   if (route.kind === "unknown") {
-    toast(`No page at ${route.pathname}.`);
+    toast(t().toast.noPage(route.pathname));
     navigate(PASTE_PATH, { replace: true });
     showView("paste");
     offerResume();
@@ -1071,7 +1156,9 @@ async function applyRoute(): Promise<void> {
     if (stored) {
       inputEl.value = stored.text;
       updateDropMeta();
-      const ok = await load(stored.text, stored.label ?? "stored document", { persist: false });
+      const ok = await load(stored.text, stored.label ?? t().labels.storedDocument, {
+        persist: false,
+      });
       // The browser tried to scroll to the fragment before any of this existed,
       // so that attempt hit nothing. Now the sections are in the DOM.
       if (ok) resolveHash(savedEntryState());
@@ -1080,7 +1167,7 @@ async function applyRoute(): Promise<void> {
     }
     navigate(PASTE_PATH, { replace: true });
     showView("paste");
-    toast("No document is loaded. Paste one to get started.");
+    toast(t().toast.noDocument);
     return;
   }
 
@@ -1103,7 +1190,7 @@ async function boot(): Promise<void> {
     return;
   }
 
-  if (route.kind === "view" || route.kind === "unknown") {
+  if (route.kind === "view" || route.kind === "unknown" || route.kind === "legal") {
     await applyRoute();
     return;
   }
@@ -1126,7 +1213,7 @@ async function boot(): Promise<void> {
     const index = readDocument(stored.text);
     current = {
       index,
-      label: stored.label ?? "stored document",
+      label: stored.label ?? t().labels.storedDocument,
       bytes: new TextEncoder().encode(stored.text).byteLength,
       text: stored.text,
     };

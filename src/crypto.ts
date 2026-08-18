@@ -45,6 +45,8 @@
  *     bytes 29..    ciphertext with its 128-bit tag appended
  */
 
+import { t } from "./i18n/index.js";
+
 const VERSION = 2;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
@@ -189,15 +191,12 @@ const HEADER_BYTES = 1 + SALT_BYTES + IV_BYTES;
 
 export async function open(blob: Bytes, secret: string): Promise<SharePayload> {
   if (blob.length < HEADER_BYTES + 16) {
-    throw new ShareError(
-      "That shared document is corrupt.",
-      "The stored data is too short to be a valid document.",
-    );
+    throw new ShareError(t().shareErrors.corruptShort.headline, t().shareErrors.corruptShort.hint);
   }
   if (blob[0] !== VERSION) {
     throw new ShareError(
-      "That share link was made by a different version.",
-      `It uses format version ${blob[0]}, and this build reads version ${VERSION}. Ask for a fresh link.`,
+      t().shareErrors.wrongVersion.headline,
+      t().shareErrors.wrongVersion.hint(blob[0] ?? 0, VERSION),
     );
   }
 
@@ -216,8 +215,8 @@ export async function open(blob: Bytes, secret: string): Promise<SharePayload> {
     // AES-GCM is authenticated, so this is either the wrong secret or a
     // tampered blob — there is no way to tell them apart, and no need to.
     throw new ShareError(
-      "That share link could not be decrypted.",
-      "The key does not match this document. If the link was shortened, wrapped by a chat client, or retyped, the key is probably wrong.",
+      t().shareErrors.undecryptable.headline,
+      t().shareErrors.undecryptable.hint,
     );
   }
 
@@ -226,16 +225,16 @@ export async function open(blob: Bytes, secret: string): Promise<SharePayload> {
     text = new TextDecoder().decode(await gunzip(compressed));
   } catch {
     throw new ShareError(
-      "That shared document is corrupt.",
-      "It decrypted, but the contents could not be decompressed.",
+      t().shareErrors.corruptDeflate.headline,
+      t().shareErrors.corruptDeflate.hint,
     );
   }
 
   const parsed = JSON.parse(text) as SharePayload;
   if (typeof parsed?.text !== "string") {
     throw new ShareError(
-      "That shared document is corrupt.",
-      "It decrypted, but does not contain a document.",
+      t().shareErrors.corruptPayload.headline,
+      t().shareErrors.corruptPayload.hint,
     );
   }
   return parsed;

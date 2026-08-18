@@ -2,6 +2,7 @@ import { el } from "./dom.js";
 import { classify, formatDate, formatNumber, humanizeKey, previewValue } from "./format.js";
 import { join as pointerJoin } from "./pointer.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import { t } from "./i18n/index.js";
 
 /** Nested structures past this depth stay collapsed, to keep expansion cheap. */
 const AUTO_OPEN_DEPTH = 1;
@@ -76,17 +77,17 @@ function rowActions(): HTMLElement {
       class: "act act--mini",
       type: "button",
       "data-copy": "path",
-      title: "Copy JSON Pointer to this value",
+      title: t().value.copyPointerTitle,
       "aria-label": "Copy JSON Pointer to this value",
-      text: "path",
+      text: t().value.copyPointerLabel,
     }),
     el("button", {
       class: "act act--mini",
       type: "button",
       "data-copy": "value",
-      title: "Copy this value",
+      title: t().value.copyValueTitle,
       "aria-label": "Copy this value",
-      text: "value",
+      text: t().value.copyValueLabel,
     }),
   );
 }
@@ -113,15 +114,16 @@ function renderNested(
     return el(
       "span",
       { class: "v v--empty-wrap" },
-      el("span", { class: "v v--empty", text: isArray ? "empty array" : "empty object" }),
+      el("span", {
+        class: "v v--empty",
+        text: isArray ? t().value.emptyArray : t().value.emptyObject,
+      }),
       actions,
     );
   }
 
   const details = el("details", { class: "tree", open: depth < AUTO_OPEN_DEPTH });
-  const label = isArray
-    ? `${entries.length} ${entries.length === 1 ? "item" : "items"}`
-    : `${entries.length} ${entries.length === 1 ? "key" : "keys"}`;
+  const label = isArray ? t().value.items(entries.length) : t().value.keys(entries.length);
 
   details.append(
     el(
@@ -179,9 +181,15 @@ function renderEntries(
   return list;
 }
 
-/** A `attributes` / `meta` / `links` block. */
+/**
+ * An `attributes` / `meta` / `links` block.
+ *
+ * `label` carries both the heading and the sentence for an empty block, because
+ * "No attributes." cannot be derived from "Attributes" by lower-casing it in a
+ * language that inflects — which is what this used to do.
+ */
 export function renderObjectBlock(
-  title: string,
+  label: { title: string; empty: string },
   value: JsonObject,
   pointer: string,
   modifier = "",
@@ -193,14 +201,14 @@ export function renderObjectBlock(
     el(
       "h4",
       { class: "block__title" },
-      title,
-      el("span", { class: "block__count", text: String(keys.length) }),
-      el("code", { class: "block__pointer", text: pointer, title: "JSON Pointer to this block" }),
+      label.title,
+      el("span", { class: "block__count", text: t().num(keys.length) }),
+      el("code", { class: "block__pointer", text: pointer, title: t().value.pointerTitle }),
     ),
   );
 
   if (keys.length === 0) {
-    section.append(el("p", { class: "block__empty", text: `No ${title.toLowerCase()}.` }));
+    section.append(el("p", { class: "block__empty", text: label.empty }));
     return section;
   }
 

@@ -1,7 +1,8 @@
 import { copyBlob, downloadText } from "./clipboard.js";
 import { el } from "./dom.js";
 import { formatBytes } from "./format.js";
-import { browserNavKeys, IS_APPLE, MOD_KEY, otherPlatformNote, pointerNavNote } from "./platform.js";
+import { t } from "./i18n/index.js";
+import { browserNavKeys, IS_APPLE, MOD_KEY } from "./platform.js";
 import type { KeyHint } from "./platform.js";
 import { deleteFromLibrary, listLibrary, renameInLibrary } from "./store.js";
 import type { LibraryEntry } from "./store.js";
@@ -27,14 +28,14 @@ export function openRawModal(options: {
 
   const pre = el("pre", { class: "raw", tabindex: "0" }, el("code", { text }));
 
-  const copy = el("button", { class: "btn btn--primary", type: "button", text: "Copy JSON" });
+  const copy = el("button", { class: "btn btn--primary", type: "button", text: t().raw.copyJson });
   copy.dataset["autofocus"] = "true";
-  copy.addEventListener("click", () => void copyBlob(text, "JSON"));
+  copy.addEventListener("click", () => void copyBlob(text, t().copyKinds.json));
 
-  const download = el("button", { class: "btn", type: "button", text: "Download" });
+  const download = el("button", { class: "btn", type: "button", text: t().raw.download });
   download.addEventListener("click", () => {
     downloadText(text, options.filename);
-    toast(`Downloading ${options.filename}`);
+    toast(t().toast.downloading(options.filename));
   });
 
   openModal({
@@ -52,14 +53,14 @@ export function openRawModal(options: {
 
 function relativeTime(epochMs: number): string {
   const seconds = Math.round((Date.now() - epochMs) / 1000);
-  if (seconds < 60) return "just now";
+  if (seconds < 60) return t().library.justNow;
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 60) return t().library.minutesAgo(minutes);
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return t().library.hoursAgo(hours);
   const days = Math.round(hours / 24);
-  if (days < 30) return `${days} d ago`;
-  return new Date(epochMs).toLocaleDateString(undefined, { dateStyle: "medium" });
+  if (days < 30) return t().library.daysAgo(days);
+  return t().library.savedOn(epochMs);
 }
 
 export async function openLibraryModal(
@@ -76,12 +77,8 @@ export async function openLibraryModal(
         el(
           "div",
           { class: "library__empty" },
-          el("p", { class: "library__empty-title", text: "Nothing saved yet." }),
-          el(
-            "p",
-            { class: "library__empty-hint" },
-            "Open a document and choose Save to keep it here. Saved documents stay in this browser — they are never uploaded.",
-          ),
+          el("p", { class: "library__empty-title", text: t().library.emptyTitle }),
+          el("p", { class: "library__empty-hint" }, t().library.emptyHint),
         ),
       );
       return;
@@ -94,14 +91,14 @@ export async function openLibraryModal(
 
       const openButton = el(
         "button",
-        { class: "library__open", type: "button", title: `Open ${entry.label}` },
+        { class: "library__open", type: "button", title: t().library.open(entry.label) },
         el("span", { class: "library__name", text: entry.label }),
         el(
           "span",
           { class: "library__meta" },
           el("code", { class: "library__shape", text: entry.shape }),
-          el("span", { text: `${entry.resources.toLocaleString()} resources` }),
-          el("span", { text: `${entry.types} types` }),
+          el("span", { text: t().library.resources(entry.resources) }),
+          el("span", { text: t().library.types(entry.types) }),
           el("span", { text: formatBytes(entry.bytes) }),
           el("span", { class: "library__when", text: relativeTime(entry.savedAt) }),
         ),
@@ -111,12 +108,12 @@ export async function openLibraryModal(
       const rename = el("button", {
         class: "act",
         type: "button",
-        title: "Rename",
-        "aria-label": `Rename ${entry.label}`,
-        text: "rename",
+        title: t().library.renameTitle,
+        "aria-label": t().library.renameLabel(entry.label),
+        text: t().library.rename,
       });
       rename.addEventListener("click", async () => {
-        const next = window.prompt("New name for this document", entry.label);
+        const next = window.prompt(t().library.renamePrompt, entry.label);
         if (next === null) return;
         const trimmed = next.trim();
         if (!trimmed) return;
@@ -124,28 +121,28 @@ export async function openLibraryModal(
           entry.label = trimmed;
           render(list);
           onChange();
-          toast(`Renamed to ${trimmed}`);
+          toast(t().library.renamed(trimmed));
         } else {
-          toast("Could not rename that document.", "error");
+          toast(t().library.renameFailed, "error");
         }
       });
 
       const remove = el("button", {
         class: "act act--danger",
         type: "button",
-        title: "Delete",
-        "aria-label": `Delete ${entry.label}`,
-        text: "delete",
+        title: t().library.deleteTitle,
+        "aria-label": t().library.deleteLabel(entry.label),
+        text: t().library.delete,
       });
       remove.addEventListener("click", async () => {
-        if (!window.confirm(`Delete "${entry.label}" from your saved documents?`)) return;
+        if (!window.confirm(t().library.deleteConfirm(entry.label))) return;
         if (entry.id !== undefined && (await deleteFromLibrary(entry.id))) {
           const remaining = list.filter((e) => e.id !== entry.id);
           render(remaining);
           onChange();
-          toast(`Deleted ${entry.label}`);
+          toast(t().library.deleted(entry.label));
         } else {
-          toast("Could not delete that document.", "error");
+          toast(t().library.deleteFailed, "error");
         }
       });
 
@@ -159,10 +156,10 @@ export async function openLibraryModal(
   render(entries);
 
   openModal({
-    title: "Saved documents",
+    title: t().library.title,
     subtitle: entries.length
-      ? `${entries.length} in this browser`
-      : "Stored locally in this browser",
+      ? t().library.countInBrowser(entries.length)
+      : t().library.storedLocally,
     body,
     variant: "tall",
   });
@@ -174,12 +171,12 @@ export function openSaveModal(defaultLabel: string, onSave: (label: string) => v
     class: "field",
     type: "text",
     value: defaultLabel,
-    "aria-label": "Name",
+    "aria-label": t().save.nameLabel,
     spellcheck: false,
   });
   input.dataset["autofocus"] = "true";
 
-  const save = el("button", { class: "btn btn--primary", type: "button", text: "Save" });
+  const save = el("button", { class: "btn btn--primary", type: "button", text: t().save.save });
 
   const submit = (handleClose: () => void) => () => {
     const label = input.value.trim() || defaultLabel;
@@ -188,18 +185,14 @@ export function openSaveModal(defaultLabel: string, onSave: (label: string) => v
   };
 
   openModal({
-    title: "Save this document",
-    subtitle: "Kept in this browser only",
+    title: t().save.title,
+    subtitle: t().save.subtitle,
     body: el(
       "div",
       { class: "save" },
-      el("label", { class: "save__label", text: "Name" }),
+      el("label", { class: "save__label", text: t().save.nameLabel }),
       input,
-      el(
-        "p",
-        { class: "save__hint" },
-        "Saved documents live in this browser's IndexedDB. Clearing site data removes them.",
-      ),
+      el("p", { class: "save__hint" }, t().save.hint),
     ),
     footer: (handle) => {
       save.addEventListener("click", submit(handle.close));
@@ -232,20 +225,31 @@ export function openSaveModal(defaultLabel: string, onSave: (label: string) => v
  * app — and their spelling depends on the OS, so leaving them out taught nobody
  * anything.
  */
-const SHORTCUTS: KeyHint[] = [
-  { combos: ["?"], description: "Show this list" },
-  { combos: ["/", "g"], description: "Find a resource by type or id" },
-  { combos: ["s"], description: "Save the document to this browser" },
-  { combos: ["r"], description: "Show the whole document as raw JSON" },
-  { combos: ["e"], description: "Export the document to a file" },
-  { combos: ["l"], description: "Open saved documents" },
-  {
-    combos: ["Shift + Esc"],
-    description: "Leave the document and go back to the paste view",
-  },
-  { combos: ["Esc"], description: "Close a dialog" },
-  { combos: [`${MOD_KEY} + Enter`], description: "Read the pasted document" },
-];
+function appShortcuts(): KeyHint[] {
+  const m = t().shortcuts;
+  return [
+    { combos: ["?"], description: m.showList },
+    { combos: ["/", "g"], description: m.find },
+    { combos: ["s"], description: m.saveDocument },
+    { combos: ["r"], description: m.rawDocument },
+    { combos: ["e"], description: m.exportDocument },
+    { combos: ["l"], description: m.openLibrary },
+    { combos: ["Shift + Esc"], description: m.leaveDocument },
+    { combos: ["Esc"], description: m.closeDialog },
+    { combos: [`${MOD_KEY} + Enter`], description: m.readPasted },
+  ];
+}
+
+/** The browser's own keys: spelling from `platform.ts`, words from here. */
+function browserShortcuts(): KeyHint[] {
+  const m = t().shortcuts;
+  const described: Record<string, string> = {
+    back: m.browserBack,
+    forward: m.browserForward,
+    newTab: m.browserNewTab,
+  };
+  return browserNavKeys().map(({ id, combos }) => ({ combos, description: described[id] ?? id }));
+}
 
 /** One `dl` of key/description rows. */
 function keyList(hints: KeyHint[]): HTMLElement {
@@ -253,7 +257,7 @@ function keyList(hints: KeyHint[]): HTMLElement {
   for (const { combos, description } of hints) {
     const dt = el("dt", { class: "keys__key" });
     combos.forEach((combo, comboIndex) => {
-      if (comboIndex > 0) dt.append(el("span", { class: "keys__or", text: "or" }));
+      if (comboIndex > 0) dt.append(el("span", { class: "keys__or", text: t().shortcuts.or }));
       combo.split(" + ").forEach((part, index) => {
         if (index > 0) dt.append(el("span", { class: "keys__plus", text: "+" }));
         dt.append(el("kbd", { text: part }));
@@ -276,17 +280,17 @@ function group(title: string, body: Node, ...notes: string[]): HTMLElement {
 
 export function openShortcutsModal(): void {
   openModal({
-    title: "Keyboard shortcuts",
+    title: t().shortcuts.title,
     body: el(
       "div",
       { class: "keys-groups" },
-      group("In this app", keyList(SHORTCUTS)),
+      group(t().shortcuts.inThisApp, keyList(appShortcuts())),
       group(
-        IS_APPLE ? "From your browser — Mac keys" : "From your browser",
-        keyList(browserNavKeys()),
-        "This app pushes a real history entry for every relationship you follow, so Back and Forward move through the document itself — returning you to the exact resource and scroll position you left. They are your browser's keys, not this app's.",
-        pointerNavNote(),
-        otherPlatformNote(),
+        t().shortcuts.fromBrowser(IS_APPLE),
+        keyList(browserShortcuts()),
+        t().shortcuts.historyNote,
+        t().shortcuts.pointerNote(IS_APPLE),
+        t().shortcuts.otherPlatformNote(IS_APPLE),
       ),
     ),
   });

@@ -1,26 +1,58 @@
 /**
  * Path handling, done by hand.
  *
- * There are three paths and they never nest, so a router library would be more
+ * There are five paths and they never nest, so a router library would be more
  * machinery than the problem needs:
  *
  *   /                       the paste view
  *   /view                   the document view
  *   /d/<id>:<secret>        a share link, which loads and then becomes /view
+ *   /impressum              provider information (§ 5 DDG)
+ *   /privacy                the privacy policy
  *
  * Anchors inside the document view are fragments on `/view`, so relationship
  * navigation stays entirely the browser's business — this module never touches
  * the hash.
+ *
+ * The two legal paths are real paths rather than a modal because they have to
+ * be linkable and quotable on their own. `/impressum` keeps the German word in
+ * every language: it is the term § 5 DDG case law is built around and the one a
+ * German visitor scans a footer for. `/privacy` has no such constraint — no law
+ * dictates what a privacy policy link is called — so it matches the rest of the
+ * English-language UI, and `/datenschutz` is accepted as an alias for anyone
+ * who types or is sent the German word.
  */
 
 export type Route =
   | { kind: "paste" }
   | { kind: "view" }
   | { kind: "share"; id: number; secret: string }
+  | { kind: "legal"; page: LegalRoute }
   | { kind: "unknown"; pathname: string };
+
+/** Which of the two legal pages a `legal` route names. */
+export type LegalRoute = "impressum" | "privacy";
 
 export const PASTE_PATH = "/";
 export const VIEW_PATH = "/view";
+export const IMPRESSUM_PATH = "/impressum";
+export const PRIVACY_PATH = "/privacy";
+
+/**
+ * Alternative spellings that resolve to the same page.
+ *
+ * `/datenschutz` is what a German speaker types, and `/legal` and `/imprint`
+ * are what an English speaker guesses. Cheap to honour, and the alternative is
+ * a "no page here" toast on a page somebody has a legal right to reach.
+ */
+const LEGAL_PATHS: Record<string, LegalRoute> = {
+  "/impressum": "impressum",
+  "/imprint": "impressum",
+  "/legal": "impressum",
+  "/privacy": "privacy",
+  "/datenschutz": "privacy",
+  "/datenschutzerklaerung": "privacy",
+};
 
 /** `/d/<id>:<secret>`, tolerating a trailing slash and a `#` separator. */
 const SHARE_PATTERN = /^\/d\/(\d{1,18})[:.]([A-Za-z0-9_-]{8,64})\/?$/;
@@ -38,6 +70,11 @@ export function parseRoute(rawPathname: string, hash = ""): Route {
 
   if (pathname === "/" || pathname === "") return { kind: "paste" };
   if (pathname === VIEW_PATH || pathname === VIEW_PATH + "/") return { kind: "view" };
+
+  // Tolerate a trailing slash and any casing, because these paths get typed by
+  // hand and pasted into address bars far more than the others.
+  const legal = LEGAL_PATHS[pathname.replace(/\/+$/, "").toLowerCase() || "/"];
+  if (legal) return { kind: "legal", page: legal };
 
   const match = SHARE_PATTERN.exec(pathname);
   if (match) return { kind: "share", id: Number(match[1]), secret: match[2]! };

@@ -1,4 +1,5 @@
 import { el } from "./dom.js";
+import { t } from "./i18n/index.js";
 import { summaryAttribute, previewValue } from "./format.js";
 import { chip } from "./render-resource.js";
 import { openModal } from "./ui.js";
@@ -22,8 +23,8 @@ export function openJumpModal(index: DocumentIndex): void {
   const input = el("input", {
     class: "field",
     type: "search",
-    placeholder: "type or id — e.g. people 0098, or art-8f21",
-    "aria-label": "Find a resource by type or id",
+    placeholder: t().jump.placeholder,
+    "aria-label": t().jump.label,
     autocomplete: "off",
     spellcheck: false,
   });
@@ -62,14 +63,14 @@ export function openJumpModal(index: DocumentIndex): void {
     results.replaceChildren();
 
     if (!matched.length) {
-      count.textContent = "No resource matches that.";
+      count.textContent = t().jump.noMatch;
       return;
     }
 
     count.textContent =
       matched.length >= MAX_RESULTS
-        ? `First ${MAX_RESULTS} matches — keep typing to narrow`
-        : `${matched.length} ${matched.length === 1 ? "match" : "matches"}`;
+        ? t().jump.capped(MAX_RESULTS)
+        : t().jump.matches(matched.length);
 
     for (const resource of matched) {
       const summary = summaryAttribute(resource.attributes);
@@ -88,8 +89,8 @@ export function openJumpModal(index: DocumentIndex): void {
   render("");
 
   const handle = openModal({
-    title: "Go to a resource",
-    subtitle: `${index.counts.total.toLocaleString()} resources in this document`,
+    title: t().jump.title,
+    subtitle: t().jump.subtitle(index.counts.total),
     body: el("div", { class: "jump" }, input, count, results),
     variant: "tall",
   });

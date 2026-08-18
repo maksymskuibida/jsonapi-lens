@@ -1,4 +1,5 @@
 import { el } from "./dom.js";
+import { t } from "./i18n/index.js";
 
 /* ---------------------------------------------------------------- toast --- */
 
@@ -104,7 +105,7 @@ export function openModal(options: ModalOptions): ModalHandle {
   const close = el("button", {
     class: "modal__close",
     type: "button",
-    "aria-label": "Close",
+    "aria-label": t().modal.close,
     text: "✕",
   });
   close.addEventListener("click", () => handle.close());

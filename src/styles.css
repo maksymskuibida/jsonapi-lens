@@ -2877,6 +2877,274 @@ body.has-modal {
   gap: var(--sp-4);
 }
 
+/* ------------------------------------------------------ language switch --- */
+
+/*
+ * A native `<select>`, restyled rather than replaced. A custom menu would have
+ * to re-implement keyboard handling, typeahead and the mobile picker, and the
+ * control is used roughly once per visitor — the browser's own is better at all
+ * three than anything worth writing here.
+ */
+.lang {
+  display: inline-flex;
+  flex: none;
+}
+
+.lang__select {
+  appearance: none;
+  padding: 0.4rem 1.5rem 0.4rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease),
+    color 120ms var(--ease);
+
+  /* The caret is drawn rather than left to the UA, so it follows the theme. */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 0.75rem center, right 0.5rem center;
+  background-size: 0.25rem 0.25rem, 0.25rem 0.25rem;
+  background-repeat: no-repeat;
+}
+
+.lang__select:hover {
+  background-color: var(--surface-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+/* The dropdown itself is UA-rendered, so its colours have to be set here. */
+.lang__select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* --------------------------------------------------------------- footer --- */
+
+/*
+ * Part of the shell, below every view. The Impressum has to be reachable from
+ * anywhere in the app — "ständig verfügbar" in the words of § 5 DDG — and the
+ * shell is the only place that is true of without repeating the link per view.
+ */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4) var(--sp-6);
+  margin-top: auto;
+  padding: var(--sp-5) var(--sp-6);
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunk);
+  font-size: var(--fs-3xs);
+  color: var(--text-3);
+}
+
+.footer__tagline {
+  font-family: var(--font-body);
+}
+
+.footer__links {
+  display: flex;
+  gap: var(--sp-5);
+}
+
+.footer__link {
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color 120ms var(--ease), border-color 120ms var(--ease);
+}
+
+.footer__link:hover {
+  color: var(--text);
+  border-bottom-color: var(--line-strong);
+}
+
+/* ---------------------------------------------------------- legal pages --- */
+
+/*
+ * The only prose in the app. Everything else on screen is identifiers in a
+ * measured column, so these pages deliberately read like a document: one
+ * column at the standard measure, generous leading, and the display face
+ * reserved for headings.
+ */
+.legal-view {
+  flex: 1;
+  display: grid;
+  place-items: start center;
+  padding: var(--sp-9) var(--sp-6) var(--sp-10);
+}
+
+.legal {
+  width: min(var(--measure), 100%);
+  font-family: var(--font-body);
+  color: var(--text-2);
+  line-height: 1.65;
+}
+
+.legal__title {
+  font-family: var(--font-display);
+  font-size: clamp(var(--fs-lg), 4vw, var(--fs-2xl));
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+  color: var(--text);
+  text-wrap: balance;
+}
+
+.legal__lede {
+  margin-top: var(--sp-5);
+  font-size: var(--fs-md);
+  text-wrap: pretty;
+}
+
+/* Impossible to miss on purpose — see `hasPlaceholders`. */
+.legal__warning {
+  margin-top: var(--sp-6);
+  padding: var(--sp-5) var(--sp-6);
+  border: 1px solid var(--danger-line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: 1.5;
+}
+
+.legal__section {
+  margin-top: var(--sp-8);
+}
+
+.legal__heading {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.legal__p,
+.legal__lines,
+.legal__list,
+.legal__pairs,
+.legal__note {
+  margin-top: var(--sp-5);
+  font-size: var(--fs-sm);
+}
+
+/* An address: the line breaks are the content, so they are not decoration. */
+.legal__lines {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.legal__list {
+  padding-left: var(--sp-6);
+  list-style: square;
+}
+
+.legal__list li {
+  margin-top: var(--sp-2);
+}
+
+.legal__list li::marker {
+  color: var(--text-3);
+}
+
+/*
+ * Term/detail pairs. Two columns once there is room for the term to sit beside
+ * its detail without either being squeezed; stacked below that.
+ */
+.legal__pairs {
+  display: grid;
+  gap: var(--sp-3) var(--sp-6);
+}
+
+@media (min-width: 40rem) {
+  .legal__pairs {
+    grid-template-columns: minmax(8rem, 14rem) 1fr;
+  }
+
+  .legal__detail {
+    margin-top: 0;
+  }
+}
+
+.legal__term {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.legal__detail {
+  margin-top: var(--sp-1);
+}
+
+.legal__note {
+  padding: var(--sp-5) var(--sp-6);
+  border: 1px solid var(--accent-line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.legal__link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-line);
+  overflow-wrap: anywhere;
+}
+
+.legal__link:hover {
+  border-bottom-color: var(--accent);
+}
+
+.legal__foot {
+  margin-top: var(--sp-8);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: var(--fs-3xs);
+  color: var(--text-3);
+}
+
+.legal__nav {
+  margin-top: var(--sp-6);
+}
+
+.legal__crosslink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+  text-decoration: none;
+}
+
+.legal__crosslink::before {
+  content: "→";
+  color: var(--text-3);
+}
+
+.legal__crosslink:hover {
+  color: var(--accent);
+}
+
 /* ==========================================================================
    Viewport behaviour
    --------------------------------------------------------------------------
@@ -2916,6 +3184,18 @@ body.has-modal {
 
   .btn {
     padding-inline: 0.5rem;
+  }
+
+  .lang__select {
+    padding-inline: 0.5rem 1.25rem;
+  }
+
+  .footer {
+    padding-inline: var(--sp-4);
+  }
+
+  .legal-view {
+    padding-inline: var(--sp-4);
   }
 }
 

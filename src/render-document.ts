@@ -1,5 +1,6 @@
 import { el, escapeHtml } from "./dom.js";
 import { formatBytes, formatDuration } from "./format.js";
+import { t } from "./i18n/index.js";
 import { encodeSegment, resourceKey } from "./ident.js";
 import { chip, groupRowsHtml } from "./render-resource.js";
 import { renderObjectBlock } from "./render-value.js";
@@ -18,7 +19,7 @@ export function groupDomId(type: string): string {
 }
 
 function count(n: number): string {
-  return n.toLocaleString();
+  return t().num(n);
 }
 
 /* ------------------------------------------------------------------ *
@@ -26,14 +27,14 @@ function count(n: number): string {
  * ------------------------------------------------------------------ */
 
 export function renderRail(index: DocumentIndex): HTMLElement {
-  const rail = el("nav", { class: "rail", "aria-label": "Document contents" });
+  const rail = el("nav", { class: "rail", "aria-label": t().rail.ariaLabel });
   const max = index.groups.reduce((m, g) => Math.max(m, g.resources.length), 1);
 
   rail.append(
     el(
       "div",
       { class: "rail__head" },
-      el("h2", { class: "rail__title", text: "Types" }),
+      el("h2", { class: "rail__title", text: t().rail.types }),
       el("span", { class: "rail__title-count", text: count(index.groups.length) }),
     ),
   );
@@ -44,8 +45,8 @@ export function renderRail(index: DocumentIndex): HTMLElement {
         class: "rail__search",
         type: "search",
         id: "rail-search",
-        placeholder: "Narrow this list",
-        "aria-label": "Narrow the type list",
+        placeholder: t().rail.narrow,
+        "aria-label": t().rail.narrowLabel,
         autocomplete: "off",
         spellcheck: false,
       }),
@@ -66,7 +67,7 @@ export function renderRail(index: DocumentIndex): HTMLElement {
           class: "railrow__link",
           href: "#" + groupDomId(group.type),
           "data-hue": group.hue,
-          title: `Jump to ${group.type}`,
+          title: t().rail.jumpTo(group.type),
         },
         el("b", { class: "railrow__sigil", text: group.sigil }),
         el(
@@ -76,7 +77,8 @@ export function renderRail(index: DocumentIndex): HTMLElement {
             "span",
             { class: "railrow__name-line" },
             el("span", { class: "railrow__name", text: group.type }),
-            isPrimary && el("span", { class: "railrow__primary", title: "In primary data", text: "•" }),
+            isPrimary &&
+              el("span", { class: "railrow__primary", title: t().rail.inPrimary, text: "•" }),
             el("span", { class: "railrow__count", text: count(group.resources.length) }),
           ),
           // A proportion bar, because the shape of a payload — which type
@@ -92,9 +94,9 @@ export function renderRail(index: DocumentIndex): HTMLElement {
         class: "railrow__solo",
         type: "button",
         "data-solo": group.type,
-        title: `Show only ${group.type}`,
+        title: t().rail.showOnly(group.type),
         "aria-pressed": "false",
-        text: "only",
+        text: t().rail.only,
       }),
     );
 
@@ -112,7 +114,7 @@ export function renderRail(index: DocumentIndex): HTMLElement {
         type: "button",
         id: "clear-filter",
         hidden: true,
-        text: "Show all types",
+        text: t().rail.showAllTypes,
       }),
     ),
   );
@@ -146,41 +148,42 @@ export function renderOverview(index: DocumentIndex, stats: DocumentStats): HTML
 
   // JSON-ish shorthand keeps these short enough not to wrap, and reads the way
   // the document itself is written.
+  const overview = t().overview;
   const shape = index.primaryIsNull
-    ? "data: null"
+    ? overview.shapeNull
     : index.errors.length
-      ? `errors[${count(index.errors.length)}]`
+      ? overview.shapeErrors(index.errors.length)
       : index.primary.length === 0
         ? index.counts.total > 0
-          ? "included only"
-          : "meta only"
+          ? overview.shapeIncludedOnly
+          : overview.shapeMetaOnly
         : index.primary.length === 1
-          ? "data{1}"
-          : `data[${count(index.primary.length)}]`;
+          ? overview.shapeSingle
+          : overview.shapeMany(index.primary.length);
 
   const list = el("dl", { class: "overview__stats" });
   list.append(
-    stat("Shape", shape),
-    stat("Resources", count(index.counts.total)),
-    stat("Types", count(index.groups.length)),
-    stat("Included", count(index.counts.fromIncluded)),
-    stat("Relationships", count(index.counts.relationships)),
+    stat(overview.shape, shape),
+    stat(overview.resources, count(index.counts.total)),
+    stat(overview.types, count(index.groups.length)),
+    stat(overview.included, count(index.counts.fromIncluded)),
+    stat(overview.relationships, count(index.counts.relationships)),
   );
   if (index.counts.danglingPointers) {
     list.append(
       stat(
-        index.counts.danglingPointers === 1 ? "Unresolved pointer" : "Unresolved pointers",
+        overview.unresolvedPointers(index.counts.danglingPointers),
         count(index.counts.danglingPointers),
         "absent",
       ),
     );
   }
   if (index.counts.duplicates) {
-    list.append(stat("Duplicate identities", count(index.counts.duplicates), "warn"));
+    list.append(stat(overview.duplicateIdentities, count(index.counts.duplicates), "warn"));
   }
   list.append(
-    stat("Size", formatBytes(stats.bytes)),
-    stat("Indexed in", formatDuration(stats.parseMs)),
+    stat(overview.size, formatBytes(stats.bytes)),
+    stat(overview.indexedIn, formatDuration(stats.parseMs)),
   );
 
   section.append(list);
@@ -189,7 +192,7 @@ export function renderOverview(index: DocumentIndex, stats: DocumentStats): HTML
     section.append(
       el("p", {
         class: "overview__note",
-        text: "Primary data is explicitly null. That is a valid response for a to-one relationship that relates to nothing — not an error.",
+        text: overview.nullNote,
       }),
     );
   }
@@ -198,7 +201,7 @@ export function renderOverview(index: DocumentIndex, stats: DocumentStats): HTML
     section.append(
       el("p", {
         class: "overview__note",
-        text: "This document carries no resources. Only its top-level members are shown below.",
+        text: overview.emptyNote,
       }),
     );
   }
@@ -208,7 +211,7 @@ export function renderOverview(index: DocumentIndex, stats: DocumentStats): HTML
       el(
         "p",
         { class: "overview__note overview__note--perf" },
-        `Large document: all ${count(index.counts.total)} resources are on the page and every anchor resolves, but attribute detail is built when you expand a resource. Find-in-page reaches every summary row, including off-screen ones — to search inside attributes, expand the resources first.`,
+        overview.lazyNote(index.counts.total),
       ),
     );
   }
@@ -232,11 +235,11 @@ export function renderDangling(index: DocumentIndex): HTMLElement | null {
       el(
         "span",
         null,
-        `${count(index.dangling.length)} distinct ${index.dangling.length === 1 ? "pointer" : "pointers"} resolve to nothing in this document`,
+        t().dangling.distinct(index.dangling.length),
       ),
       el("span", {
         class: "absent-list__hint",
-        text: `${count(index.counts.danglingPointers)} total`,
+        text: t().dangling.total(index.counts.danglingPointers),
       }),
     ),
   );
@@ -245,7 +248,7 @@ export function renderDangling(index: DocumentIndex): HTMLElement | null {
   body.append(
     el("p", {
       class: "absent-list__note",
-      text: "These are referenced by relationships but were not sent in data or included. Usually that means the request was missing an include parameter — or the server dropped something it should have sent.",
+      text: t().dangling.note,
     }),
   );
 
@@ -272,7 +275,7 @@ function renderError(error: JsonApiError, position: number): HTMLElement {
   head.append(
     el("h3", {
       class: "err__title",
-      text: error.title ?? `Error ${position + 1}`,
+      text: error.title ?? t().errors.fallbackTitle(position + 1),
     }),
   );
   item.append(head);
@@ -286,15 +289,22 @@ function renderError(error: JsonApiError, position: number): HTMLElement {
       el(
         "p",
         { class: "err__source" },
-        el("span", { class: "err__source-label", text: typeof pointer === "string" ? "pointer" : "parameter" }),
+        el("span", {
+          class: "err__source-label",
+          text: typeof pointer === "string" ? t().errors.pointer : t().errors.parameter,
+        }),
         el("code", { class: "err__source-value", text: String(pointer ?? parameter) }),
       ),
     );
   }
 
   const errorPointer = `/errors/${position}`;
-  if (error.meta) item.append(renderObjectBlock("Meta", error.meta, `${errorPointer}/meta`, "sub"));
-  if (error.links) item.append(renderObjectBlock("Links", error.links, `${errorPointer}/links`, "sub"));
+  if (error.meta) {
+    item.append(renderObjectBlock(t().block.meta, error.meta, `${errorPointer}/meta`, "sub"));
+  }
+  if (error.links) {
+    item.append(renderObjectBlock(t().block.links, error.links, `${errorPointer}/links`, "sub"));
+  }
 
   return item;
 }
@@ -307,7 +317,7 @@ export function renderErrors(index: DocumentIndex): HTMLElement | null {
     el(
       "h2",
       { class: "errors__title" },
-      "Errors",
+      t().errors.title,
       el("span", { class: "errors__count", text: count(index.errors.length) }),
     ),
   );
@@ -327,12 +337,12 @@ export function renderTopLevel(index: DocumentIndex): HTMLElement | null {
   if (!index.meta && !index.links && !index.jsonapi) return null;
 
   const details = el("details", { class: "toplevel", id: "top-level" });
-  details.append(el("summary", { class: "toplevel__summary", text: "Top-level members" }));
+  details.append(el("summary", { class: "toplevel__summary", text: t().topLevel.summary }));
 
   const body = el("div", { class: "toplevel__body" });
-  if (index.jsonapi) body.append(renderObjectBlock("jsonapi", index.jsonapi, "/jsonapi", "sub"));
-  if (index.links) body.append(renderObjectBlock("Links", index.links, "/links", "sub"));
-  if (index.meta) body.append(renderObjectBlock("Meta", index.meta, "/meta", "sub"));
+  if (index.jsonapi) body.append(renderObjectBlock(t().block.jsonapi, index.jsonapi, "/jsonapi", "sub"));
+  if (index.links) body.append(renderObjectBlock(t().block.links, index.links, "/links", "sub"));
+  if (index.meta) body.append(renderObjectBlock(t().block.meta, index.meta, "/meta", "sub"));
   details.append(body);
 
   return details;
@@ -350,7 +360,7 @@ export function renderPrimary(index: DocumentIndex): HTMLElement | null {
     el(
       "h2",
       { class: "primary__title" },
-      "Primary data",
+      t().primary.title,
       el("span", { class: "primary__count", text: count(index.primary.length) }),
     ),
   );
@@ -370,7 +380,7 @@ export function renderPrimary(index: DocumentIndex): HTMLElement | null {
     list.append(
       el("li", {
         class: "primary__more",
-        text: `+ ${count(index.primary.length - shown.length)} more in the sections below`,
+        text: t().primary.more(index.primary.length - shown.length),
       }),
     );
   }
@@ -393,8 +403,8 @@ const EXPAND_ALL_LIMIT = 500;
 function groupHtml(group: TypeGroup): string {
   const tools =
     group.resources.length <= EXPAND_ALL_LIMIT
-      ? `<button class="group__toggle" type="button">Expand all</button>`
-      : `<span class="group__toggle-note" title="Too many rows to expand at once">${count(group.resources.length)} rows</span>`;
+      ? `<button class="group__toggle" type="button">${escapeHtml(t().group.expandAll)}</button>`
+      : `<span class="group__toggle-note" title="${escapeHtml(t().group.tooManyRowsTitle)}">${escapeHtml(t().group.tooManyRows(group.resources.length))}</span>`;
 
   return (
     `<section class="group" id="${groupDomId(group.type)}" data-type="${escapeHtml(group.type)}" data-hue="${group.hue}">` +
