@@ -10,6 +10,7 @@ import llmsTxt from "../public/llms.txt?raw";
 import llmsFullTxt from "../public/llms-full.txt?raw";
 import manifestJson from "../public/site.webmanifest?raw";
 import headersFile from "../public/_headers?raw";
+import redirectsFile from "../public/_redirects?raw";
 
 import { PRERENDERED_PAGES } from "../vite.config.js";
 import { de } from "../src/i18n/de.js";
@@ -18,7 +19,7 @@ import { uk } from "../src/i18n/uk.js";
 import { LOCALES } from "../src/i18n/index.js";
 import { legalEn } from "../src/legal/en.js";
 import { IDENTITY } from "../src/legal/identity.js";
-import { IMPRESSUM_PATH, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
+import { IMPRESSUM_PATH, LEGAL_PATHS, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
 import { INDEXABLE, NOT_INDEXABLE, SITE_ORIGIN } from "../src/seo.js";
 import type { Messages } from "../src/i18n/en.js";
 import type { LegalPage } from "../src/legal/types.js";
@@ -348,11 +349,59 @@ describe("_headers", () => {
   });
 });
 
+describe("_redirects", () => {
+  /** `<from> <to> <status>`, ignoring comments and blank lines. */
+  const rules = redirectsFile
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .map((line) => line.split(/\s+/));
+
+  it("sends every alias to the page src/router.ts says it means", () => {
+    const canonical: Record<string, string> = {
+      impressum: IMPRESSUM_PATH,
+      privacy: PRIVACY_PATH,
+    };
+    const aliases = Object.entries(LEGAL_PATHS).filter(
+      ([path, page]) => path !== canonical[page],
+    );
+
+    expect(rules).toHaveLength(aliases.length);
+    for (const [path, page] of aliases) {
+      const rule = rules.find(([from]) => from === path);
+      expect(rule, path).toBeTruthy();
+      expect(rule?.[1], path).toBe(canonical[page]);
+      // 301, not 302: the alias is not coming back as a separate page.
+      expect(rule?.[2], path).toBe("301");
+    }
+  });
+
+  it("never redirects a canonical path, which would be a loop", () => {
+    for (const [from] of rules) {
+      expect([IMPRESSUM_PATH, PRIVACY_PATH, PASTE_PATH]).not.toContain(from);
+    }
+  });
+});
+
 describe("the prerendered legal pages", () => {
   it("covers exactly the two paths that have their own content", () => {
     expect(PRERENDERED_PAGES.map((page) => page.path).sort()).toEqual(
       [IMPRESSUM_PATH, PRIVACY_PATH].sort(),
     );
+  });
+
+  /*
+   * `/impressum` was briefly emitted as `impressum/index.html`, which Cloudflare's
+   * `auto-trailing-slash` handling serves by first sending a 307 to `/impressum/`
+   * — a redirect to a URL that disagrees with the canonical on the page itself.
+   * A flat file makes `/impressum` the 200 and `/impressum/` the redirect.
+   */
+  it("names paths that become flat files rather than directories", () => {
+    for (const page of PRERENDERED_PAGES) {
+      expect(page.path.startsWith("/"), page.path).toBe(true);
+      expect(page.path.slice(1), page.path).not.toContain("/");
+      expect(page.path.endsWith("/"), page.path).toBe(false);
+    }
   });
 
   it("uses the titles and ledes the pages themselves render", () => {

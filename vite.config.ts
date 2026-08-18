@@ -31,6 +31,14 @@ export interface PrerenderedPage {
  * running app replaces them from the catalogue in whichever language it
  * negotiates. `test/seo.test.ts` asserts they match `src/legal/en.ts`, so this
  * table cannot drift from the pages it describes.
+ *
+ * Each is emitted as a flat `impressum.html`, *not* `impressum/index.html`.
+ * Cloudflare's asset router runs `html_handling: auto-trailing-slash`, which
+ * serves `/impressum` from either shape — but for the directory shape it first
+ * sends a 307 to `/impressum/`, so every visitor and crawler would take a
+ * redirect to a URL that disagrees with the canonical this very file declares.
+ * With the flat file `/impressum` is a 200 and `/impressum/` is the redirect,
+ * which is the direction that matches the canonical, the sitemap and the footer.
  */
 export const PRERENDERED_PAGES: PrerenderedPage[] = [
   {
@@ -152,7 +160,7 @@ function seoRoutes(): Plugin {
       for (const page of PRERENDERED_PAGES) {
         this.emitFile({
           type: "asset",
-          fileName: `${page.path.replace(/^\//, "")}/index.html`,
+          fileName: `${page.path.replace(/^\//, "")}.html`,
           source: headFor(html, page),
         });
       }

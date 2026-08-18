@@ -44,8 +44,14 @@ export const PRIVACY_PATH = "/privacy";
  * `/datenschutz` is what a German speaker types, and `/legal` and `/imprint`
  * are what an English speaker guesses. Cheap to honour, and the alternative is
  * a "no page here" toast on a page somebody has a legal right to reach.
+ *
+ * Exported because `public/_redirects` sends the aliases to the canonical path
+ * with a 301, so a search engine is never offered four URLs for one page. This
+ * table stays the one that decides which alias means what — the redirects are
+ * checked against it by `test/seo.test.ts` — and it still resolves them itself,
+ * for in-app navigation and for anyone who lands on one before the redirect.
  */
-const LEGAL_PATHS: Record<string, LegalRoute> = {
+export const LEGAL_PATHS: Record<string, LegalRoute> = {
   "/impressum": "impressum",
   "/imprint": "impressum",
   "/legal": "impressum",

@@ -246,7 +246,12 @@ Two rules run through all of it:
 plugin in [`vite.config.ts`](vite.config.ts), so a crawler that does not run JavaScript gets their
 titles, descriptions, canonicals and structured data rather than the front page's. Every replacement
 in that plugin is asserted, so an edit to `index.html` that breaks one fails the build instead of
-quietly emitting a page that describes the wrong thing.
+quietly emitting a page that describes the wrong thing. They are flat files — `impressum.html`, not
+`impressum/index.html` — because Cloudflare's `auto-trailing-slash` handling serves the directory
+shape by first redirecting `/impressum` to `/impressum/`, which is a redirect to a URL that
+disagrees with the canonical on the page. The alias paths (`/imprint`, `/legal`, `/datenschutz`,
+`/datenschutzerklaerung`) 301 to the real one via [`public/_redirects`](public/_redirects), generated
+from the same table in `src/router.ts` that resolves them, so one page never has four indexable URLs.
 
 The link preview is [`public/og.svg`](public/og.svg), drawn in the app's own palette and typeface and
 rasterised to `og.png` by [`scripts/render-og.sh`](scripts/render-og.sh) (`npm run og`). It is a
@@ -419,6 +424,7 @@ public/
   og.svg → og.png     the link preview, drawn and then rasterised
   site.webmanifest    name, icons, theme colour
   _headers            X-Robots-Tag for /view and /d/*, plus two safety headers
+  _redirects          the legal aliases, 301'd to the one URL each page has
 migrations/           D1 schema
 scripts/
   gen-fixture.mjs     the 25.7 MB performance fixture

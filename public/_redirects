@@ -1,0 +1,14 @@
+# Alias paths, sent to the one URL each page actually has.
+#
+# `src/router.ts` resolves all of these itself, because people type them — but a
+# path that resolves is also a path a search engine can index, and four URLs for
+# one Impressum is four ways to split its ranking. A 301 keeps the aliases
+# working and leaves exactly one indexable URL per page.
+#
+# Generated from `LEGAL_PATHS` in `src/router.ts`; `test/seo.test.ts` asserts the
+# two still agree.
+
+/imprint                    /impressum  301
+/legal                      /impressum  301
+/datenschutz                /privacy  301
+/datenschutzerklaerung      /privacy  301
