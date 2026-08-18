@@ -220,19 +220,25 @@ function openSection(section: Element): void {
  * because the DOM did not exist yet) and on `hashchange` (where the browser has
  * scrolled, but the target may be collapsed or filtered out).
  *
- * `restoreY` is the scroll position saved for the history entry being returned
- * to. When it is present — Back or Forward — it wins, so you land exactly where
- * you were rather than at the top of whatever the fragment names. When it is
- * absent — following a link for the first time — the fragment is scrolled to.
+ * `restore` is what the history entry being returned to remembered. When it is
+ * present — Back or Forward — the document is folded back to the shape it had,
+ * and then the exact offset is used, so you land where you were rather than at
+ * the top of whatever the fragment names. When it is absent — following a link
+ * for the first time — the fragment is scrolled to.
  *
- * Either way the target's row is opened *first*, so the scroll happens against
- * final layout. Opening a row grows the page below it, and restoring a position
- * before that growth would land short.
+ * Order matters throughout: the fold state is applied first, then the target's
+ * own row is opened, and only then does anything scroll. Every one of those
+ * steps changes how tall the page is, and an offset applied before them lands
+ * against a layout that no longer exists.
  *
  * The highlight needs no help from here: `:target` starts matching as soon as an
  * element with that id exists, including one rendered long after the navigation.
  */
-function resolveHash(restoreY: number | null = null): void {
+function resolveHash(restore: EntryState | null = null): void {
+  // Fold the page back before measuring anything against it.
+  if (restore?.open) applyOpenRows(restore.open);
+  const restoreY = typeof restore?.y === "number" ? restore.y : null;
+
   const raw = location.hash;
 
   if (!raw || raw === "#") {
@@ -287,25 +293,94 @@ function resolveHash(restoreY: number | null = null): void {
  */
 if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 
-let saveScrollTimer: number | undefined;
+/**
+ * What a history entry remembers.
+ *
+ * A scroll offset on its own is not enough. The offset only means anything
+ * against a particular layout, and expanding one row moves everything below it
+ * by hundreds of pixels — so returning to `y` after the page has been folded
+ * differently lands somewhere unrelated. The set of open rows travels with the
+ * offset, and is re-applied before the scroll.
+ */
+interface EntryState {
+  y?: number;
+  /** DOM ids of the resource sections that were expanded. */
+  open?: string[];
+  /** Set when there were too many open rows to record; see OPEN_ROWS_LIMIT. */
+  openTruncated?: boolean;
+}
 
-function rememberScroll(): void {
+/**
+ * Above this, the open set is not recorded. `history.state` is capped by the
+ * browser (Firefox rejects past ~640 kB), and "Expand all" on a big group could
+ * otherwise push tens of thousands of ids into every entry. Past the limit the
+ * scroll offset is still stored; only the fold state is given up.
+ */
+const OPEN_ROWS_LIMIT = 2000;
+
+let saveStateTimer: number | undefined;
+
+/** The resource sections currently expanded. Only open rows are scanned. */
+function openRowIds(): string[] {
+  const ids: string[] = [];
+  for (const details of docEl.querySelectorAll<HTMLElement>(".res__d[open]")) {
+    const section = details.closest<HTMLElement>(".res");
+    if (section?.id) {
+      ids.push(section.id);
+      if (ids.length > OPEN_ROWS_LIMIT) return ids;
+    }
+  }
+  return ids;
+}
+
+/** Fold the document back to exactly the given set, touching only what differs. */
+function applyOpenRows(ids: string[]): void {
+  const wanted = new Set(ids);
+  const currentlyOpen = new Set<string>();
+
+  for (const details of docEl.querySelectorAll<HTMLDetailsElement>(".res__d[open]")) {
+    const section = details.closest<HTMLElement>(".res");
+    if (!section?.id) continue;
+    currentlyOpen.add(section.id);
+    if (!wanted.has(section.id)) details.open = false;
+  }
+
+  for (const id of wanted) {
+    if (currentlyOpen.has(id)) continue;
+    const details = document.getElementById(id)?.querySelector<HTMLDetailsElement>(".res__d");
+    if (details) details.open = true;
+  }
+}
+
+function rememberState(): void {
   try {
     const state = (history.state ?? {}) as Record<string, unknown>;
-    history.replaceState({ ...state, y: Math.round(window.scrollY) }, "");
+    const open = openRowIds();
+    const next: EntryState = { ...state, y: Math.round(window.scrollY) };
+    if (open.length > OPEN_ROWS_LIMIT) {
+      delete next.open;
+      next.openTruncated = true;
+    } else {
+      next.open = open;
+      delete next.openTruncated;
+    }
+    history.replaceState(next, "");
   } catch {
     /* replaceState can throw if called too often; losing one sample is fine */
   }
 }
 
-window.addEventListener(
-  "scroll",
-  () => {
-    window.clearTimeout(saveScrollTimer);
-    saveScrollTimer = window.setTimeout(rememberScroll, 120);
-  },
-  { passive: true },
-);
+function scheduleRemember(): void {
+  window.clearTimeout(saveStateTimer);
+  saveStateTimer = window.setTimeout(rememberState, 120);
+}
+
+window.addEventListener("scroll", scheduleRemember, { passive: true });
+
+/* Folding a row changes the layout the offset is measured against, and fires no
+   scroll event, so expansion has to be recorded in its own right. `toggle` does
+   not bubble — hence the capture phase, as elsewhere. */
+docEl.addEventListener("toggle", scheduleRemember, true);
 
 /*
  * The debounced listener above keeps the entry roughly current, but the moment
@@ -326,16 +401,28 @@ document.addEventListener(
     const target = event.target;
     if (!(target instanceof Element)) return;
     const anchor = target.closest<HTMLAnchorElement>('a[href^="#"]');
-    if (anchor) rememberScroll();
+    if (anchor) rememberState();
   },
   true,
 );
 
-window.addEventListener("pagehide", rememberScroll);
+window.addEventListener("pagehide", rememberState);
 
-function savedScrollY(): number | null {
-  const y = (history.state as { y?: unknown } | null)?.y;
-  return typeof y === "number" ? y : null;
+/* `scrollend` is the exact moment a scroll settles, so it records the real
+   resting position instead of wherever the debounce happened to land. */
+window.addEventListener("scrollend", rememberState, { passive: true });
+
+/*
+ * There is deliberately no Navigation API `navigate` hook here, tempting as it
+ * looks. It fires during a traversal, by which point `history.state` already
+ * refers to the entry being restored — so writing the outgoing scroll position
+ * there overwrites the very state that is about to be read back, and Back stops
+ * working entirely. `scrollend` above closes the same gap without that risk.
+ */
+
+/** What the current entry remembered — used after a reload, where state survives. */
+function savedEntryState(): EntryState | null {
+  return (history.state as EntryState | null) ?? null;
 }
 
 /**
@@ -344,15 +431,15 @@ function savedScrollY(): number | null {
  * runs once after whichever arrives last — so the two cannot fight over the
  * scroll position, whatever order the browser delivers them in.
  */
-let pendingRestoreY: number | null = null;
+let pendingRestore: EntryState | null = null;
 let settleTimer: number | undefined;
 
 function scheduleSettle(): void {
   window.clearTimeout(settleTimer);
   settleTimer = window.setTimeout(() => {
-    const y = pendingRestoreY;
-    pendingRestoreY = null;
-    resolveHash(y);
+    const restore = pendingRestore;
+    pendingRestore = null;
+    resolveHash(restore);
   }, 0);
 }
 
@@ -982,7 +1069,7 @@ async function applyRoute(): Promise<void> {
       const ok = await load(stored.text, stored.label ?? "stored document", { persist: false });
       // The browser tried to scroll to the fragment before any of this existed,
       // so that attempt hit nothing. Now the sections are in the DOM.
-      if (ok) resolveHash(savedScrollY());
+      if (ok) resolveHash(savedEntryState());
       else navigate(PASTE_PATH, { replace: true });
       return;
     }
@@ -997,8 +1084,7 @@ async function applyRoute(): Promise<void> {
 }
 
 window.addEventListener("popstate", (event) => {
-  const y = (event.state as { y?: unknown } | null)?.y;
-  pendingRestoreY = typeof y === "number" ? y : null;
+  pendingRestore = (event.state as EntryState | null) ?? null;
   void applyRoute().then(scheduleSettle);
 });
 

@@ -62,11 +62,18 @@ browser.
   read back from IndexedDB, so the browser's initial scroll-to-fragment hits nothing. The app
   rebuilds first, then resolves `location.hash` itself. (`:target` needs no help — it starts
   matching as soon as an element with that id exists.)
-- **Opening a row shifts everything below it**, which stales any scroll offset saved before that
-  growth. So the browser's own `scrollRestoration` is turned off and each entry's position is kept in
-  `history.state`, written synchronously on the way out — a capture-phase click on any in-page anchor,
-  plus `pagehide` — rather than only from a debounced scroll listener that may still be pending when
-  the navigation happens. On the way back the row is opened *first*, then the position is restored.
+- **A scroll offset only means something against one layout.** Expanding a row moves everything
+  below it by hundreds of pixels, so restoring `y` after the page has been folded differently lands
+  somewhere unrelated. Each entry therefore records the set of open rows alongside the offset, and on
+  the way back the document is folded to that shape *before* anything scrolls. The browser's own
+  `scrollRestoration` is off, because it cannot know any of this. Positions are captured on
+  `scrollend`, on a debounce, on a capture-phase click on any in-page anchor, and on `pagehide`.
+  Above 2,000 open rows the fold state is dropped rather than risking the browser's `history.state`
+  size limit; the offset is still kept.
+- **Do not reach for the Navigation API's `navigate` event** to catch the last few milliseconds
+  before a Back. It fires *during* the traversal, when `history.state` already refers to the entry
+  being restored, so writing the outgoing position there overwrites exactly what is about to be read
+  and Back stops working. Found by testing; `scrollend` closes the same gap safely.
 - **Cloudflare's asset router percent-encodes the colon** in `/d/1:KEY`, 307-ing to `/d/1%3AKEY`, so
   the router decodes the pathname before matching.
 - **Duplicate identities.** A document that repeats `type:id` violates the spec, but rendering it
@@ -104,8 +111,8 @@ browser.
 **Keeping things**
 - **Saved documents** live in IndexedDB, with rename and delete. Nothing is uploaded.
 - The last document you opened is restored on reload; `/` offers a way back into it.
-- Back and Forward restore the exact scroll position of each history entry, not just the fragment —
-  including your position part-way down a long expanded resource.
+- Back and Forward restore each history entry's exact scroll position *and* which rows were
+  expanded — a saved offset is meaningless if the page has since been folded differently.
 
 **Keyboard** — `?` lists them all. `/` or `g` finds a resource by type or id, `s` saves, `r` raw,
 `e` exports, `l` opens saved documents, `Shift+Esc` leaves the document, `Esc` closes a dialog.

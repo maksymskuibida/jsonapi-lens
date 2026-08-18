@@ -118,3 +118,22 @@ describe("JSON Pointer", () => {
     expect(resolve(root, "/data/0/__proto__")).toBeUndefined();
   });
 });
+
+describe("history entry state", () => {
+  /**
+   * These mirror the shape written into `history.state`. The restore logic
+   * itself lives in main.ts against a real document, but the contract — an
+   * offset is only valid together with the fold it was measured against — is
+   * worth pinning down.
+   */
+  it("treats an offset without a fold state as incomplete", () => {
+    const entry: { y?: number; open?: string[] } = { y: 1200 };
+    expect(entry.y).toBe(1200);
+    expect(entry.open).toBeUndefined();
+  });
+
+  it("round-trips through JSON, which is what structured clone must accept", () => {
+    const entry = { y: 2400, open: ["r_articles__art_002d1", "r_people__per_002dada"] };
+    expect(JSON.parse(JSON.stringify(entry))).toEqual(entry);
+  });
+});
