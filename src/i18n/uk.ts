@@ -54,7 +54,7 @@ export const uk: Messages = {
 
   footer: {
     tagline: "Переглядач документів JSON:API. Працює у вашому браузері.",
-    impressum: "Impressum",
+    impressum: "Вихідні дані (Impressum)",
     privacy: "Конфіденційність",
     sourceLabel: "Код",
   },

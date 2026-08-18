@@ -6,7 +6,15 @@ import "./styles.css";
 import { copyBlob, copyText, downloadText } from "./clipboard.js";
 import { el } from "./dom.js";
 import { formatBytes, formatDuration } from "./format.js";
-import { applyDocumentLanguage, LOCALE_NAMES, LOCALES, locale, setLocale, t } from "./i18n/index.js";
+import {
+  applyDocumentLanguage,
+  LOCALE_CODES,
+  LOCALE_NAMES,
+  LOCALES,
+  locale,
+  setLocale,
+  t,
+} from "./i18n/index.js";
 import type { Locale } from "./i18n/index.js";
 import { localiseStaticDom } from "./i18n/static-dom.js";
 import { legal } from "./legal/index.js";
@@ -115,6 +123,36 @@ languageEl.value = locale();
 languageEl.addEventListener("change", () => {
   setLocale(languageEl.value as Locale);
 });
+
+/*
+ * A `<select>` is as wide as its widest option, and the full names push the top
+ * bar past 320px. Below the same breakpoint the buttons use, the options become
+ * language tags — which is also what the control is doing at that size: naming
+ * a choice, not explaining it.
+ */
+const narrowBar = window.matchMedia("(max-width: 52rem)");
+
+/*
+ * Idempotent, and driven by both the media query and `resize`. The query's own
+ * `change` event is the right signal and fires in a real browser, but it is one
+ * event: anything that resizes the viewport without dispatching it would leave
+ * the wrong labels sitting there until the next reload. Rewriting three
+ * `textContent`s is far cheaper than the bug.
+ */
+let narrowLabels: boolean | null = null;
+
+function labelLanguageOptions(): void {
+  if (narrowLabels === narrowBar.matches) return;
+  narrowLabels = narrowBar.matches;
+  for (const option of languageEl.options) {
+    const code = option.value as Locale;
+    option.textContent = narrowLabels ? LOCALE_CODES[code] : LOCALE_NAMES[code];
+  }
+}
+
+labelLanguageOptions();
+narrowBar.addEventListener("change", labelLanguageOptions);
+window.addEventListener("resize", labelLanguageOptions, { passive: true });
 
 /* ---------------------------------------------------------------- state --- */
 

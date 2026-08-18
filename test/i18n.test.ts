@@ -66,6 +66,16 @@ describe("catalogues", () => {
     expect(messages.overview.shapeSingle).toBe("data{1}");
   });
 
+  it("keeps Impressum in the footer label of every language", () => {
+    // § 5 DDG's *leicht erkennbar* is about a German visitor recognising the
+    // link, so the word survives translation even where the rest of the label
+    // does not. German needs no gloss — there it is the whole label.
+    for (const [name, messages] of [["en", en], ...CATALOGUES] as [string, Messages][]) {
+      expect(messages.footer.impressum, name).toContain("Impressum");
+    }
+    expect(de.footer.impressum).toBe("Impressum");
+  });
+
   it("offers exactly the share lifetimes the Worker accepts", () => {
     const keys = Object.keys(en.share.lifetimes).sort();
     for (const [name, messages] of CATALOGUES) {

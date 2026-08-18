@@ -32,6 +32,20 @@ export const LOCALE_NAMES: Record<Locale, string> = {
   uk: "Українська",
 };
 
+/**
+ * Short forms, for when the top bar has no room for the full name.
+ *
+ * The bar is the tightest constraint in the layout — a brand plus four controls
+ * does not fit a phone — and "Українська" is the widest control on it. Below the
+ * breakpoint the switcher shows the language's tag instead, the same trade the
+ * buttons make when they drop their `btn__wide` words.
+ */
+export const LOCALE_CODES: Record<Locale, string> = {
+  en: "EN",
+  de: "DE",
+  uk: "UK",
+};
+
 const CATALOGUES: Record<Locale, Messages> = { en, de, uk };
 
 const STORAGE_KEY = "jsonapi-lens:locale";

@@ -66,7 +66,7 @@ export const en = {
 
   footer: {
     tagline: "A JSON:API document viewer. Runs in your browser.",
-    impressum: "Impressum",
+    impressum: "Legal Notice (Impressum)",
     privacy: "Privacy",
     /** Reachable from every view, which is the point of putting it here. */
     sourceLabel: "Source",
