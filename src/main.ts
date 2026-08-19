@@ -741,7 +741,10 @@ document.addEventListener(
     const target = event.target;
     if (!(target instanceof Element)) return;
     const anchor = target.closest<HTMLAnchorElement>('a[href^="#"]');
-    if (anchor) rememberState();
+    if (anchor) {
+      rememberState();
+      dropPendingRestore();
+    }
   },
   true,
 );
@@ -771,24 +774,34 @@ function savedEntryState(): EntryState | null {
  * runs once after whichever arrives last — so the two cannot fight over the
  * scroll position, whatever order the browser delivers them in.
  *
- * The fall back to `history.state` is what makes a second pass harmless. If the
- * two events are ever far enough apart for the timer to fire between them — a
- * traversal that has to reload the document from IndexedDB first — the second
- * pass would otherwise run with no restore state and scroll to the top of
- * whatever the fragment names, throwing away the position just restored. During
- * a traversal `history.state` is already the entry being returned to, so reading
- * it again reproduces the same landing rather than undoing it. Following a link
- * pushes an entry whose state is null, which is exactly the "no restore" case.
+ * What a traversal is has to be *recorded*, not inferred from `history.state`.
+ * Reading the state back looked like a tidy way to survive a second settle pass,
+ * and it broke arriving at a resource: the entry a fragment navigation pushes
+ * starts out stateless, but anything that fires a scroll before the timer runs —
+ * closing the jump dialog does — writes a position into it first. That state then
+ * reads as a restored fold shape, and a restored shape deliberately leaves rows
+ * as they were, so the row just navigated to stayed shut.
+ *
+ * So: set on `popstate`, cleared by the next forward navigation, and *not*
+ * cleared once used, which is what keeps a second pass harmless. The fragment is
+ * kept alongside it because a restore only belongs to the URL it was captured
+ * for — editing the fragment in the address bar makes a new entry, and the
+ * pending restore must not be applied to it.
  */
-let pendingRestore: EntryState | null = null;
+let pendingRestore: { state: EntryState | null; hash: string } | null = null;
 let settleTimer: number | undefined;
+
+/** Forget any traversal still waiting: a new navigation supersedes it. */
+function dropPendingRestore(): void {
+  pendingRestore = null;
+}
 
 function scheduleSettle(): void {
   window.clearTimeout(settleTimer);
   settleTimer = window.setTimeout(() => {
-    const restore = pendingRestore ?? savedEntryState();
-    pendingRestore = null;
-    resolveHash(restore);
+    const pending =
+      pendingRestore && pendingRestore.hash === location.hash ? pendingRestore.state : null;
+    resolveHash(pending);
   }, 0);
 }
 
@@ -1196,6 +1209,10 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
     else navigate(VIEW_PATH, { replace: true });
   }
 
+  // A different document invalidates any traversal still waiting to be applied:
+  // its remembered rows and its anchor belong to the document being replaced.
+  dropPendingRestore();
+
   renderDocumentView(current, parseMs);
 
   if (options.persist) {
@@ -1509,7 +1526,7 @@ async function applyRoute(): Promise<void> {
 }
 
 window.addEventListener("popstate", (event) => {
-  pendingRestore = (event.state as EntryState | null) ?? null;
+  pendingRestore = { state: (event.state as EntryState | null) ?? null, hash: location.hash };
   void applyRoute().then(scheduleSettle);
 });
 

@@ -69,11 +69,17 @@ If you write your own, two rules matter more than the rest:
 
 ## What is covered
 
-22 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
+24 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
 unwound one Back at a time, Back-then-Forward, rapid double Backs, Back/Forward hammering, returning
 to the very top and the very bottom, a type filter active, "Expand all" on a 36-row group, a position
 deep inside a tall expanded row, a reverse pointer out of "Referenced by", the jump modal, collapsing
-the row you landed on before leaving, and "Expand all" reading the rows rather than its own memory.
+the row you landed on before leaving, "Expand all" reading the rows rather than its own memory, and arriving at a resource opening it by
+every route there is.
+
+That last one is worth its own note. Every scenario that follows a relationship also asserts the row
+it landed on is open, because a position-only assertion cannot see that failing — the landing is in
+exactly the right place whether or not the row expanded, and a regression there is unmissable in use
+and invisible in the numbers.
 
 Every one of them runs at whatever `--width` is given, so narrow layouts are the same 22 scenarios
 rather than a separate list. 390, 768 and 1512 are the widths worth trying; fractional row heights at

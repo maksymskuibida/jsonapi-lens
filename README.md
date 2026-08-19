@@ -102,6 +102,17 @@ called — so it matches the rest of the UI. `/imprint`, `/legal`, `/datenschutz
   in-page anchor, and on `pagehide` — and never while a restore is still converging, or the entry
   would be overwritten with a half-finished position. Above 2,000 open rows the fold state is dropped
   rather than risking the browser's `history.state` size limit; the position is still kept.
+- **A traversal has to be recorded, not inferred from `history.state`.** Reading the state back looks
+  like a tidy way to make a second settle pass harmless — during a traversal it already holds the
+  entry being returned to. It is wrong, and the symptom is nowhere near the cause: the entry a
+  fragment navigation pushes starts out stateless, but anything that fires a scroll before the
+  fragment is resolved writes a position into it first, and closing the jump dialog does exactly
+  that. That state then reads as a restored fold shape, a restored shape deliberately leaves rows as
+  they were, and so the row you had just navigated to stayed shut. `popstate` records the traversal
+  instead, the next forward navigation clears it, and it is deliberately *not* cleared once used —
+  that is what makes a repeat pass idempotent. It is stored with the fragment it was captured for,
+  because editing the fragment in the address bar makes a new entry that a pending restore must not
+  be applied to.
 - **Do not reach for the Navigation API's `navigate` event** to catch the last few milliseconds
   before a Back. It fires *during* the traversal, when `history.state` already refers to the entry
   being restored, so writing the outgoing position there overwrites exactly what is about to be read

@@ -42,13 +42,17 @@
     await N.center(a);
     const before = { top: N.top(a), y: Math.round(scrollY), h: N.height(), open: N.openIds().length };
     await N.click(...ID[to], host);
+    // Arriving somewhere has to open it. Following a relationship to read a
+    // collapsed row is most of the point, and a position-only assertion cannot
+    // see it: the landing is in exactly the right place either way.
+    const arrivedOpen = !!N.sec(...ID[to]).querySelector('.res__d[open]');
     const landed = { y: Math.round(scrollY), h: N.height(), hash: location.hash };
     await N.back();
     const after = { top: N.top(a), y: Math.round(scrollY), h: N.height(), open: N.openIds().length };
     const drift = after.top - before.top;
     return {
-      name, ok: Math.abs(drift) <= TOL, driftPx: drift,
-      detail: `top ${before.top}->${after.top}, y ${before.y}->${after.y}, h ${before.h}->${after.h}, open ${before.open}->${after.open}`,
+      name, ok: Math.abs(drift) <= TOL && arrivedOpen, driftPx: drift,
+      detail: `top ${before.top}->${after.top}, y ${before.y}->${after.y}, h ${before.h}->${after.h}, open ${before.open}->${after.open}, arrivedOpen=${arrivedOpen}`,
       landed,
     };
   }
@@ -237,6 +241,56 @@
       await N.back();
       const drift = N.top(a) - before;
       return { name: '24 Referenced-by reverse pointer, Back', ok: Math.abs(drift) <= TOL, driftPx: drift, detail: `top ${before}->${N.top(a)}` };
+    },
+
+    /* 26 Every way of arriving at a resource opens it. Only a restored fold shape
+       may leave a row shut, and that is scenario 16. */
+    async s26(N) {
+      const seen = [];
+
+      // a relationship chip inside another resource's body
+      await N.fresh();
+      await N.open(...ID.mc);
+      await N.click(...ID.psoe, N.sec(...ID.mc));
+      seen.push(['relationship chip', !!N.sec(...ID.psoe).querySelector('.res__d[open]')]);
+
+      // a chip in the overview's primary-data list
+      await N.fresh();
+      await N.click(...ID.c0);
+      seen.push(['primary data chip', !!N.sec(...ID.c0).querySelector('.res__d[open]')]);
+
+      // the jump modal
+      await N.fresh();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
+      await N.settle(300);
+      const input = document.querySelector('.jump input, dialog input[type="search"]');
+      if (input) {
+        input.value = 'stations USSEASEA';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await N.settle(250);
+        const first = document.querySelector('.jump__result');
+        if (first) first.click();
+        await N.settle(700);
+        seen.push(['jump modal', !!N.sec(...ID.sea).querySelector('.res__d[open]')]);
+      } else {
+        seen.push(['jump modal', 'modal did not open']);
+      }
+
+      // a reverse pointer out of "Referenced by"
+      await N.fresh();
+      await N.open(...ID.chi);
+      const rev = N.sec(...ID.chi).querySelector('.block--rev a[href^="#r_"]');
+      if (rev) {
+        const id = rev.getAttribute('href').slice(1);
+        rev.click();
+        await N.settle(700);
+        seen.push(['referenced-by', !!document.getElementById(id).querySelector('.res__d[open]')]);
+      } else {
+        seen.push(['referenced-by', 'no reverse link']);
+      }
+
+      const ok = seen.every(([, opened]) => opened === true);
+      return { name: '26 arriving at a resource opens it, by every route', ok, driftPx: 0, detail: JSON.stringify(seen) };
     },
 
     /* 25 "Expand all" must read the rows, not remember its own last click.
