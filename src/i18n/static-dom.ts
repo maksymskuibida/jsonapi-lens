@@ -144,8 +144,15 @@ export const STATIC_BINDINGS: [selector: string, apply: Apply][] = [
   ["#footer-privacy", text((m) => m.footer.privacy)],
 ];
 
-export function localiseStaticDom(root: ParentNode = document): void {
-  const messages = t();
+/**
+ * `messages` defaults to the negotiated language, which is what the app wants.
+ * The prerender in `vite.config.ts` passes a language explicitly, because it
+ * renders this markup once per language into a document it supplies itself.
+ */
+export function localiseStaticDom(
+  root: ParentNode = document,
+  messages: Messages = t(),
+): void {
   for (const [selector, apply] of STATIC_BINDINGS) {
     const node = root.querySelector<HTMLElement>(selector);
     if (node) apply(node, messages);

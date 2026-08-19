@@ -14,7 +14,10 @@ const PAGES: Record<Locale, LegalPages> = {
   uk: legalUk,
 };
 
-/** The legal pages in the language the rest of the UI is speaking. */
-export function legal(): LegalPages {
-  return PAGES[locale()];
+/**
+ * The legal pages in the language the rest of the UI is speaking — or, given a
+ * language, in that one. See `t()` in `src/i18n` for why the argument exists.
+ */
+export function legal(at: Locale = locale()): LegalPages {
+  return PAGES[at];
 }

@@ -41,7 +41,7 @@ export const INDEXABLE =
 export const NOT_INDEXABLE = "noindex, nofollow";
 
 /** Open Graph wants a language *and* a region, unlike `<html lang>`. */
-const OG_LOCALES: Record<Locale, string> = {
+export const OG_LOCALES: Record<Locale, string> = {
   en: "en_GB",
   de: "de_DE",
   uk: "uk_UA",
@@ -66,12 +66,17 @@ const LEGAL_PATHS = { impressum: IMPRESSUM_PATH, privacy: PRIVACY_PATH } as cons
  *
  * A loaded document is not a route — the same `/view` shows a different document
  * per visitor — so its title comes from `documentMeta` below instead.
+ *
+ * `at` names the language, and defaults to the one on screen. The prerender in
+ * `vite.config.ts` calls this for each language in turn, so the `<title>` a
+ * crawler is handed and the one the running app sets come out of this function
+ * either way and cannot say different things.
  */
-export function metaForRoute(route: Route): PageMeta {
-  const m = t();
+export function metaForRoute(route: Route, at: Locale = locale()): PageMeta {
+  const m = t(at);
 
   if (route.kind === "legal") {
-    const pages = legal();
+    const pages = legal(at);
     const page = route.page === "impressum" ? pages.impressum : pages.privacy;
     return {
       title: `${page.title} — jsonapi-lens`,

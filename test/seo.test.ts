@@ -12,17 +12,21 @@ import manifestJson from "../public/site.webmanifest?raw";
 import headersFile from "../public/_headers?raw";
 import redirectsFile from "../public/_redirects?raw";
 
-import { PRERENDERED_PAGES } from "../vite.config.js";
+import wranglerConfig from "../wrangler.jsonc?raw";
+
+import { PRERENDERED_PAGES, render } from "../vite.config.js";
 import { de } from "../src/i18n/de.js";
 import { en } from "../src/i18n/en.js";
 import { uk } from "../src/i18n/uk.js";
-import { LOCALES } from "../src/i18n/index.js";
-import { legalEn } from "../src/legal/en.js";
+import { FALLBACK_LOCALE, LOCALES } from "../src/i18n/index.js";
+import { legal } from "../src/legal/index.js";
 import { IDENTITY } from "../src/legal/identity.js";
 import { IMPRESSUM_PATH, LEGAL_PATHS, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
-import { INDEXABLE, NOT_INDEXABLE, SITE_ORIGIN } from "../src/seo.js";
+import { INDEXABLE, metaForRoute, NOT_INDEXABLE, OG_LOCALES, SITE_ORIGIN } from "../src/seo.js";
+import { entryFile, variantAsset, variantFile, VARIANT_BASES } from "../src/variants.js";
+import type { PrerenderedPage } from "../vite.config.js";
+import type { Locale } from "../src/i18n/index.js";
 import type { Messages } from "../src/i18n/en.js";
-import type { LegalPage } from "../src/legal/types.js";
 
 /*
  * The head, `robots.txt`, `sitemap.xml`, the `llms.txt` pair and the prerender
@@ -383,38 +387,291 @@ describe("_redirects", () => {
   });
 });
 
-describe("the prerendered legal pages", () => {
-  it("covers exactly the two paths that have their own content", () => {
+describe("the prerendered pages", () => {
+  it("covers exactly the paths that have a file of their own", () => {
     expect(PRERENDERED_PAGES.map((page) => page.path).sort()).toEqual(
-      [IMPRESSUM_PATH, PRIVACY_PATH].sort(),
+      [PASTE_PATH, IMPRESSUM_PATH, PRIVACY_PATH].sort(),
     );
+  });
+
+  it("gives the front page the graph that is already in the markup", () => {
+    // `null` means "localise index.html's own graph". The legal pages get their
+    // own instead, because neither is an application with an FAQ.
+    const front = PRERENDERED_PAGES.find((page) => page.path === PASTE_PATH);
+    expect(front?.schemaType).toBeNull();
+    for (const page of PRERENDERED_PAGES.filter((p) => p.path !== PASTE_PATH)) {
+      expect(page.schemaType, page.path).not.toBeNull();
+    }
   });
 
   /*
    * `/impressum` was briefly emitted as `impressum/index.html`, which Cloudflare's
    * `auto-trailing-slash` handling serves by first sending a 307 to `/impressum/`
    * — a redirect to a URL that disagrees with the canonical on the page itself.
-   * A flat file makes `/impressum` the 200 and `/impressum/` the redirect.
+   * A flat file makes `/impressum` the 200 and `/impressum/` the redirect, and the
+   * language variants have to stay flat for the same reason.
    */
-  it("names paths that become flat files rather than directories", () => {
+  it("emits flat files rather than directories, in every language", () => {
     for (const page of PRERENDERED_PAGES) {
-      expect(page.path.startsWith("/"), page.path).toBe(true);
-      expect(page.path.slice(1), page.path).not.toContain("/");
-      expect(page.path.endsWith("/"), page.path).toBe(false);
+      for (const locale of LOCALES) {
+        const file = variantFile(page.path, locale);
+        expect(file, `${page.path} ${locale}`).toBeTruthy();
+        expect(file, `${page.path} ${locale}`).not.toContain("/");
+        expect(file?.endsWith(".html"), `${page.path} ${locale}`).toBe(true);
+      }
     }
   });
 
-  it("uses the titles and ledes the pages themselves render", () => {
-    const pages: Record<string, LegalPage | undefined> = {
-      [IMPRESSUM_PATH]: legalEn.impressum,
-      [PRIVACY_PATH]: legalEn.privacy,
-    };
+  it("says the same thing as the app, in each language", () => {
+    // The prerender calls `metaForRoute`, so this is not checking a copy of the
+    // strings — it is checking that the function it and the app both call answers
+    // in the language it is asked about, rather than the one it negotiated.
+    for (const locale of LOCALES) {
+      const pages = legal(locale);
+      const m: Messages = { en, de, uk }[locale];
 
+      expect(metaForRoute({ kind: "paste" }, locale).title).toBe(m.meta.title);
+      expect(metaForRoute({ kind: "paste" }, locale).description).toBe(m.meta.description);
+
+      for (const [page, source] of [
+        ["impressum", pages.impressum],
+        ["privacy", pages.privacy],
+      ] as const) {
+        const meta = metaForRoute({ kind: "legal", page }, locale);
+        expect(meta.title, `${locale} ${page}`).toBe(`${source.title} — jsonapi-lens`);
+        expect(meta.description, `${locale} ${page}`).toBe(`${source.lede} ${m.footer.tagline}`);
+      }
+    }
+  });
+});
+
+describe("the prerendered files themselves", () => {
+  /*
+   * What a reader that never runs JavaScript is handed. Every `?lang=` URL is
+   * advertised as its own language — by the `hreflang` links in the head and by
+   * twelve entries in `sitemap.xml` — and for a crawler, or whatever builds a
+   * link preview when the URL is pasted into a chat, this file is the only
+   * answer it will ever see. The app correcting the head at boot is too late.
+   */
+  const emitted = (path: string, locale: Locale): Document => {
+    const page = PRERENDERED_PAGES.find((candidate) => candidate.path === path);
+    expect(page, path).toBeTruthy();
+    return new DOMParser().parseFromString(
+      render(shippedMarkup, page as PrerenderedPage, locale),
+      "text/html",
+    );
+  };
+
+  const CASES: [locale: Locale, messages: Messages][] = [
+    ["en", en],
+    ["de", de],
+    ["uk", uk],
+  ];
+
+  it.each(CASES)("titles the front page in %s", (locale, m) => {
+    const doc = emitted(PASTE_PATH, locale);
+
+    expect(doc.title).toBe(m.meta.title);
+    expect(doc.documentElement.getAttribute("lang")).toBe(m.meta.lang);
+    expect(metaContent(doc, 'meta[property="og:title"]')).toBe(m.meta.title);
+    expect(metaContent(doc, 'meta[name="twitter:title"]')).toBe(m.meta.title);
+    expect(metaContent(doc, 'meta[name="description"]')).toBe(m.meta.description);
+  });
+
+  it.each(CASES)("titles both legal pages in %s", (locale) => {
+    for (const path of [IMPRESSUM_PATH, PRIVACY_PATH]) {
+      const doc = emitted(path, locale);
+      const page = PRERENDERED_PAGES.find((candidate) => candidate.path === path);
+      const expected = metaForRoute((page as PrerenderedPage).route, locale);
+
+      expect(doc.title, `${path} ${locale}`).toBe(expected.title);
+      expect(metaContent(doc, 'meta[name="description"]'), path).toBe(expected.description);
+      // The word survives translation, because it is the word the law uses.
+      if (path === IMPRESSUM_PATH) expect(doc.title, locale).toContain("Impressum");
+    }
+  });
+
+  it.each(CASES)("localises the copy, not just the head, in %s", (locale, m) => {
+    const doc = emitted(PASTE_PATH, locale);
+
+    expect(doc.querySelector("#footer-tagline")?.textContent).toBe(m.footer.tagline);
+    expect(doc.querySelector("#faq-q1")?.textContent).toBe(m.faq.items[0]?.q);
+    expect(normalise(doc.querySelector("#paste-title")?.textContent ?? "")).not.toBe("");
+    // `<html lang>` describes the text under it; a German head over English copy
+    // would be a different lie from the one this plugin exists to fix.
+    expect(doc.documentElement.getAttribute("lang")).toBe(m.meta.lang);
+  });
+
+  it("keeps the Mac spelling of the modifier key, as the markup does", () => {
+    // The one binding whose output depends on the machine and not the language.
+    // Node is not a Mac, so left alone it would bake "Ctrl" into every file.
+    for (const locale of LOCALES) {
+      const hint = emitted(PASTE_PATH, locale).querySelector("#drop-hint");
+      expect(hint?.textContent, locale).toContain("⌘");
+      expect(hint?.textContent, locale).not.toContain("Ctrl");
+    }
+  });
+
+  it.each(CASES)("declares the %s URL canonical, and the others as alternates", (locale) => {
+    const doc = emitted(IMPRESSUM_PATH, locale);
+    const url = `${SITE_ORIGIN}${IMPRESSUM_PATH}`;
+    // Self-referential, in every language including English: this URL is listed
+    // in the sitemap and is what its own `hreflang` link points at, so a
+    // canonical naming the bare path instead would take it out of the cluster.
+    const expected = `${url}?lang=${locale}`;
+
+    expect(doc.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(expected);
+    expect(metaContent(doc, 'meta[property="og:url"]')).toBe(expected);
+    expect(metaContent(doc, 'meta[name="robots"]')).toBe(INDEXABLE);
+
+    for (const code of LOCALES) {
+      const alternate = doc.querySelector(`link[rel="alternate"][hreflang="${code}"]`);
+      expect(alternate?.getAttribute("href"), code).toBe(`${url}?lang=${code}`);
+    }
+    expect(
+      doc.querySelector('link[rel="alternate"][hreflang="x-default"]')?.getAttribute("href"),
+    ).toBe(url);
+  });
+
+  it("leaves the bare path claiming no language of its own", () => {
+    // The x-default: whichever of the three the visitor's browser asks for. It
+    // cannot name one in its canonical without contradicting two thirds of its
+    // own visitors, and it is the file `?lang=` variants are *not*.
     for (const page of PRERENDERED_PAGES) {
-      const source = pages[page.path];
-      expect(source, page.path).toBeTruthy();
-      expect(page.title, page.path).toBe(`${source?.title} — jsonapi-lens`);
-      expect(page.description, page.path).toBe(`${source?.lede} ${en.footer.tagline}`);
+      const doc = new DOMParser().parseFromString(
+        render(shippedMarkup, page, FALLBACK_LOCALE, "bare path"),
+        "text/html",
+      );
+      const url = `${SITE_ORIGIN}${page.path}`;
+
+      expect(doc.querySelector('link[rel="canonical"]')?.getAttribute("href"), page.path).toBe(url);
+      expect(metaContent(doc, 'meta[property="og:url"]'), page.path).toBe(url);
+      expect(
+        doc.querySelector('link[rel="alternate"][hreflang="x-default"]')?.getAttribute("href"),
+        page.path,
+      ).toBe(url);
+      // The markup is English, so that is what it says it is — the app replaces
+      // both the moment it boots.
+      expect(doc.documentElement.getAttribute("lang"), page.path).toBe(en.meta.lang);
+      expect(doc.title, page.path).toBe(metaForRoute(page.route, FALLBACK_LOCALE).title);
+    }
+  });
+
+  it.each(CASES)("names the %s Open Graph locale, with the other two as alternates", (locale) => {
+    const doc = emitted(PASTE_PATH, locale);
+    const alternates = [...doc.querySelectorAll('meta[property="og:locale:alternate"]')].map(
+      (node) => node.getAttribute("content"),
+    );
+
+    expect(metaContent(doc, 'meta[property="og:locale"]')).toBe(OG_LOCALES[locale]);
+    expect(alternates).toHaveLength(LOCALES.length - 1);
+    expect(alternates).not.toContain(OG_LOCALES[locale]);
+    for (const code of LOCALES.filter((other) => other !== locale)) {
+      expect(alternates, code).toContain(OG_LOCALES[code]);
+    }
+  });
+
+  it.each(CASES)("answers the FAQ in %s in the structured data too", (locale, m) => {
+    const doc = emitted(PASTE_PATH, locale);
+    const graph = JSON.parse(
+      doc.querySelector('script[type="application/ld+json"]')?.textContent ?? "{}",
+    ) as { "@graph": Record<string, unknown>[] };
+
+    const faq = graph["@graph"].find((node) => node["@type"] === "FAQPage");
+    const questions = faq?.["mainEntity"] as { name: string; acceptedAnswer: { text: string } }[];
+
+    expect(faq?.["inLanguage"]).toBe(locale);
+    expect(questions).toHaveLength(m.faq.items.length);
+    m.faq.items.forEach((item, index) => {
+      expect(questions[index]?.name, `q${index + 1}`).toBe(item.q);
+      // Read back out of the localised markup, so a search result and the page
+      // cannot answer the same question differently.
+      const rendered = normalise(doc.querySelector(`#faq-a${index + 1}`)?.textContent ?? "");
+      expect(questions[index]?.acceptedAnswer.text, `a${index + 1}`).toBe(rendered);
+    });
+
+    for (const type of ["WebSite", "FAQPage"]) {
+      expect(graph["@graph"].some((node) => node["@type"] === type), type).toBe(true);
+    }
+    const app = graph["@graph"].find((node) => Array.isArray(node["@type"]));
+    expect(app?.["description"]).toBe(m.meta.description);
+  });
+
+  it.each(CASES)("gives a legal page its own graph, in %s", (locale) => {
+    const doc = emitted(IMPRESSUM_PATH, locale);
+    const graph = JSON.parse(
+      doc.querySelector('script[type="application/ld+json"]')?.textContent ?? "{}",
+    ) as { "@graph": Record<string, unknown>[] };
+
+    expect(graph["@graph"]).toHaveLength(1);
+    const page = graph["@graph"][0];
+    expect(page?.["@type"]).toBe("ContactPage");
+    expect(page?.["name"]).toBe(metaForRoute({ kind: "legal", page: "impressum" }, locale).title);
+    // An FAQ about the viewer is not a fact about the Impressum.
+    expect(JSON.stringify(graph)).not.toContain("FAQPage");
+  });
+});
+
+describe("the language variants", () => {
+  it("has one prerendered page per path the router serves its own file for", () => {
+    expect(Object.keys(VARIANT_BASES).sort()).toEqual(
+      PRERENDERED_PAGES.map((page) => page.path).sort(),
+    );
+  });
+
+  it("keeps the bare path's own file, which is the x-default", () => {
+    // The entry file is the one Vite emits and the one the asset router finds on
+    // its own; the language files sit beside it and are never the same file.
+    for (const path of Object.keys(VARIANT_BASES)) {
+      const entry = entryFile(path);
+      expect(entry, path).toBeTruthy();
+      for (const locale of LOCALES) {
+        expect(variantFile(path, locale), `${path} ${locale}`).not.toBe(entry);
+      }
+    }
+    expect(entryFile(PASTE_PATH)).toBe("index.html");
+    expect(entryFile(IMPRESSUM_PATH)).toBe("impressum.html");
+  });
+
+  it("serves ?lang=en from its own file too, not the bare path's", () => {
+    // `/?lang=en` is in the sitemap and is the `hreflang="en"` target, so it has
+    // to declare itself canonical — which `index.html` cannot, being also the
+    // answer for `/`. Same English markup, different canonical.
+    expect(variantAsset(PASTE_PATH, FALLBACK_LOCALE)).toBe("/index.en");
+    expect(variantFile(PASTE_PATH, FALLBACK_LOCALE)).toBe("index.en.html");
+  });
+
+  it("asks the asset router for the variant without its extension", () => {
+    /*
+     * The `.html` matters: `auto-trailing-slash` answers `/index.de.html` with a
+     * 307 to `/index.de`, and a redirect would take the visitor off the `?lang=`
+     * URL that the canonical, the `hreflang` links and the sitemap all name. The
+     * Worker therefore asks for the path, and the build writes the file.
+     */
+    expect(variantAsset(PASTE_PATH, "de")).toBe("/index.de");
+    expect(variantFile(PASTE_PATH, "de")).toBe("index.de.html");
+    expect(variantAsset(IMPRESSUM_PATH, "uk")).toBe("/impressum.uk");
+    expect(variantFile(IMPRESSUM_PATH, "uk")).toBe("impressum.uk.html");
+  });
+
+  it("has nothing to say about a path or a language it does not know", () => {
+    for (const path of [VIEW_PATH, "/d/1:secret", "/nope", "/impressum/"]) {
+      expect(variantAsset(path, "de"), path).toBeNull();
+    }
+    for (const lang of [null, "", "fr", "de-AT", "DE", "../index"]) {
+      expect(variantAsset(PASTE_PATH, lang), String(lang)).toBeNull();
+    }
+  });
+
+  it("is reachable, because the Worker runs first on every path that has one", () => {
+    // A page added to the table above but not here would be served the English
+    // file for every language, silently: the asset router cannot see `?lang=`.
+    const config = JSON.parse(
+      wranglerConfig.replace(/^\s*\/\/.*$/gm, ""),
+    ) as { assets: { run_worker_first: string[] } };
+
+    for (const path of Object.keys(VARIANT_BASES)) {
+      expect(config.assets.run_worker_first, path).toContain(path);
     }
   });
 });

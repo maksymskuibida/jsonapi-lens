@@ -7,9 +7,19 @@
  * appears in a request body. This Worker sees an opaque blob, a byte count and
  * an expiry, and nothing else: no label, no type names, no filename.
  *
+ * It has one other job, added later and just as small: choosing which
+ * prerendered HTML file answers a `?lang=` URL. The asset router cannot see a
+ * query string, so `/impressum?lang=de` would otherwise be served the English
+ * file — which is what `hreflang` and `sitemap.xml` promise is German. The
+ * mapping lives in `src/variants.ts`; this script only looks it up, and hands
+ * everything it does not recognise straight to the asset router.
+ *
  * Everything else on the site is served straight from static assets; only
- * `/api/*` reaches this script (see `run_worker_first` in wrangler.jsonc).
+ * `/api/*` and the three prerendered paths reach this script (see
+ * `run_worker_first` in wrangler.jsonc).
  */
+
+import { variantAsset } from "./variants.js";
 
 // `Env` is generated from the bindings in wrangler.jsonc by `wrangler types`,
 // so it cannot drift from the config.
@@ -157,8 +167,16 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Only `/api/*` is routed here; anything else means the config drifted.
-    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+    // Everything that is not the share API is a document request: serve the file
+    // for its `?lang=`, or let the asset router do exactly what it did before.
+    if (!url.pathname.startsWith("/api/")) {
+      const variant = variantAsset(url.pathname, url.searchParams.get("lang"));
+      if (variant === null) return env.ASSETS.fetch(request);
+      // The asset is fetched by its own path, so the response is that file
+      // rather than a redirect to it; the visitor's URL keeps the `?lang=` that
+      // the head, the sitemap and the canonical all name.
+      return env.ASSETS.fetch(new Request(new URL(variant, url), request));
+    }
 
     if (url.pathname === "/api/shares" && request.method === "POST") {
       const response = await createShare(request, env);

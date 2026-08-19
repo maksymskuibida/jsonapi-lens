@@ -17,13 +17,18 @@
 
 import { de } from "./de.js";
 import { en } from "./en.js";
+import { FALLBACK_LOCALE, isLocale } from "./locales.js";
 import { uk } from "./uk.js";
+import type { Locale } from "./locales.js";
 import type { Messages } from "./en.js";
 
 export type { Messages } from "./en.js";
 
-export const LOCALES = ["en", "de", "uk"] as const;
-export type Locale = (typeof LOCALES)[number];
+// The list itself lives in `./locales.ts`, which the Worker and the prerender
+// can import without dragging the catalogues along. Re-exported here because
+// this is where the rest of the app expects to find it.
+export { FALLBACK_LOCALE, isLocale, LOCALES } from "./locales.js";
+export type { Locale } from "./locales.js";
 
 /** Each language named in itself, which is the only naming a switcher can use. */
 export const LOCALE_NAMES: Record<Locale, string> = {
@@ -50,11 +55,6 @@ const CATALOGUES: Record<Locale, Messages> = { en, de, uk };
 
 const STORAGE_KEY = "jsonapi-lens:locale";
 const QUERY_KEY = "lang";
-const FALLBACK: Locale = "en";
-
-function isLocale(value: string | null | undefined): value is Locale {
-  return value !== null && value !== undefined && (LOCALES as readonly string[]).includes(value);
-}
 
 /**
  * `de-AT` and `uk-UA` should both find a catalogue, so match on the primary
@@ -114,7 +114,7 @@ function negotiate(): Locale {
     requested = true;
     return asked;
   }
-  return stored() ?? fromNavigator() ?? FALLBACK;
+  return stored() ?? fromNavigator() ?? FALLBACK_LOCALE;
 }
 
 /**
@@ -139,9 +139,16 @@ export function localeWasRequested(): boolean {
   return requested;
 }
 
-/** The active catalogue. Called at every use site, so a swap cannot go stale. */
-export function t(): Messages {
-  return CATALOGUES[locale()];
+/**
+ * The active catalogue — or, given a language, that one.
+ *
+ * The argument exists for readers that are not the running app: the prerender
+ * in `vite.config.ts` renders the same pages in all three languages in one Node
+ * process, where "the active language" is not a thing. Everything in the app
+ * calls it with no argument and gets the negotiated language, as before.
+ */
+export function t(at: Locale = locale()): Messages {
+  return CATALOGUES[at];
 }
 
 function persist(next: Locale): void {

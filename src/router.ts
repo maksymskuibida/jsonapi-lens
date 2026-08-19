@@ -23,6 +23,8 @@
  * who types or is sent the German word.
  */
 
+import { VIEW_PATH } from "./paths.js";
+
 export type Route =
   | { kind: "paste" }
   | { kind: "view" }
@@ -33,10 +35,9 @@ export type Route =
 /** Which of the two legal pages a `legal` route names. */
 export type LegalRoute = "impressum" | "privacy";
 
-export const PASTE_PATH = "/";
-export const VIEW_PATH = "/view";
-export const IMPRESSUM_PATH = "/impressum";
-export const PRIVACY_PATH = "/privacy";
+// Declared in `./paths.ts` so the Worker can read them without the DOM, and
+// re-exported here because this is the module that routes with them.
+export { IMPRESSUM_PATH, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "./paths.js";
 
 /**
  * Alternative spellings that resolve to the same page.

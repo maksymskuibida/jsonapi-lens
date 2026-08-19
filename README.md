@@ -265,7 +265,8 @@ deliberately. Four surfaces do it, and each has a test holding it to the others:
 | | |
 |---|---|
 | [`index.html`](index.html) head | canonical, `robots`, keywords, `hreflang` for all three languages, Open Graph and Twitter cards, and a JSON-LD `@graph`: `WebSite`, `WebApplication`, `Person` and the `FAQPage` mirroring the six questions on the page |
-| [`src/seo.ts`](src/seo.ts) | keeps that head in step with the route and the language at runtime |
+| [`src/seo.ts`](src/seo.ts) | keeps that head in step with the route and the language at runtime, and titles the prerendered files at build time |
+| [`vite.config.ts`](vite.config.ts), [`src/variants.ts`](src/variants.ts) | each page written out as a real file per language, and how the Worker finds it |
 | [`public/robots.txt`](public/robots.txt), [`sitemap.xml`](public/sitemap.xml), [`_headers`](public/_headers) | what to crawl, every indexable URL once per language, and `X-Robots-Tag` for the two paths that must never be indexed |
 | [`public/llms.txt`](public/llms.txt), [`llms-full.txt`](public/llms-full.txt) | the same description in prose, for assistants and answer engines that never parse a `<head>` |
 
@@ -280,14 +281,31 @@ Two rules run through all of it:
   does render German, so it is its own indexable URL; a bare `/` negotiates from the browser, which
   is what `x-default` describes.
 
-`/impressum` and `/privacy` are also written out as real files at build time by the `seo-routes`
-plugin in [`vite.config.ts`](vite.config.ts), so a crawler that does not run JavaScript gets their
-titles, descriptions, canonicals and structured data rather than the front page's. Every replacement
-in that plugin is asserted, so an edit to `index.html` that breaks one fails the build instead of
-quietly emitting a page that describes the wrong thing. They are flat files — `impressum.html`, not
-`impressum/index.html` — because Cloudflare's `auto-trailing-slash` handling serves the directory
-shape by first redirecting `/impressum` to `/impressum/`, which is a redirect to a URL that
-disagrees with the canonical on the page. The alias paths (`/imprint`, `/legal`, `/datenschutz`,
+The front page, `/impressum` and `/privacy` are written out as real files at build time by the
+`seo-routes` plugin in [`vite.config.ts`](vite.config.ts) — **once per language**. Two things follow
+from that. A crawler that does not run JavaScript gets each legal page's own title, description,
+canonical and structured data rather than the front page's; and `/?lang=de` is served German markup
+rather than English, which is what its own `hreflang` links and twelve entries in `sitemap.xml` say it
+is. That second one matters most for readers that never run a bundle at all — a search crawler, or
+whatever builds the link preview when the URL is pasted into a chat: `src/seo.ts` corrects the head
+from the catalogue at boot, but a preview has been built and a page indexed long before that.
+
+The plugin renders each file by localising the built `index.html` through
+[`localiseStaticDom`](src/i18n/static-dom.ts) — the same table the app uses at boot — so the copy,
+`<html lang>`, the head and the FAQ answers in the JSON-LD are all the one language. Titles and
+descriptions come from `metaForRoute` in `src/seo.ts`, the function the running app calls, so the
+shipped `<title>` and the one on screen a moment later cannot be different strings. Every lookup in
+the plugin is asserted, so an edit to `index.html` that moves one of those nodes fails the build
+instead of quietly emitting a page that describes the wrong thing.
+
+[`src/variants.ts`](src/variants.ts) is the map from a path and a language to a file, and both ends
+read it: the build writes `impressum.de.html`, and the Worker answers `/impressum?lang=de` with it,
+because a query string is invisible to Cloudflare's asset router. English has no variant — the plain
+files already are English, and they stay the answer for a bare path, whose language depends on a
+`localStorage` value the edge cannot see and could only have learned from a cookie this site does not
+set. They are flat files — `impressum.de.html`, not `impressum/de.html` — because Cloudflare's
+`auto-trailing-slash` handling serves the directory shape by first redirecting `/impressum` to
+`/impressum/`, which is a redirect to a URL that disagrees with the canonical on the page. The alias paths (`/imprint`, `/legal`, `/datenschutz`,
 `/datenschutzerklaerung`) 301 to the real one via [`public/_redirects`](public/_redirects), generated
 from the same table in `src/router.ts` that resolves them, so one page never has four indexable URLs.
 
@@ -361,7 +379,9 @@ npm run deploy
 ```
 
 Cloudflare Workers static assets, plus one small Worker for the share API. `run_worker_first` is
-scoped to `/api/*` so everything else is served straight from assets with an SPA fallback.
+scoped to `/api/*` and the three prerendered paths — the Worker picks the language variant for a
+`?lang=` URL, and falls straight through to the assets otherwise — so everything else is served
+straight from assets with an SPA fallback.
 
 ## Measured performance
 

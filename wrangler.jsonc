@@ -19,8 +19,11 @@
     // the single page: `/`, `/view`, `/d/<id>:<secret>`.
     "not_found_handling": "single-page-application",
     // ...except the share API, which has to reach the Worker instead of being
-    // swallowed by the SPA fallback above.
-    "run_worker_first": ["/api/*"]
+    // swallowed by the SPA fallback above, and the three paths that have a
+    // prerendered file per language: a query string is invisible to the asset
+    // router, so only the Worker can serve `?lang=de` the German file. It falls
+    // straight through to the assets for every other request to them.
+    "run_worker_first": ["/api/*", "/", "/impressum", "/privacy"]
   },
 
   // Share storage. The Worker only ever sees ciphertext: documents are gzipped
