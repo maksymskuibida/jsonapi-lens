@@ -21,7 +21,7 @@ Two things follow from that, and both will silently invalidate a run:
 
 ```bash
 npm run dev            # the runner fetches the harness from this origin
-node test/browser/run.mjs --doc fixtures/amtrak.json
+node test/browser/run.mjs
 ```
 
 That launches its own headless Chrome, pastes the document through the app's own paste flow, and runs
@@ -53,9 +53,11 @@ it.
 
 `nav-harness.js` is the vocabulary — `fresh`, `open`, `close`, `expandGroup`, `click`, `center`,
 `scrollToFraction`, `back`, `forward`, `railFilter`, `topmostVisible`, `top`. A scenario is a short
-script in it; see `follow()` for the common shape. `nav-scenarios.js` expects the Amtrak connections
-payload its `ID` map was written against — 131 resources over 14 types. Point it at another document
-and the scenarios will report that they could not find their anchors, which is the honest outcome.
+script in it; see `follow()` for the common shape. `nav-scenarios.js` expects `amtrak.json` beside it, the
+payload its `ID` map was written against — 131 resources over 14 types, and the default for `--doc`.
+It is committed for that reason: the suite is worth nothing if it cannot be run from a clone. Point
+`--doc` at another document and the scenarios will report that they could not find their anchors,
+which is the honest outcome.
 
 If you write your own, two rules matter more than the rest:
 

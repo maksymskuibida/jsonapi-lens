@@ -17,9 +17,9 @@
  * ~60 lines below.
  *
  * Usage:
- *   node test/browser/run.mjs --doc fixtures/amtrak.json
- *   node test/browser/run.mjs --doc fixtures/amtrak.json --only s02,s08,s16
- *   node test/browser/run.mjs --doc fixtures/amtrak.json --extra my-scenarios.js
+ *   node test/browser/run.mjs
+ *   node test/browser/run.mjs --only s02,s08,s16
+ *   node test/browser/run.mjs --extra my-scenarios.js
  *
  * `--url` defaults to http://localhost:5180 and expects `npm run dev` to be
  * serving it, because the harness files are fetched from that origin.
@@ -42,7 +42,7 @@ function arg(name, fallback = null) {
 }
 
 const ORIGIN = arg("url", "http://localhost:5180");
-const DOC = arg("doc", "fixtures/amtrak.json");
+const DOC = arg("doc", "test/browser/amtrak.json");
 const ONLY = arg("only");
 const EXTRA = arg("extra");
 const WIDTH = Number(arg("width", "1512"));

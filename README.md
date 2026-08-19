@@ -319,7 +319,7 @@ neither, so those tests would pass vacuously. They live in
 [`test/browser/`](test/browser/README.md) instead, and run in headless Chrome:
 
 ```bash
-node test/browser/run.mjs --doc fixtures/amtrak.json
+node test/browser/run.mjs
 ```
 
 22 journeys through a real payload plus a reload check, each reporting how far the watched content
