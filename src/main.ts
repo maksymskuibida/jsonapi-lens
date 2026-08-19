@@ -280,6 +280,9 @@ function applyFilter(): void {
 
   const clear = docEl.querySelector<HTMLButtonElement>("#clear-filter");
   if (clear) clear.hidden = soloType === null;
+
+  // Which sections a position can be anchored to changes with the filter.
+  indexSections();
 }
 
 function setSolo(type: string | null): void {
@@ -303,10 +306,15 @@ function openSection(section: Element): void {
  * scrolled, but the target may be collapsed or filtered out).
  *
  * `restore` is what the history entry being returned to remembered. When it is
- * present — Back or Forward — the document is folded back to the shape it had,
- * and then the exact offset is used, so you land where you were rather than at
- * the top of whatever the fragment names. When it is absent — following a link
- * for the first time — the fragment is scrolled to.
+ * present — Back or Forward — the document is folded back to the shape it had
+ * and the recorded position is re-established, so you land where you were
+ * rather than at the top of whatever the fragment names. When it is absent —
+ * following a link for the first time — the fragment is scrolled to.
+ *
+ * A restored shape is authoritative, which is why the fragment's own row is
+ * only opened when there was no shape to apply. Otherwise returning to an entry
+ * where you had *collapsed* the row you originally landed on would re-open it,
+ * and every row below it would move.
  *
  * Order matters throughout: the fold state is applied first, then the target's
  * own row is opened, and only then does anything scroll. Every one of those
@@ -317,15 +325,17 @@ function openSection(section: Element): void {
  * element with that id exists, including one rendered long after the navigation.
  */
 function resolveHash(restore: EntryState | null = null): void {
-  // Fold the page back before measuring anything against it.
-  if (restore?.open) applyOpenRows(restore.open);
-  const restoreY = typeof restore?.y === "number" ? restore.y : null;
+  // Fold the page back before measuring anything against it. An empty array is
+  // a shape too — "nothing was open" — so this tests for presence, not length.
+  const shape = restore?.open;
+  if (shape) applyOpenRows(shape);
+  const position = restore && hasPosition(restore) ? restore : null;
 
   const raw = location.hash;
 
   if (!raw || raw === "#") {
     // No fragment, but there may still be a position to return to.
-    if (restoreY !== null) window.scrollTo(0, restoreY);
+    if (position) restorePosition(position);
     return;
   }
 
@@ -340,7 +350,7 @@ function resolveHash(restore: EntryState | null = null): void {
   if (!target) {
     const identity = parseDomId(fragment);
     if (identity) toast(t().toast.noResource(identity.type, identity.id));
-    if (restoreY !== null) window.scrollTo(0, restoreY);
+    if (position) restorePosition(position);
     return;
   }
 
@@ -352,10 +362,11 @@ function resolveHash(restore: EntryState | null = null): void {
     toast(t().toast.filterCleared(group.dataset["type"] ?? ""));
   }
 
-  // Open before scrolling, so the scroll lands against final layout.
-  if (target.classList.contains("res")) openSection(target);
+  // Open before scrolling, so the scroll lands against final layout — but never
+  // on top of a restored shape, which already says whether this row was open.
+  if (target.classList.contains("res") && !shape) openSection(target);
 
-  if (restoreY !== null) window.scrollTo(0, restoreY);
+  if (position) restorePosition(position);
   else target.scrollIntoView({ block: "start" });
 }
 
@@ -378,18 +389,41 @@ if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 /**
  * What a history entry remembers.
  *
- * A scroll offset on its own is not enough. The offset only means anything
- * against a particular layout, and expanding one row moves everything below it
- * by hundreds of pixels — so returning to `y` after the page has been folded
- * differently lands somewhere unrelated. The set of open rows travels with the
- * offset, and is re-applied before the scroll.
+ * A pixel offset is the wrong thing to remember, and the reason is
+ * `content-visibility: auto`. A row that has never been on screen has no
+ * measured height — the browser uses the `contain-intrinsic-size` estimate
+ * instead — so the page is only as accurate as the parts of it you have
+ * actually visited. Walk into a region for the first time and every row there
+ * grows from its 35.6px estimate to its real height, permanently. If any of
+ * that happened *above* where you were standing, the offset you left behind now
+ * points at different content: measured here at 342–1,215px of drift, which is
+ * most of a screen.
+ *
+ * So an entry remembers a *place*, not a number: which resource section the
+ * viewport was resting against, and how far that section's top was from the top
+ * of the viewport. Both survive the page growing underneath them, and both
+ * survive a reload. `y` is still kept, as the fallback for when the section is
+ * no longer in the document at all — a different payload, say.
+ *
+ * The set of open rows travels with it, because folding is the other thing that
+ * moves content, and it is re-applied before anything scrolls.
  */
 interface EntryState {
+  /** Fallback offset, for when `at` no longer resolves. */
   y?: number;
+  /** DOM id of the resource section the viewport was resting against. */
+  at?: string;
+  /** That section's distance from the top of the viewport, in CSS pixels. */
+  offset?: number;
   /** DOM ids of the resource sections that were expanded. */
   open?: string[];
   /** Set when there were too many open rows to record; see OPEN_ROWS_LIMIT. */
   openTruncated?: boolean;
+}
+
+/** Whether an entry remembers a position at all. */
+function hasPosition(state: EntryState): boolean {
+  return typeof state.at === "string" || typeof state.y === "number";
 }
 
 /**
@@ -401,6 +435,193 @@ interface EntryState {
 const OPEN_ROWS_LIMIT = 2000;
 
 let saveStateTimer: number | undefined;
+
+/**
+ * Every resource section in document order, filtered-out groups excluded.
+ *
+ * Rebuilt with the filter rather than queried per scroll: finding the section
+ * the viewport rests against is a binary search over this array, and at 56,821
+ * rows a `querySelectorAll` on every `scrollend` would not be free.
+ */
+let sectionsInOrder: HTMLElement[] = [];
+
+function indexSections(): void {
+  const found: HTMLElement[] = [];
+  for (const group of docEl.querySelectorAll<HTMLElement>(".group")) {
+    if (group.hasAttribute("data-filtered")) continue;
+    for (const section of group.querySelectorAll<HTMLElement>(".res")) found.push(section);
+  }
+  sectionsInOrder = found;
+}
+
+/**
+ * The section the viewport is resting against: the first one not entirely
+ * scrolled past, plus where its top sits relative to the viewport.
+ *
+ * Sections are laid out top to bottom in document order, so "is this section
+ * still on screen" is monotonic along the array and a binary search finds the
+ * boundary in ~17 probes instead of 56,821. Hidden groups are excluded from the
+ * array precisely so that monotonicity holds — a `display: none` group reports
+ * a zero rect wherever it sits, which would break the ordering.
+ */
+function viewportReference(): { at: string; offset: number } | null {
+  let low = 0;
+  let high = sectionsInOrder.length - 1;
+  let found = -1;
+
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (sectionsInOrder[mid]!.getBoundingClientRect().bottom > 0) {
+      found = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+
+  // Scrolled past the last section: still anchor, to the last one there is.
+  const section = sectionsInOrder[found === -1 ? sectionsInOrder.length - 1 : found];
+  if (!section?.id) return null;
+  // Sub-pixel, deliberately. Rows have fractional heights once text wraps, and
+  // rounding here is enough to ratchet: the convergence pass settles within a
+  // pixel rather than on it, so a rounded target plus that slop walked the
+  // position a whole pixel per traversal, always the same way.
+  const top = section.getBoundingClientRect().top;
+  return { at: section.id, offset: Math.round(top * 100) / 100 };
+}
+
+/* --------------------------------------------------- returning to a place --- */
+
+/**
+ * Frames spent converging on a restored position.
+ *
+ * One scroll is not enough, and this is the crux of the whole mechanism. Moving
+ * the viewport is what causes the rows around it to be rendered and measured for
+ * the first time, which changes their heights, which moves the very section
+ * being aimed at. So each pass re-reads where the section actually is and closes
+ * the remaining gap, which is what makes it converge: correctness comes from
+ * re-measuring, not from assuming heights only ever grow. They usually do, since
+ * a measured row keeps its size, but restoring a fold shape can shrink the page
+ * on the way back. In practice it settles in two or three passes.
+ */
+const SETTLE_PASSES = 8;
+
+/**
+ * How close counts as arrived, in CSS pixels.
+ *
+ * Not zero: scroll offsets are quantised, so insisting on an exact landing would
+ * spend every pass without ever satisfying the test. Sub-pixel because the error
+ * this tolerates is visible once — a quarter of a pixel is not.
+ */
+const SETTLE_EPSILON = 0.25;
+
+/** Keys that scroll. `⌘ + ←` is Back, not a scroll, hence the modifier check. */
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+
+let userGesture = false;
+const noteGesture = (): void => {
+  userGesture = true;
+};
+
+for (const type of ["wheel", "touchstart", "pointerdown"] as const) {
+  window.addEventListener(type, noteGesture, { passive: true });
+}
+window.addEventListener("keydown", (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (SCROLL_KEYS.has(event.key)) noteGesture();
+});
+
+/**
+ * Until when the scrolls happening are this module's own.
+ *
+ * The convergence pass below scrolls several times, and none of those
+ * intermediate positions are the user's. Recording one would overwrite the
+ * entry with a half-finished position. A deadline rather than a flag because it
+ * cannot get stuck: if the tab is hidden mid-restore the frame callbacks never
+ * run, and a flag would suppress every future capture for the life of the page.
+ */
+let restoringUntil = 0;
+
+function restoring(): boolean {
+  return performance.now() < restoringUntil;
+}
+
+/**
+ * How long after a restore its own trailing `scrollend` may still turn up.
+ *
+ * The convergence pass scrolls, so the browser fires `scrollend` once it stops —
+ * and that event is this module's own doing, not the user's. Recording it would
+ * replace the entry's target with the approximation the loop settled for, and
+ * going back and forth over one entry would then walk away from the original
+ * position a pixel at a time.
+ */
+const RESTORE_TAIL_MS = 250;
+
+/** Put `section` back at `offset` from the top of the viewport, and hold it there. */
+function holdSectionAt(section: HTMLElement, offset: number): void {
+  let passes = 0;
+  userGesture = false;
+
+  const done = (yieldedToUser: boolean): void => {
+    // Where the user ends up is theirs to record, so a restore they interrupted
+    // stops guarding immediately. One that finished on its own keeps the guard
+    // for a moment longer, to swallow the `scrollend` it is about to cause.
+    restoringUntil = yieldedToUser ? 0 : performance.now() + RESTORE_TAIL_MS;
+  };
+
+  const step = (): void => {
+    // The user reaching for the page outranks finishing the restore.
+    if (userGesture) {
+      done(true);
+      return;
+    }
+
+    const delta = section.getBoundingClientRect().top - offset;
+    if (Math.abs(delta) < SETTLE_EPSILON || passes >= SETTLE_PASSES) {
+      done(false);
+      return;
+    }
+
+    const before = window.scrollY;
+    window.scrollTo(0, before + delta);
+    passes += 1;
+    restoringUntil = performance.now() + 400;
+
+    // Clamped against the top or bottom of the document and unable to close the
+    // gap. Spinning would not help; this is as close as the page can get.
+    if (window.scrollY === before) {
+      done(false);
+      return;
+    }
+
+    requestAnimationFrame(step);
+  };
+
+  restoringUntil = performance.now() + 400;
+  requestAnimationFrame(step);
+}
+
+/**
+ * Return to what an entry remembered.
+ *
+ * The named section is preferred over the raw offset every time it still
+ * resolves, because it is the only one of the two that survives the page being
+ * measured differently. The offset is what is left when the document has changed
+ * out from under the entry.
+ */
+function restorePosition(state: EntryState): void {
+  const section = state.at ? document.getElementById(state.at) : null;
+
+  if (section && typeof state.offset === "number") {
+    // A filtered-out or otherwise unrendered section has no position to hold.
+    if (section.getClientRects().length > 0) {
+      holdSectionAt(section, state.offset);
+      return;
+    }
+  }
+
+  if (typeof state.y === "number") window.scrollTo(0, state.y);
+}
 
 /** The resource sections currently expanded. Only open rows are scanned. */
 function openRowIds(): string[] {
@@ -432,13 +653,50 @@ function applyOpenRows(ids: string[]): void {
     const details = document.getElementById(id)?.querySelector<HTMLDetailsElement>(".res__d");
     if (details) details.open = true;
   }
+
+  refreshGroupToggles();
+}
+
+/** Label a group's toggle for what it will do next. */
+function setGroupToggle(button: HTMLButtonElement, rowsAreOpen: boolean): void {
+  button.dataset["state"] = rowsAreOpen ? "open" : "closed";
+  button.textContent = rowsAreOpen ? t().group.collapseAll : t().group.expandAll;
+}
+
+/**
+ * Re-label every group's toggle from the rows as they now are.
+ *
+ * Restoring a fold shape opens and closes rows without going through the button,
+ * so without this a Back can leave "Collapse all" sitting above a group that is
+ * already collapsed. `:not([open])` stops at the first closed row rather than
+ * counting them all, which keeps this cheap enough to run on every traversal.
+ */
+function refreshGroupToggles(): void {
+  for (const group of docEl.querySelectorAll<HTMLElement>(".group")) {
+    const button = group.querySelector<HTMLButtonElement>(".group__toggle");
+    if (button) setGroupToggle(button, group.querySelector(".res__d:not([open])") === null);
+  }
 }
 
 function rememberState(): void {
+  // A restore in progress is scrolling on this module's behalf, and those
+  // intermediate positions are not the user's to record.
+  if (restoring()) return;
+
   try {
     const state = (history.state ?? {}) as Record<string, unknown>;
     const open = openRowIds();
     const next: EntryState = { ...state, y: Math.round(window.scrollY) };
+
+    const reference = viewportReference();
+    if (reference) {
+      next.at = reference.at;
+      next.offset = reference.offset;
+    } else {
+      delete next.at;
+      delete next.offset;
+    }
+
     if (open.length > OPEN_ROWS_LIMIT) {
       delete next.open;
       next.openTruncated = true;
@@ -512,6 +770,15 @@ function savedEntryState(): EntryState | null {
  * `hashchange` as well. Both funnel here, and the shared timer means the work
  * runs once after whichever arrives last — so the two cannot fight over the
  * scroll position, whatever order the browser delivers them in.
+ *
+ * The fall back to `history.state` is what makes a second pass harmless. If the
+ * two events are ever far enough apart for the timer to fire between them — a
+ * traversal that has to reload the document from IndexedDB first — the second
+ * pass would otherwise run with no restore state and scroll to the top of
+ * whatever the fragment names, throwing away the position just restored. During
+ * a traversal `history.state` is already the entry being returned to, so reading
+ * it again reproduces the same landing rather than undoing it. Following a link
+ * pushes an entry whose state is null, which is exactly the "no restore" case.
  */
 let pendingRestore: EntryState | null = null;
 let settleTimer: number | undefined;
@@ -519,7 +786,7 @@ let settleTimer: number | undefined;
 function scheduleSettle(): void {
   window.clearTimeout(settleTimer);
   settleTimer = window.setTimeout(() => {
-    const restore = pendingRestore;
+    const restore = pendingRestore ?? savedEntryState();
     pendingRestore = null;
     resolveHash(restore);
   }, 0);
@@ -767,11 +1034,13 @@ docEl.addEventListener("click", (event) => {
   if (expand) {
     const group = expand.closest<HTMLElement>(".group");
     if (!group) return;
-    const rows = group.querySelectorAll<HTMLDetailsElement>(".res__d");
-    const opening = expand.dataset["state"] !== "open";
-    for (const row of rows) row.open = opening;
-    expand.dataset["state"] = opening ? "open" : "closed";
-    expand.textContent = opening ? t().group.collapseAll : t().group.expandAll;
+    // Decided from the rows, not from what this button last did. Folding happens
+    // by other routes too — a row opened by hand, a row opened on arrival, a Back
+    // restoring a whole shape — and a button that trusts its own memory ends up
+    // doing the opposite of its label, or apparently nothing at all.
+    const opening = group.querySelector(".res__d:not([open])") !== null;
+    for (const row of group.querySelectorAll<HTMLDetailsElement>(".res__d")) row.open = opening;
+    setGroupToggle(expand, opening);
   }
 });
 
@@ -1206,6 +1475,13 @@ async function applyRoute(): Promise<void> {
       return;
     }
     const stored = await loadDocument();
+    // Opening IndexedDB is slow enough to lose a race with a person: a document
+    // pasted while that await was pending is already rendered and already owns
+    // the view, and continuing here would put the paste view back over it.
+    if (current) {
+      showView("doc");
+      return;
+    }
     if (stored) {
       inputEl.value = stored.text;
       updateDropMeta();
@@ -1255,6 +1531,14 @@ async function boot(): Promise<void> {
   // The paste view is the entry point. If a document is already stored, offer a
   // way back to it instead of silently jumping there.
   const stored = await loadDocument();
+
+  // Reading IndexedDB takes long enough that a document can be pasted before it
+  // finishes — most easily on a cold profile, where opening the database is
+  // slowest. That document is rendered and showing by now, so boot has nothing
+  // left to do: falling through would replace it with the paste view and look
+  // exactly like the paste having been ignored.
+  if (current) return;
+
   showView("paste");
 
   if (!stored) {

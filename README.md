@@ -73,14 +73,35 @@ called — so it matches the rest of the UI. `/imprint`, `/legal`, `/datenschutz
   read back from IndexedDB, so the browser's initial scroll-to-fragment hits nothing. The app
   rebuilds first, then resolves `location.hash` itself. (`:target` needs no help — it starts
   matching as soon as an element with that id exists.)
-- **A scroll offset only means something against one layout.** Expanding a row moves everything
-  below it by hundreds of pixels, so restoring `y` after the page has been folded differently lands
-  somewhere unrelated. Each entry therefore records the set of open rows alongside the offset, and on
-  the way back the document is folded to that shape *before* anything scrolls. The browser's own
-  `scrollRestoration` is off, because it cannot know any of this. Positions are captured on
-  `scrollend`, on a debounce, on a capture-phase click on any in-page anchor, and on `pagehide`.
-  Above 2,000 open rows the fold state is dropped rather than risking the browser's `history.state`
-  size limit; the offset is still kept.
+- **A history entry cannot remember a scroll offset, and `content-visibility` is the reason.** A
+  row that has never been on screen has no measured height — the browser uses the
+  `contain-intrinsic-size` estimate — so the page is only as accurate as the parts of it you have
+  visited. Walk into a region for the first time and every row there grows from 35.6px to its real
+  height, permanently. If that happened *above* where you were standing, the offset you left behind
+  now points at different content. Measured on a 131-resource document: **342–1,215px of drift**,
+  most of a screen, and worst of all on a reload, where nothing has been measured yet.
+
+  So an entry remembers a **place, not a number**: which resource section the viewport was resting
+  against, and how far that section's top was from the top of the viewport. On the way back that
+  section is put back at that offset — and then re-measured over several frames, because the act of
+  scrolling is what renders the rows around it and therefore changes their heights. It converges in
+  two or three passes; heights only ever resolve from estimate to real, never back. `y` is still
+  recorded, as the fallback for when the section is no longer in the document at all.
+
+  Finding the section is a binary search over an array rebuilt with the type filter — 0.01ms at
+  61,487 rows, against 10.4ms for a `querySelectorAll` on every `scrollend`. Filtered-out groups are
+  excluded from that array, because a `display: none` group reports a zero rect wherever it sits and
+  would break the ordering the search depends on.
+
+- **The set of open rows travels with the position**, because folding is the other thing that moves
+  content, and it is re-applied *before* anything scrolls. A restored shape is also authoritative:
+  the fragment's own row is only auto-opened when there was no shape to apply. Otherwise returning to
+  an entry where you had *collapsed* the row you originally landed on would re-open it, and
+  everything below would move. The browser's own `scrollRestoration` is off, because it cannot know
+  any of this. Positions are captured on `scrollend`, on a debounce, on a capture-phase click on any
+  in-page anchor, and on `pagehide` — and never while a restore is still converging, or the entry
+  would be overwritten with a half-finished position. Above 2,000 open rows the fold state is dropped
+  rather than risking the browser's `history.state` size limit; the position is still kept.
 - **Do not reach for the Navigation API's `navigate` event** to catch the last few milliseconds
   before a Back. It fires *during* the traversal, when `history.state` already refers to the entry
   being restored, so writing the outgoing position there overwrites exactly what is about to be read
@@ -92,6 +113,11 @@ called — so it matches the rest of the UI. `/imprint`, `/legal`, `/datenschutz
   wins; the row is tagged `duplicated`.
 - **Filtering by type hides groups**, and you cannot scroll to a `display: none` element — so
   following a link into a filtered-out type clears the filter and says so.
+- **`boot()` reads IndexedDB behind an `await`**, and a document loaded during that await is already
+  rendered and already owns the view by the time the read returns. Falling through to `showView`
+  would put the paste view back over the top of it, which looks exactly like the paste having been
+  ignored. A person cannot paste and click inside that window, but a test can, so both `boot` and
+  `applyRoute` check for it rather than being accidentally right.
 - **A pointer with no matching resource** renders as an explicit struck-through "not in document"
   marker, and is counted in the summary. That distinction is usually the thing being diagnosed.
 - **`scroll-margin-top`** on every anchor target, or the sticky header and sticky group header would
@@ -155,8 +181,9 @@ visitor.
 **Keeping things**
 - **Saved documents** live in IndexedDB, with rename and delete. Nothing is uploaded.
 - The last document you opened is restored on reload; `/` offers a way back into it.
-- Back and Forward restore each history entry's exact scroll position *and* which rows were
-  expanded — a saved offset is meaningless if the page has since been folded differently.
+- Back and Forward return you to the exact point you left — the same content in the same place on
+  screen, not the same pixel offset, which is a different and much weaker promise on a page whose
+  rows are measured lazily. Which rows were expanded is restored with it.
 
 **Keyboard** — `?` lists them all. `/` or `g` finds a resource by type or id, `s` saves, `r` raw,
 `e` exports, `l` opens saved documents, `Shift+Esc` leaves the document, `Esc` closes a dialog.
@@ -283,8 +310,28 @@ npm run build
 npm run fixtures
 ```
 
-`npm test` runs 109 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
-the encryption round trip and the bulk-render escaping. `npm run build` typechecks app and Worker
+`npm test` runs 117 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
+the encryption round trip and the bulk-render escaping.
+
+History restoration is deliberately *not* among them. What it promises — Back puts the same content
+back in the same place on screen — depends on `content-visibility` and on real layout, and jsdom has
+neither, so those tests would pass vacuously. They live in
+[`test/browser/`](test/browser/README.md) instead, and run in headless Chrome:
+
+```bash
+node test/browser/run.mjs --doc fixtures/amtrak.json
+```
+
+22 journeys through a real payload plus a reload check, each reporting how far the watched content
+moved in pixels; ±2px is the bar and the runner exits non-zero if anything drifts further. `--width`
+runs the whole suite at a narrow layout. It needs `npm run dev` up,
+because it fetches the scenarios from that origin, and it drives Chrome over CDP directly — Node has
+had a global `WebSocket` since 22, so that is about sixty lines and no new dependency.
+
+Headless rather than a real window on purpose. A headed tab only renders while it is the visible,
+non-occluded tab of a non-minimised window; anywhere else it stops running `requestAnimationFrame`
+and stops updating `content-visibility`, and the measurements come out quietly wrong rather than
+failing. Headless always renders, needs nobody's screen, and several copies can run at once. `npm run build` typechecks app and Worker
 separately (they have incompatible globals) and builds to `dist/`. `npm run fixtures` writes
 `fixtures/large-50k.json`; it takes an optional count and path.
 
@@ -318,6 +365,11 @@ Chrome 148, Apple Silicon. Fixture: `npm run fixtures` → **25.7 MB, 56,821 res
 | DOM | 56,821 sections, **750,727 elements** |
 | JS heap after render | **57–83 MB** |
 | Jump to a resource 1.9 M pixels down | **147 ms** |
+| Find the section a position is anchored to | **0.01 ms** (binary search, warm; 3.7 ms cold) |
+| Index those sections, once per render or filter | **29 ms** |
+
+The two restoration figures were measured on a re-generated fixture of 61,487 resources rather than
+the 56,821 above; `npm run fixtures` does not produce an identical document twice.
 | Reload from IndexedDB and re-render | ~1.6 s |
 | Create a share link (7.6 kB document) | **~1.0 s**, of which ~200 ms is the KDF |
 
