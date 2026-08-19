@@ -21,8 +21,8 @@
  *   node test/browser/run.mjs --only s02,s08,s16
  *   node test/browser/run.mjs --extra my-scenarios.js
  *
- * `--url` defaults to http://localhost:5180 and expects `npm run dev` to be
- * serving it, because the harness files are fetched from that origin.
+ * `--url` defaults to http://localhost:5180, and can be pointed at a deployment
+ * just as well — the harness is injected from disk, not fetched from the origin.
  * Exits non-zero if any scenario fails, so it can gate a release.
  */
 
@@ -270,13 +270,12 @@ try {
     throw new Error(`asked for a ${WIDTH}px viewport and got ${gotWidth}px`);
   }
 
-  const harness = ["/test/browser/nav-harness.js", "/test/browser/nav-scenarios.js"];
-  await page.evaluate(`(async () => {
-    for (const src of ${JSON.stringify(harness)}) {
-      (0, eval)(await (await fetch(src + '?t=' + Date.now())).text());
-    }
-    return true;
-  })()`);
+  // Injected from disk rather than fetched from the origin, so this can be
+  // pointed at a deployment as well as at a dev server — the built site serves
+  // `dist/`, and asking it for `/test/browser/…` gets the SPA fallback.
+  for (const file of ["test/browser/nav-harness.js", "test/browser/nav-scenarios.js"]) {
+    await page.evaluate(`(0, eval)(${JSON.stringify(await readFile(file, "utf8"))})`);
+  }
 
   if (EXTRA) {
     const extra = await readFile(EXTRA, "utf8");

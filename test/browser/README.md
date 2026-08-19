@@ -20,12 +20,20 @@ Two things follow from that, and both will silently invalidate a run:
 ## Running them
 
 ```bash
-npm run dev            # the runner fetches the harness from this origin
+npm run dev
 node test/browser/run.mjs
 ```
 
+Or against a deployment, which is worth doing after a release — the fix these
+scenarios cover is about layout, and layout is the sort of thing a build can change:
+
+```bash
+node test/browser/run.mjs --url https://jsonapi.mstool.dev
+```
+
 That launches its own headless Chrome, pastes the document through the app's own paste flow, and runs
-every scenario, printing one line each and exiting non-zero if any drifted. Options:
+every scenario. The harness is injected from disk rather than fetched, so any origin serving the app
+will do, printing one line each and exiting non-zero if any drifted. Options:
 
 | | |
 |---|---|
