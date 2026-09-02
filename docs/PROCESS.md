@@ -4,7 +4,7 @@ How a change gets from a task to production in this repository. The configuratio
 branch names, labels, environments — is in [DELIVERY.md](DELIVERY.md). Binding design decisions are
 in [DECISIONS.md](DECISIONS.md). What is actually on `main` is in [STATUS.md](STATUS.md).
 
-Profile: **`local-qa`**. Three roles, and QA runs before merge because merging is what deploys.
+Profile: **`local+prod-qa`**. Three roles. QA runs before merge, because merging is what deploys — and again on production afterwards, because a build is what sits between the two.
 
 ## 1 · The lifecycle
 
@@ -37,6 +37,11 @@ IMPLEMENTER  branch <type>/<task-id>-<slug>
     │ ✓
     ▼
 implementer squash-merges  ──►  push to main  ──►  CI  ──►  DEPLOY  ──►  PRODUCTION
+                                                                            │
+                                                                            ▼
+                                              QA-WEB again, on jsonapi.mstool.dev:
+                                              the full regression checklist, then
+                                              every new feature.  ✗ → fix forward
 ```
 
 **QA is batched per wave, not run per change.** One browser pass covering several features is
@@ -54,6 +59,13 @@ shared is the setup, not the coverage.
 assets and any D1 migration to `https://jsonapi.mstool.dev`. Review and QA as though what you pass
 is live in three minutes, because it is. Every pull request body says plainly what was **not**
 verified.
+
+**The production pass is not a formality.** What it catches is the class of defect that only exists
+after a build: a layout that shifted under minification, a `content-visibility` measurement that
+differs from the dev server's, an asset path that resolves locally and not behind the Worker, a D1
+migration that ran differently against the real database. `docs/qa-checklists/REGRESSION.md` is run
+in full both times for exactly that reason — and it grows a permanent row for every defect that ever
+reached production.
 
 ## 2 · Roles
 

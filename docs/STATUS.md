@@ -74,11 +74,11 @@ force, not just which files each task obviously edits.
 | `qa-api` agent | 🔒 | The only HTTP surface is `/api/shares` and `/api/health`, with no published schema a blind agent could derive cases from. Revisit if the share API grows a documented contract. |
 | `qa-device` agent | 🔒 | There is no native app. |
 | Required-reviewer on the `production` environment | 🔒 | Single maintainer. A self-approved deploy gate is theatre, and a gate that gets waived on its first use never comes back. |
-| Production QA pass (`local+prod-qa`) | 🔒 | The target profile above this one. Needs a written regression checklist and a decision that a QA agent may drive the public origin. `deploy.yml` already smoke-tests after release, and `test/browser/run.mjs` already accepts `--url`, so this is a short step when it is wanted. |
+| — | — | *(Production QA is no longer deferred: the profile is `local+prod-qa`, `docs/qa-checklists/REGRESSION.md` is the checklist, and the release sequence is in `DELIVERY.md`.)* |
 
 ## 4 · Open asks — not ours to close
 
 | Ask | Owner | Blocks |
 |---|---|---|
-| Protect `main` — require a pull request and the `check` status context | @maksymskuibida (repo admin) | Nothing is enforced today: `main` is unprotected, so a direct push bypasses review, QA and CI-before-merge in one step. Free on a public repo. |
+| Protect `main` — require a pull request and the `check` status context | @maksymskuibida (repo admin) | Nothing is enforced today: `main` is unprotected, so a direct push bypasses review, QA and CI-before-merge in one step. Free on a public repo. **Deliberately not done by an agent** — it is a repository setting, not a code change, and changing account settings unasked is out of bounds. Passed over rather than blocked on, per `DELIVERY.md` *Running unattended*. |
 | Arm the evidence staleness gate | next session | The "ran it, then changed the code" failure. `scripts/check-evidence.sh` is not installed; the SHA is checked by hand at preflight, which catches carelessness but not drift. |

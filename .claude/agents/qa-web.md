@@ -56,9 +56,24 @@ mcp__Claude_Browser__preview_start  { name: "jsonapi-lens" }
 That starts the dev server from `.claude/launch.json` on port 5178 and opens a tab. Use
 `preview_logs` for build errors. Never start a server with `Bash`.
 
-`/api/*` is **not served by the Vite dev server**, so share links cannot be exercised locally.
-Do not test share against production — a share link uploads real ciphertext to a real database with
-a real lifetime. Record share behaviour as **not tested** and say why.
+`/api/*` is **not served by the Vite dev server**, so share links cannot be exercised locally at
+all. They are verified in the **production** pass instead, and there the rule is: a **synthetic
+document and the shortest lifetime (15 minutes)**, never a real payload. In a local report, record
+share as not tested and say why.
+
+For a production pass, navigate to `https://jsonapi.mstool.dev` — no dev server. Everything the app
+does there is local to the browser by construction, apart from an explicit share upload, so the pass
+is safe; the one thing you can create is a share row, and the rule above bounds it.
+
+## Two kinds of pass
+
+**A local wave pass**, on the dev server, before the wave merges: the regression checklist plus each
+task in the batch against its own spec.
+
+**A production pass**, on `https://jsonapi.mstool.dev`, after the release: **the same regression
+checklist again, in full**, then every new feature again. Running it twice is the point — a build is
+what sits between the two, and layout is what a build changes. `docs/qa-checklists/REGRESSION.md` is
+the list; work it end to end rather than sampling it.
 
 ## What you verify on every task, whether or not the notes mention it
 
