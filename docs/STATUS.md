@@ -26,6 +26,7 @@ blocker) · **🔒 not built** (deliberate — reason in §3) · **📋 queued**
 | T6 · Share a bundle | 📋 | [T6](task-specs/T6.md) | In the saved list: a Share button puts a checkbox on each row and swaps the buttons for Cancel and Create link. Disabled with nothing selected; one selection makes a document link, several make a bundle. Opening a bundle offers its documents for import — all, a selection, or cancel. |
 | T7 · MCP server | 📋 | [T7](task-specs/T7.md) | `share` takes a document list and an AI-supplied `openssl rand -hex 32` secret, seals one document or a bundle, returns the id, and documents how to build the URL. `read` takes an id and a secret and returns the document. |
 | T3 · Importers | 📋 | [T3](task-specs/T3.md) | cURL, raw HTTP request, raw HTTP response, bare URL, HAR, and **JSON transport logs** — a serialised Python `logging` record with HTTP transport fields, where two records correlate on a shared id and merge in either order. |
+| T8 · Pre-existing defects | 📋 | [T8](task-specs/T8.md) | Five defects the production baseline found, live on prod today and none of them ours: value formatting ignoring the app's language (**high**), a malformed share link reported as a missing page, `/view`'s title falling back whenever there is a hash, a stale saved-count on delete, and five untranslated string groups. |
 | T4 · Diagnostics | 📋 | [T4](task-specs/T4.md) | The request-vs-response cross-checks, linked at both ends and surfaced inline on the rows they explain. |
 
 ## 1a · Waves
@@ -36,10 +37,10 @@ are assigned **disjoint file sets**, because the alternative is two agents rebas
 | Wave | Tasks | Owns |
 |---|---|---|
 | 1 | **T1** ‖ **T5** | T1: `parse.ts`, `ident.ts`, the new JSON index, the rail, **all of `main.ts`**, i18n `shape`/`identity`. T5: `store.ts`, `crypto.ts`, `share.ts`, i18n `bundle`. See the note below — the first draft of this split was wrong. |
-| 2 | **T2** ‖ **T6** ‖ **T7** | T2: the new request modules + the document view. T6: `panels.ts` + the bundle route. T7: a new `mcp/` tree only. T2 and T6 both touch `main.ts` in different regions; second to land rebases. |
+| 2 | **T2** ‖ **T6** ‖ **T7** ‖ **T8** | T2: the new request modules, `main.ts`, `render-document.ts`, `types.ts`, `styles.css`. T6: `panels.ts` + the bundle route. T7: a new `mcp/` tree only. T8: `format.ts`, `i18n/intl.ts`, `router.ts`, `seo.ts`, `render-resource.ts`. T2 and T6 both touch `main.ts` in different regions; second to land rebases. **T8 runs after T1 merges** — it edits files T1 owns. D4 goes to whichever of T6/T8 gets there first; see T8's ownership note. |
 | 3 | **T3** ‖ **T4** | T3: the importer modules. T4: the checks module. Both read T2's model and neither owns it. |
 
-Dependencies: **T1 → T2 → {T3, T4}** and **T5 → {T2, T6, T7}**. Everything else is parallel.
+Dependencies: **T1 → T2 → {T3, T4}**, **T5 → {T2, T6, T7}**, and **T1 → T8**. Everything else is parallel.
 
 **The wave-1 split needed correcting mid-flight, and the reason generalises.** `src/main.ts`
 builds a `LibraryEntry` out of `resources`, `types` and `shape` — three fields that only existed on
@@ -75,6 +76,18 @@ force, not just which files each task obviously edits.
 | `qa-device` agent | 🔒 | There is no native app. |
 | Required-reviewer on the `production` environment | 🔒 | Single maintainer. A self-approved deploy gate is theatre, and a gate that gets waived on its first use never comes back. |
 | — | — | *(Production QA is no longer deferred: the profile is `local+prod-qa`, `docs/qa-checklists/REGRESSION.md` is the checklist, and the release sequence is in `DELIVERY.md`.)* |
+
+## 3a · Production baseline
+
+`docs/qa-reports/prod-baseline-2026-09-02.md` records the state of production **before** this
+release: 70 of 71 checklist lines passing, the browser scenario suite 24/24 against the live origin,
+zero network requests carrying document content, and five pre-existing defects now specified as
+**T8**. The one untested line is private-window/storage-blocked behaviour, for which the automation
+harness has no incognito primitive.
+
+It exists so the post-deploy pass is a **diff** rather than a fresh opinion. Without it, every
+failure found after the release would be ambiguous between "we broke it" and "it was always like
+that" — and five of them would have been misattributed.
 
 ## 4 · Open asks — not ours to close
 
