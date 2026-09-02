@@ -154,6 +154,11 @@ Stated concretely so "layering" is checkable:
   the static assets, so it is a fetch by definition. Those four, and **no other module
   may open a network connection.** The app's central promise is that reading a document is local;
   a `fetch` anywhere else is a design violation, not an optimisation.
+- This rule is about `src/` — the browser app's promise that reading a document never leaves the
+  tab. `mcp/` is a separate program a user runs deliberately, over stdio, to talk to the same public
+  API `share.ts` already does; it may open a network connection (`mcp/transport.ts` is where it
+  does), and doing so does not weaken the promise above, because nothing in `src/` gained a new
+  network path — the browser app is exactly as local as it was.
 
 ## 6 · The rules this codebase is most likely to lose
 

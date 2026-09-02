@@ -6,7 +6,7 @@ status-ledger: docs/STATUS.md
 forge: github
 branch-template: <type>/<task-id>-<slug>
 concurrency-cap: 2
-verify-command: npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh
+verify-command: npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npx tsc -p mcp/tsconfig.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh
 preflight: scripts/review-preflight.sh
 environments: local,prod
 qa-surfaces: web
@@ -56,7 +56,7 @@ schema a blind agent could derive cases from. No `qa-device`: there is no native
 | Purpose | Command |
 |---|---|
 | Install | `npm ci` |
-| Verify locally (the order CI runs) | `npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh` |
+| Verify locally (the order CI runs) | `npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npx tsc -p mcp/tsconfig.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh` |
 | Run the app | `npm run dev` — port 5178, pinned in `.claude/launch.json` |
 | Browser scenarios (local) | `node test/browser/run.mjs` |
 | Browser scenarios (deployment) | `node test/browser/run.mjs --url https://jsonapi.mstool.dev` |

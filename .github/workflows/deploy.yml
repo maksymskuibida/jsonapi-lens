@@ -49,6 +49,14 @@ jobs:
       - name: Typecheck the Worker
         run: npx tsc -p tsconfig.worker.json --noEmit
 
+      # mcp/ runs on plain Node rather than in a browser, so it is its own
+      # tsc program (mcp/tsconfig.json) for the same reason the Worker is —
+      # see that file's header comment. Not part of `deploy`: mcp/ is a local
+      # tool a user runs themselves, never uploaded as part of the Worker or
+      # the static assets.
+      - name: Typecheck the MCP server
+        run: npx tsc -p mcp/tsconfig.json --noEmit
+
       - name: Test
         run: npm test
 

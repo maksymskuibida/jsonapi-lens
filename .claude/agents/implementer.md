@@ -76,7 +76,7 @@ is repeated here because you work from this brief. If you change one, change bot
 - Verify locally, in the order CI runs, before you open anything:
 
   ```
-  npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh
+  npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npx tsc -p mcp/tsconfig.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh
   ```
 
   `npx wrangler types` first is not optional: `worker-configuration.d.ts` is generated rather than
