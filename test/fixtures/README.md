@@ -34,3 +34,13 @@ The two records describe **one** outbound call and pair on `context.correlation_
 `info.url` and `info.http_method`. `started` carries the request; `finished` carries the status,
 the response headers, the elapsed time and the response body — which here is a JSON:API document,
 because that is the case the importer exists for.
+
+## `share-v2-compat.json`
+
+Not synthesised in the usual sense — it is the literal output of `src/crypto.ts`'s `seal()`, from
+before T5's bundle/exchange work touched that file, run against the synthetic payload and secret
+recorded inside the fixture itself. Exists so `test/crypto.test.ts` can prove the current `open()`
+still decrypts a share link sealed by the exact code that shipped in commit
+`12d01fc4d790c4f10252cc1034d722113cdf891b`, named in the fixture's own comment — a blob sealed by
+today's code would only prove today's code agrees with itself. The `secret` field is not a real
+share secret; it exists only to open this one fixture and was never used against production.
