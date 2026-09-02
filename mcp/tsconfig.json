@@ -1,0 +1,39 @@
+{
+  // A separate program from the root tsconfig.json for the same reason
+  // tsconfig.worker.json is: this code runs on plain Node, not in a browser,
+  // so its globals differ (`types: ["node"]` is what supplies `process`,
+  // `Buffer` and Node's own ambient `fetch`/`Response`/`crypto` typings).
+  //
+  // `lib` still carries "DOM", even though nothing this tree runs touches a
+  // document or a window. `src/crypto.ts` pulls in the whole of
+  // `src/i18n/index.ts` (for `t()`) and, through it, all three catalogues —
+  // and `en.ts`/`de.ts`/`uk.ts` import `src/dom.ts` for unrelated messages
+  // this server never reaches, while `i18n/index.ts` itself references
+  // `location`/`document`/`history` in branches already guarded at runtime
+  // (`typeof location === "undefined"`) but not type-guarded. One `tsc`
+  // program typechecks a file's *whole* import graph under one `lib` set, so
+  // there is no way to typecheck `crypto.ts` here without also satisfying
+  // those references — dropping "DOM" does not prove this tree avoids the
+  // browser, it just fails to typecheck a file this task must import as-is.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  // `test/mcp` is included here, not in the root program — see that config's
+  // own comment on its matching exclusion — because it needs the same Node
+  // globals and module resolution this tree does, including one test that
+  // spawns `mcp/server.ts` as a real subprocess.
+  "include": ["**/*.ts", "../test/mcp/**/*.ts"]
+}
