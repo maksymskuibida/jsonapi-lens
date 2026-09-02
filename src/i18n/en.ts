@@ -627,6 +627,46 @@ export const en = {
     },
   },
 
+  /*
+   * ------------------------------------------------------------ bundle ---
+   * Everything T5 adds, under one new top-level key. `secretLength` is not
+   * only about bundles — it fires from plain single-document sealing too,
+   * whenever a caller (T7's MCP server, say) supplies a secret outside
+   * `[MIN_SECRET_CHARS, MAX_SECRET_CHARS]` — but it lives here anyway so this
+   * diff cannot collide with T1's own new top-level keys in this same file.
+   */
+
+  bundle: {
+    errors: {
+      secretLength: {
+        headline: "That secret is not a usable length.",
+        hint: (length: number, min: number, max: number) =>
+          `It is ${f.n(length)} characters. A share secret must be between ${f.n(min)} and ${f.n(max)} characters.`,
+      },
+      empty: {
+        headline: "A bundle needs at least one document.",
+        hint: "Select at least one document to share.",
+      },
+      emptyDocument: {
+        headline: "An empty document cannot be shared.",
+        hint: (label: string) => `"${label}" has no content.`,
+      },
+      tooLarge: {
+        headline: "This bundle is too large to share.",
+        hint: (limit: string, overBy: string, offenders: string) =>
+          `Encrypted, it is ${overBy} over the ${limit} limit. Largest: ${offenders}. Remove one and try again.`,
+      },
+      corrupt: {
+        headline: "That shared bundle is corrupt.",
+        hint: "It decrypted, but does not contain a bundle.",
+      },
+      unavailable: {
+        headline: "This share link contains several documents.",
+        hint: "This version of jsonapi-lens has no bundle view yet, so nothing here can display it. Ask for a single-document link instead, or try again later.",
+      },
+    },
+  },
+
   /* ------------------------------------------------------------ labels --- */
 
   labels: {

@@ -564,6 +564,37 @@ export const de: Messages = {
     },
   },
 
+  bundle: {
+    errors: {
+      secretLength: {
+        headline: "Dieser Schlüssel hat keine brauchbare Länge.",
+        hint: (length, min, max) =>
+          `Er hat ${f.n(length)} Zeichen. Ein Share-Schlüssel muss zwischen ${f.n(min)} und ${f.n(max)} Zeichen lang sein.`,
+      },
+      empty: {
+        headline: "Ein Bündel braucht mindestens ein Dokument.",
+        hint: "Wählen Sie mindestens ein Dokument zum Teilen aus.",
+      },
+      emptyDocument: {
+        headline: "Ein leeres Dokument kann nicht geteilt werden.",
+        hint: (label) => `„${label}“ hat keinen Inhalt.`,
+      },
+      tooLarge: {
+        headline: "Dieses Bündel ist zu groß zum Teilen.",
+        hint: (limit, overBy, offenders) =>
+          `Verschlüsselt liegt es ${overBy} über dem Limit von ${limit}. Am größten: ${offenders}. Entfernen Sie eines und versuchen Sie es erneut.`,
+      },
+      corrupt: {
+        headline: "Dieses geteilte Bündel ist beschädigt.",
+        hint: "Es ließ sich entschlüsseln, enthält aber kein Bündel.",
+      },
+      unavailable: {
+        headline: "Dieser Share-Link enthält mehrere Dokumente.",
+        hint: "Diese Version von jsonapi-lens hat noch keine Bündelansicht und kann es daher nicht anzeigen. Bitten Sie um einen Link mit nur einem Dokument, oder versuchen Sie es später erneut.",
+      },
+    },
+  },
+
   labels: {
     pastedDocument: "eingefügtes Dokument",
     storedDocument: "gespeichertes Dokument",

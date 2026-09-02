@@ -97,8 +97,12 @@ export async function openLibraryModal(
           "span",
           { class: "library__meta" },
           el("code", { class: "library__shape", text: entry.shape }),
-          el("span", { text: t().library.resources(entry.resources) }),
-          el("span", { text: t().library.types(entry.types) }),
+          // Absent for a document whose lens has no resource/type concept —
+          // a plain-JSON reading, or a v2 entry from before that lens existed.
+          // Omitted rather than shown as zero: it did not count zero
+          // resources, it never had a concept of one to count.
+          entry.resources !== undefined ? el("span", { text: t().library.resources(entry.resources) }) : null,
+          entry.types !== undefined ? el("span", { text: t().library.types(entry.types) }) : null,
           el("span", { text: formatBytes(entry.bytes) }),
           el("span", { class: "library__when", text: relativeTime(entry.savedAt) }),
         ),
