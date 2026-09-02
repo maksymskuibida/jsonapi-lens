@@ -1771,19 +1771,36 @@ async function boot(): Promise<void> {
   inputEl.value = stored.text;
   updateDropMeta();
 
-  // Parse it so "Back to document" is instant, but stay on the paste view.
+  // Parse *and render* it so "Back to document" is instant, but stay on the
+  // paste view. Pre-existing bug, reproduced on the unmodified base commit
+  // and fixed here because this is the function that already needed
+  // rewriting for `readAny`: this branch used to set `current` and call
+  // `offerResume()` without ever rendering into `docEl`, so a document
+  // stored from an earlier session, reloaded fresh on `/`, showed a
+  // completely blank document view the moment "Back to document" was
+  // clicked — `showView("doc")` reveals `docEl`, and nothing had ever put
+  // anything there. Rendering now and folding back to the paste view with a
+  // second `showView`/`applyRouteMeta` call keeps the visible screen and the
+  // page's own metadata matching what is actually on it, while leaving
+  // `docEl` already populated for whenever "Back to document" is clicked.
+  //
   // `readAny` rather than `readDocument`: a stored document is one that was
   // already read successfully once — including a plain-JSON one — and this
   // is a restore, not a fresh submission, so there is no shape offer to show
   // here even if the shape is not `jsonapi`.
   try {
+    const started = performance.now();
     const lens = readAny(stored.text);
+    const parseMs = performance.now() - started;
     current = {
       lens,
       label: stored.label ?? t().labels.storedDocument,
       bytes: new TextEncoder().encode(stored.text).byteLength,
       text: stored.text,
     };
+    renderLoadedView(current, parseMs);
+    showView("paste");
+    applyRouteMeta({ kind: "paste" });
     offerResume();
   } catch {
     // A stored document that no longer parses is not worth blocking the paste
