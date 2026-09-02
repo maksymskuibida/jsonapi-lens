@@ -165,3 +165,101 @@ describe("library", () => {
     expect(await deleteFromLibrary(999)).toBe(true);
   });
 });
+
+describe("the v2 → v3 upgrade, on a real existing database", () => {
+  /**
+   * Seeds a database shaped exactly like the pre-T5 build would have left
+   * one on disk: opened at version 2, using that build's own
+   * `onupgradeneeded` (out-of-line-keyed `documents`, `library` keyed on
+   * `id` with a `savedAt` index) — not this branch's `store.ts`, which can
+   * only ever open at version 3 now. `saveDocument`/`saveToLibrary` are
+   * deliberately not reused here for the same reason: this has to be data a
+   * v2 client actually could have written, not data this branch's code
+   * happens to produce.
+   */
+  function seedV2Database(
+    document: StoredDocument,
+    entry: Omit<LibraryEntry, "id">,
+  ): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open("jsonapi-lens", 2);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore("documents");
+        const store = db.createObjectStore("library", { keyPath: "id", autoIncrement: true });
+        store.createIndex("savedAt", "savedAt");
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction(["documents", "library"], "readwrite");
+        tx.objectStore("documents").put(document, "current");
+        const addReq = tx.objectStore("library").add(entry);
+        let libraryId: number;
+        addReq.onsuccess = () => {
+          libraryId = addReq.result as number;
+        };
+        tx.oncomplete = () => {
+          db.close();
+          resolve(libraryId);
+        };
+        tx.onerror = () => reject(tx.error);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  it("upgrades a real v2 database in place: the current document and the library entry both survive, and every library operation still works", async () => {
+    const v2Document: StoredDocument = {
+      text: '{"data":{"type":"widgets","id":"1"}}',
+      savedAt: 100,
+      label: "v2-current.json",
+    };
+    const v2Entry: Omit<LibraryEntry, "id"> = {
+      label: "v2-library.json",
+      text: '{"data":[{"type":"widgets","id":"1"},{"type":"widgets","id":"2"}]}',
+      savedAt: 200,
+      bytes: 58,
+      resources: 2,
+      types: 1,
+      shape: "data[2]",
+    };
+    const seededId = await seedV2Database(v2Document, v2Entry);
+
+    // Every call below goes through this branch's real `store.ts`, whose
+    // `open()` requests version 3 — against a database still on disk at
+    // version 2, this is what actually fires a real `onupgradeneeded` with
+    // `oldVersion: 2`, not a simulated one.
+    const loadedDoc = await loadDocument();
+    expect(loadedDoc).toEqual(v2Document);
+    expect(loadedDoc?.exchange).toBeUndefined();
+
+    const loadedEntry = await getFromLibrary(seededId);
+    expect(loadedEntry).toEqual({ ...v2Entry, id: seededId });
+
+    const listed = await listLibrary();
+    expect(listed).toEqual([{ ...v2Entry, id: seededId }]);
+    expect(await countLibrary()).toBe(1);
+
+    // A v3-shaped entry can be added alongside the migrated v2 one.
+    const v3Id = await saveToLibrary({
+      label: "new.json",
+      text: "{}",
+      savedAt: 300,
+      bytes: 2,
+      exchange: { method: "GET" },
+    });
+    expect(await countLibrary()).toBe(2);
+
+    // Every library operation still works on the pre-existing v2 record,
+    // including renaming, which reads the entry back and rewrites it —
+    // confirming the untouched fields (resources/types/shape) survive a
+    // round trip through this branch's code, not just the initial read.
+    expect(await renameInLibrary(seededId, "renamed-v2.json")).toBe(true);
+    const renamed = await getFromLibrary(seededId);
+    expect(renamed).toEqual({ ...v2Entry, id: seededId, label: "renamed-v2.json" });
+
+    expect(await deleteFromLibrary(seededId)).toBe(true);
+    expect(await getFromLibrary(seededId)).toBeNull();
+    expect(await getFromLibrary(v3Id!)).not.toBeNull();
+  });
+});
