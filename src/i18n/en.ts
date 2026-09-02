@@ -19,6 +19,7 @@
 
 import { el, frag } from "../dom.js";
 import { intlFor } from "./intl.js";
+import type { Shape, ShapeEvidence } from "../types.js";
 
 const f = intlFor("en");
 
@@ -260,6 +261,80 @@ export const en = {
   /** Digit grouping in the active language, for counts built outside a message. */
   num: (value: number) => f.n(value),
 
+  /* ------------------------------------------------------- plain JSON — T1 --- */
+
+  shape: {
+    /** Short label for the detected shape — kept as terse as `overview.shapeSingle` and friends. */
+    name: (value: Shape): string => {
+      switch (value) {
+        case "jsonapi":
+          return "JSON:API";
+        case "hal":
+          return "HAL";
+        case "odata":
+          return "OData";
+        case "jsonrpc":
+          return "JSON-RPC";
+        case "envelope":
+          return "Envelope";
+        case "collection":
+          return "Collection";
+        case "ndjson":
+          return "JSON Lines";
+        case "plain":
+          return "Plain JSON";
+      }
+    },
+    /** Why `detectShape` chose what it chose — shown in the overview note and in the paste-view offer. */
+    evidence: (value: ShapeEvidence): string => {
+      switch (value.kind) {
+        case "jsonapi-member":
+          return "This document has a top-level `data`, `errors` or `meta` member.";
+        case "hal-links":
+          return "Detected as HAL: the document has a top-level `_links` member.";
+        case "hal-embedded":
+          return "Detected as HAL: the document has a top-level `_embedded` member.";
+        case "odata-context":
+          return "Detected as OData: the document has an `@odata.context` member.";
+        case "jsonrpc-member":
+          return "Detected as JSON-RPC: the document has a `jsonrpc` member.";
+        case "envelope-shape":
+          return "This document has a `data` member, but its value is not shaped like JSON:API resource data.";
+        case "envelope-conflict":
+          return "This document has both `data` and `errors`, which JSON:API forbids together.";
+        case "collection-array":
+          return `The document is a bare array of ${f.n(value.length)} ${f.plural(value.length, { one: "item", other: "items" })}.`;
+        case "ndjson-lines":
+          return value.malformedLine === null
+            ? `Read as ${f.n(value.records)} JSON Lines ${f.plural(value.records, { one: "record", other: "records" })}.`
+            : `Read as ${f.n(value.records)} JSON Lines ${f.plural(value.records, { one: "record", other: "records" })}; line ${f.n(value.malformedLine)} did not parse and was skipped.`;
+        case "plain-empty-object":
+          return "The document is an empty object.";
+        case "plain-scalar":
+          return "The document is a single value, not an object or an array.";
+        case "plain-object":
+          return "The document is a plain JSON object with no shape this tool recognises.";
+        case "plain-unparseable":
+          return "The text could not be read as JSON or as JSON Lines.";
+      }
+    },
+    offerHeadline: (shapeName: string) => `This looks like ${shapeName}, not JSON:API.`,
+    readAsPlain: "Read as plain JSON",
+    readAsJsonApi: "Read as JSON:API anyway",
+    stats: (items: number, collections: number, size: string) =>
+      `${f.n(items)} ${f.plural(items, { one: "item", other: "items" })} · ${f.n(collections)} ${f.plural(collections, { one: "collection", other: "collections" })} · ${size}`,
+    itemsStat: "Items",
+    collectionsStat: "Collections",
+    ambiguousStat: "Ambiguous identities",
+    emptyNote: "This document carries no collections or identities. Only its structure is shown below.",
+    identitySkippedNote:
+      "This document is large enough that identity inference was skipped — values are shown, but repeated identifiers are not linked.",
+    /** Fallback name for a collection with no natural container name — a bare top-level array. */
+    rootCollectionLabel: "items",
+    tooManyMembers: (n: number) => `${f.n(n)} more ${f.plural(n, { one: "item", other: "items" })} not shown`,
+    topLevelMembers: { title: "Other top-level members", empty: "No other top-level members." },
+  },
+
   /* ------------------------------------------------------------- rail --- */
 
   rail: {
@@ -362,6 +437,18 @@ export const en = {
     copyValueTitle: "Copy this value",
     copyValueLabel: "value",
     pointerTitle: "JSON Pointer to this block",
+  },
+
+  /** The inferred identity graph — a repeated identifier rendered as a link, the way `{type, id}` already is. */
+  identity: {
+    /** The link text replacing a collection found elsewhere in the tree, so it is not rendered twice. */
+    seeCollection: (label: string, count: number) =>
+      `${f.n(count)} ${f.plural(count, { one: "item", other: "items" })} in the “${label}” section`,
+    ambiguousTitle: (count: number) =>
+      `${f.n(count)} possible ${f.plural(count, { one: "definition", other: "definitions" })} for this value — not linked, because it is not clear which one is meant`,
+    danglingTitle: "No definition for this value was found in the document",
+    /** Stands in for the internal global-identity scope when a UUID/ULID/ObjectId match has no container name to show. */
+    global: "identifier",
   },
 
   /**

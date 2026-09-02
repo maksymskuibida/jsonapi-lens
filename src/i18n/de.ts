@@ -226,6 +226,75 @@ export const de: Messages = {
 
   num: (value) => f.n(value),
 
+  shape: {
+    name: (value) => {
+      switch (value) {
+        case "jsonapi":
+          return "JSON:API";
+        case "hal":
+          return "HAL";
+        case "odata":
+          return "OData";
+        case "jsonrpc":
+          return "JSON-RPC";
+        case "envelope":
+          return "Envelope";
+        case "collection":
+          return "Sammlung";
+        case "ndjson":
+          return "JSON Lines";
+        case "plain":
+          return "Reines JSON";
+      }
+    },
+    evidence: (value) => {
+      switch (value.kind) {
+        case "jsonapi-member":
+          return "Dieses Dokument hat ein Top-Level-Member `data`, `errors` oder `meta`.";
+        case "hal-links":
+          return "Als HAL erkannt: Das Dokument hat ein Top-Level-Member `_links`.";
+        case "hal-embedded":
+          return "Als HAL erkannt: Das Dokument hat ein Top-Level-Member `_embedded`.";
+        case "odata-context":
+          return "Als OData erkannt: Das Dokument hat ein Member `@odata.context`.";
+        case "jsonrpc-member":
+          return "Als JSON-RPC erkannt: Das Dokument hat ein Member `jsonrpc`.";
+        case "envelope-shape":
+          return "Dieses Dokument hat ein `data`-Member, dessen Wert aber nicht wie JSON:API-Ressourcendaten geformt ist.";
+        case "envelope-conflict":
+          return "Dieses Dokument hat sowohl `data` als auch `errors`, was JSON:API zusammen verbietet.";
+        case "collection-array":
+          return `Das Dokument ist ein nacktes Array mit ${f.n(value.length)} ${f.plural(value.length, { one: "Eintrag", other: "Einträgen" })}.`;
+        case "ndjson-lines":
+          return value.malformedLine === null
+            ? `Gelesen als ${f.n(value.records)} JSON-Lines-${f.plural(value.records, { one: "Datensatz", other: "Datensätze" })}.`
+            : `Gelesen als ${f.n(value.records)} JSON-Lines-${f.plural(value.records, { one: "Datensatz", other: "Datensätze" })}; Zeile ${f.n(value.malformedLine)} ließ sich nicht parsen und wurde übersprungen.`;
+        case "plain-empty-object":
+          return "Das Dokument ist ein leeres Objekt.";
+        case "plain-scalar":
+          return "Das Dokument ist ein einzelner Wert, kein Objekt und kein Array.";
+        case "plain-object":
+          return "Das Dokument ist ein einfaches JSON-Objekt ohne erkannte Form.";
+        case "plain-unparseable":
+          return "Der Text ließ sich weder als JSON noch als JSON Lines lesen.";
+      }
+    },
+    offerHeadline: (shapeName) => `Das sieht aus wie ${shapeName}, nicht wie JSON:API.`,
+    readAsPlain: "Als reines JSON lesen",
+    readAsJsonApi: "Trotzdem als JSON:API lesen",
+    stats: (items, collections, size) =>
+      `${f.n(items)} ${f.plural(items, { one: "Eintrag", other: "Einträge" })} · ${f.n(collections)} ${f.plural(collections, { one: "Sammlung", other: "Sammlungen" })} · ${size}`,
+    itemsStat: "Einträge",
+    collectionsStat: "Sammlungen",
+    ambiguousStat: "Mehrdeutige Identitäten",
+    emptyNote: "Dieses Dokument enthält keine Sammlungen oder Identitäten. Unten steht nur seine Struktur.",
+    identitySkippedNote:
+      "Dieses Dokument ist groß genug, dass die Identitätserkennung übersprungen wurde — Werte werden angezeigt, aber wiederholte Kennungen sind nicht verlinkt.",
+    rootCollectionLabel: "Einträge",
+    tooManyMembers: (n) => `${f.n(n)} weitere ${f.plural(n, { one: "Eintrag", other: "Einträge" })} nicht angezeigt`,
+    topLevelMembers: { title: "Weitere Top-Level-Member", empty: "Keine weiteren Top-Level-Member." },
+  },
+
   rail: {
     ariaLabel: "Inhalt des Dokuments",
     narrow: "Liste eingrenzen",
@@ -318,6 +387,15 @@ export const de: Messages = {
     copyValueTitle: "Diesen Wert kopieren",
     copyValueLabel: "Wert",
     pointerTitle: "JSON Pointer auf diesen Block",
+  },
+
+  identity: {
+    seeCollection: (label, count) =>
+      `${f.n(count)} ${f.plural(count, { one: "Eintrag", other: "Einträge" })} im Abschnitt „${label}“`,
+    ambiguousTitle: (count) =>
+      `${f.n(count)} mögliche ${f.plural(count, { one: "Definition", other: "Definitionen" })} für diesen Wert — nicht verlinkt, weil unklar ist, welche gemeint ist`,
+    danglingTitle: "Für diesen Wert wurde keine Definition im Dokument gefunden",
+    global: "Kennung",
   },
 
   block: {
