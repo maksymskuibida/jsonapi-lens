@@ -246,6 +246,12 @@ function showView(which: "boot" | "paste" | "doc" | "legal", bootMessage?: strin
   newDocEl.hidden = which !== "doc";
   topbarDocEl.hidden = which !== "doc";
   if (which === "boot") bootMessageEl.textContent = bootMessage ?? t().boot.reading;
+  // A pending shape offer belongs to one specific, still-unresolved paste —
+  // every route through this function (arriving fresh at the paste view via
+  // Back/"New"/boot, or leaving it for a document) means that paste is no
+  // longer the thing on screen, so any offer still standing is stale. Only
+  // `showShapeOffer` itself, called without going through here, may show one.
+  hideShapeOffer();
 }
 
 function showError(error: unknown): void {
@@ -1541,7 +1547,7 @@ newDocEl.addEventListener("click", () => {
   resumeEl.hidden = true;
   navigate(PASTE_PATH);
   applyRouteMeta({ kind: "paste" });
-  showView("paste");
+  showView("paste"); // also clears any stale shape offer — see showView's own comment
   inputEl.focus();
 });
 
