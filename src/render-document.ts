@@ -1,10 +1,11 @@
 import { el, escapeHtml } from "./dom.js";
 import { formatBytes, formatDuration } from "./format.js";
 import { t } from "./i18n/index.js";
-import { encodeSegment, resourceKey } from "./ident.js";
+import { groupDomId, groupHref, nodeHref, resourceKey, typeSigil } from "./ident.js";
+import { GLOBAL_IDENTITY_SCOPE } from "./json-index.js";
 import { chip, groupRowsHtml } from "./render-resource.js";
 import { renderObjectBlock } from "./render-value.js";
-import type { DocumentIndex, JsonApiError, TypeGroup } from "./types.js";
+import type { DocumentIndex, JsonApiError, JsonIndex, TypeGroup } from "./types.js";
 
 /**
  * Above this many resources, attribute detail is built on expand rather than
@@ -14,32 +15,47 @@ import type { DocumentIndex, JsonApiError, TypeGroup } from "./types.js";
  */
 export const EAGER_BODY_LIMIT = 2000;
 
-export function groupDomId(type: string): string {
-  return "g_" + encodeSegment(type);
-}
-
 function count(n: number): string {
   return t().num(n);
 }
 
 /* ------------------------------------------------------------------ *
  * Jump rail
+ *
+ * `renderRail` takes `RailEntry[]` rather than a `DocumentIndex`, so a
+ * plain-JSON document's inferred collections drive exactly the same rail
+ * markup — counts, hues, sigils, proportion bars, the search box past eight
+ * rows, the solo filter — with no rail code of its own. `main.ts` builds the
+ * entries for whichever `Lens` it has; this function does not know which one
+ * it was given.
  * ------------------------------------------------------------------ */
 
-export function renderRail(index: DocumentIndex): HTMLElement {
+export interface RailEntry {
+  /** Stable and unique across every entry — what `data-type`/`data-solo` carry, and what the existing solo-filter code in `main.ts` matches on. Not necessarily the display name: two plain-JSON collections can share a label. */
+  key: string;
+  label: string;
+  count: number;
+  hue: number;
+  sigil: string;
+  href: string;
+  /** The JSON:API "in primary data" bullet. Always `false` outside that mode. */
+  primary: boolean;
+}
+
+export function renderRail(entries: RailEntry[]): HTMLElement {
   const rail = el("nav", { class: "rail", "aria-label": t().rail.ariaLabel });
-  const max = index.groups.reduce((m, g) => Math.max(m, g.resources.length), 1);
+  const max = entries.reduce((m, e) => Math.max(m, e.count), 1);
 
   rail.append(
     el(
       "div",
       { class: "rail__head" },
       el("h2", { class: "rail__title", text: t().rail.types }),
-      el("span", { class: "rail__title-count", text: count(index.groups.length) }),
+      el("span", { class: "rail__title-count", text: count(entries.length) }),
     ),
   );
 
-  if (index.groups.length > 8) {
+  if (entries.length > 8) {
     rail.append(
       el("input", {
         class: "rail__search",
@@ -55,31 +71,30 @@ export function renderRail(index: DocumentIndex): HTMLElement {
 
   const list = el("ol", { class: "rail__types" });
 
-  for (const group of index.groups) {
-    const share = Math.max(2, Math.round((group.resources.length / max) * 100));
-    const isPrimary = index.primary.some((p) => p.type === group.type);
+  for (const entry of entries) {
+    const share = Math.max(2, Math.round((entry.count / max) * 100));
 
-    const row = el("li", { class: "railrow", "data-type": group.type });
+    const row = el("li", { class: "railrow", "data-type": entry.key });
     row.append(
       el(
         "a",
         {
           class: "railrow__link",
-          href: "#" + groupDomId(group.type),
-          "data-hue": group.hue,
-          title: t().rail.jumpTo(group.type),
+          href: entry.href,
+          "data-hue": entry.hue,
+          title: t().rail.jumpTo(entry.label),
         },
-        el("b", { class: "railrow__sigil", text: group.sigil }),
+        el("b", { class: "railrow__sigil", text: entry.sigil }),
         el(
           "span",
           { class: "railrow__body" },
           el(
             "span",
             { class: "railrow__name-line" },
-            el("span", { class: "railrow__name", text: group.type }),
-            isPrimary &&
+            el("span", { class: "railrow__name", text: entry.label }),
+            entry.primary &&
               el("span", { class: "railrow__primary", title: t().rail.inPrimary, text: "•" }),
-            el("span", { class: "railrow__count", text: count(group.resources.length) }),
+            el("span", { class: "railrow__count", text: count(entry.count) }),
           ),
           // A proportion bar, because the shape of a payload — which type
           // dominates it — is usually the first thing worth knowing.
@@ -93,8 +108,8 @@ export function renderRail(index: DocumentIndex): HTMLElement {
       el("button", {
         class: "railrow__solo",
         type: "button",
-        "data-solo": group.type,
-        title: t().rail.showOnly(group.type),
+        "data-solo": entry.key,
+        title: t().rail.showOnly(entry.label),
         "aria-pressed": "false",
         text: t().rail.only,
       }),
@@ -122,11 +137,40 @@ export function renderRail(index: DocumentIndex): HTMLElement {
   return rail;
 }
 
+/** `RailEntry[]` for a JSON:API document's type groups — what `renderRail` used to read directly. */
+export function railEntriesForGroups(index: DocumentIndex): RailEntry[] {
+  const primaryTypes = new Set(index.primary.map((p) => p.type));
+  return index.groups.map((group) => ({
+    key: group.type,
+    label: group.type,
+    count: group.resources.length,
+    hue: group.hue,
+    sigil: group.sigil,
+    href: groupHref(group.type),
+    primary: primaryTypes.has(group.type),
+  }));
+}
+
+/** `RailEntry[]` for a plain-JSON document's top-level collections. */
+export function railEntriesForCollections(index: JsonIndex): RailEntry[] {
+  return index.collections
+    .filter((c) => c.topLevel)
+    .map((collection) => ({
+      key: collection.pointer,
+      label: collection.label || t().shape.rootCollectionLabel,
+      count: collection.memberPointers.length,
+      hue: collection.hue,
+      sigil: collection.sigil,
+      href: nodeHref(collection.pointer),
+      primary: false,
+    }));
+}
+
 /* ------------------------------------------------------------------ *
  * Document header: what is in here
  * ------------------------------------------------------------------ */
 
-interface DocumentStats {
+export interface DocumentStats {
   bytes: number;
   parseMs: number;
   renderMs?: number;
@@ -219,6 +263,47 @@ export function renderOverview(index: DocumentIndex, stats: DocumentStats): HTML
   return section;
 }
 
+/** The same overview card, for a plain-JSON document. See `renderOverview` above. */
+export function renderJsonOverview(index: JsonIndex, stats: DocumentStats): HTMLElement {
+  const section = el("section", { class: "overview", id: "overview" });
+  const overview = t().overview;
+  const shape = t().shape;
+
+  const list = el("dl", { class: "overview__stats" });
+  list.append(
+    stat(overview.shape, shape.name(index.shape)),
+    stat(shape.itemsStat, count(index.counts.total)),
+    stat(shape.collectionsStat, count(index.counts.collections)),
+  );
+  if (index.counts.ambiguous) {
+    list.append(stat(shape.ambiguousStat, count(index.counts.ambiguous), "warn"));
+  }
+  if (index.counts.danglingTotal) {
+    list.append(
+      stat(overview.unresolvedPointers(index.counts.danglingTotal), count(index.counts.danglingTotal), "absent"),
+    );
+  }
+  list.append(
+    stat(overview.size, formatBytes(stats.bytes)),
+    stat(overview.indexedIn, formatDuration(stats.parseMs)),
+  );
+  section.append(list);
+
+  section.append(el("p", { class: "overview__note", text: shape.evidence(index.shapeEvidence) }));
+
+  if (index.counts.total === 0 && index.collections.length === 0) {
+    section.append(el("p", { class: "overview__note", text: shape.emptyNote }));
+  }
+
+  if (index.identitySkipped) {
+    section.append(
+      el("p", { class: "overview__note overview__note--perf", text: shape.identitySkippedNote }),
+    );
+  }
+
+  return section;
+}
+
 /* ------------------------------------------------------------------ *
  * Unresolved pointers — usually the thing being diagnosed
  * ------------------------------------------------------------------ */
@@ -255,6 +340,57 @@ export function renderDangling(index: DocumentIndex): HTMLElement | null {
   const list = el("ul", { class: "absent-list__items" });
   for (const target of index.dangling) {
     list.append(el("li", null, chip(target.type, target.id, false)));
+  }
+  body.append(list);
+  details.append(body);
+
+  return details;
+}
+
+/**
+ * The identity graph's version of `chip()`: a scope and a value rather than a
+ * type and an id, since a plain-JSON identity has no `type`. `scope ===
+ * GLOBAL_IDENTITY_SCOPE` is a UUID/ULID/ObjectId matched on value alone, which
+ * has no meaningful container name to show — `t().identity.global` names it
+ * instead of leaking the internal sentinel.
+ */
+export function identityChip(scope: string, value: string, resolved: boolean): HTMLElement {
+  const label = scope === GLOBAL_IDENTITY_SCOPE ? t().identity.global : scope;
+  const classes = `chip ${resolved ? "chip--link" : "chip--absent"}`;
+  const node = el(resolved ? "a" : "span", { class: classes });
+  node.append(
+    el("b", { class: "chip__sigil", text: typeSigil(label) }),
+    el("span", { class: "chip__type", text: label }),
+    el("span", { class: "chip__id", text: value }),
+  );
+  if (!resolved) node.append(el("span", { class: "chip__absent", text: t().resource.notInDocument }));
+  return node;
+}
+
+/** The same unresolved-pointers panel, for a plain-JSON document's dangling identity references. */
+export function renderJsonDangling(index: JsonIndex): HTMLElement | null {
+  if (!index.dangling.length) return null;
+
+  const details = el("details", { class: "absent-list", id: "unresolved" });
+  details.append(
+    el(
+      "summary",
+      { class: "absent-list__summary" },
+      el("span", { class: "absent-list__icon", "aria-hidden": "true", text: "!" }),
+      el("span", null, t().dangling.distinct(index.dangling.length)),
+      el("span", {
+        class: "absent-list__hint",
+        text: t().dangling.total(index.counts.danglingTotal),
+      }),
+    ),
+  );
+
+  const body = el("div", { class: "absent-list__body" });
+  body.append(el("p", { class: "absent-list__note", text: t().dangling.note }));
+
+  const list = el("ul", { class: "absent-list__items" });
+  for (const target of index.dangling) {
+    list.append(el("li", null, identityChip(target.scope, target.value, false)));
   }
   body.append(list);
   details.append(body);
