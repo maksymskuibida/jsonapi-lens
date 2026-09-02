@@ -1,0 +1,87 @@
+{
+  "context": {
+    "session_id": "3KpQ2mVxRt7bNwLcHs9dYf",
+    "correlation_id": "8ZrTn4WqLpB2vKxMd6HcJs",
+    "task_id": "5NvBqR8yTmXwHkPzLd3fUc",
+    "parent_task_id": "2WhKmT7bQxLvNpRc9YdJfZ",
+    "interaction_id": "6LmPqB4tRnVxKwHc2ZdYsJ",
+    "interface": "api",
+    "product": "widgets",
+    "service": "gateway",
+    "version": "1.24.67+283e66b",
+    "api_version": "1.24.67+283e66b",
+    "task_name": "POST /v2/refund_offers",
+    "configuration_id": 100017,
+    "company_id": 100017,
+    "user_login_method": "Password",
+    "entrypoint": {
+      "service": "edge",
+      "version": "9.1.75+1862253",
+      "api_version": "9.1.75+1862253",
+      "task_name": "POST /v2/refund_offers",
+      "customer_ip": "192.0.2.24",
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+      "actor": {
+        "id": "agent@example.com",
+        "name": "agent@example.com",
+        "type": "user"
+      }
+    },
+    "actor": {
+      "id": "agent@example.com",
+      "name": "agent@example.com",
+      "type": "user"
+    },
+    "feature_flags": [
+      "ALLOW_PARTIAL_REFUNDS",
+      "CACHE_PROVIDER_CONDITIONS",
+      "ENABLE_VOUCHER_REFUNDS",
+      "SKIP_PROVIDER_RETRY",
+      "STRICT_FEE_VALIDATION",
+      "USE_PROVIDER_V2_ENDPOINT"
+    ],
+    "rollout_flags": {
+      "REFUND_PIPELINE": "beta"
+    }
+  },
+  "info": {
+    "name": "gateway.exampleprovider",
+    "loggername": "gateway.exampleprovider",
+    "msg": "EXAMPLEPROVIDER:/v2/cancellations/conditions request started",
+    "message": "EXAMPLEPROVIDER:/v2/cancellations/conditions request started",
+    "levelname": "INFO",
+    "levelno": 20,
+    "pathname": "/usr/local/lib/python3.12/site-packages/example_transport/logging.py",
+    "filename": "logging.py",
+    "module": "logging",
+    "funcName": "log_start",
+    "lineno": 370,
+    "exc_info": null,
+    "exc_text": null,
+    "stack_info": null,
+    "created": "2026-09-02 11:39:58.835",
+    "asctime": "2026-09-02 11:39:58,835",
+    "msecs": 835,
+    "relativeCreated": 701278.8245677948,
+    "thread": 140505172730688,
+    "threadName": "MainThread",
+    "process": 20,
+    "processName": "MainProcess",
+    "taskName": "Task-29034",
+    "event_type": "exampleprovider_request",
+    "message_type": "transport_logging",
+    "provider": "example-provider",
+    "provider_method": "/v2/cancellations/conditions",
+    "http_method": "GET",
+    "url": "https://api.example.com/v2/cancellations/conditions",
+    "request_params": null,
+    "request_data": null,
+    "request_headers": {
+      "api-key": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "applevel": "staging",
+    "appname": "GATEWAY",
+    "ecs_task_name": null,
+    "instance_name": "gateway-5684d86c57-rncmj"
+  }
+}
