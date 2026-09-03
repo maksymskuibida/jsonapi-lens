@@ -19,26 +19,37 @@
  *
  * The mechanism is `stored()` in `src/i18n/index.ts`, which is checked before
  * `navigator` and takes priority the moment it returns a locale. It reads
- * `localStorage`, which plain Node does not have at all — so providing a
- * minimal stand-in whose `getItem` answers `"en"` makes `locale()` resolve to
- * English on its first call, before `navigator` is ever consulted. This is not
- * exploiting an implementation detail: `stored()` is the module's own,
- * documented "a choice was remembered" path, and this is a Node-side value for
- * exactly that value 's browser equivalent.
+ * `localStorage.getItem`, so this module's job is to make that call return
+ * `"en"` — regardless of whether `localStorage` already exists.
+ *
+ * That "regardless" used to be a gap: an earlier version of this file only
+ * installed a stand-in when `globalThis.localStorage` was `undefined`, on the
+ * assumption that plain Node never defines it. That assumption breaks under
+ * `--experimental-webstorage` (real Web Storage, unflagged in a future Node)
+ * or any MCP host that adds its own polyfill before this module runs — the
+ * guard would then skip installing anything, `stored()` would ask the *real*
+ * `localStorage` for a key nobody ever wrote, get `null`, and fall through to
+ * `navigator` exactly as if this module did not exist. So the fix is not to
+ * guard more carefully; it is to stop treating "does a storage already exist"
+ * and "is our key set in it" as the same question. A stand-in is installed
+ * only when there is truly nothing there, but the write — `setItem` with our
+ * own key — always happens, into whatever `localStorage` turns out to be.
  *
  * Must be imported before anything that might call `t()` — i.e. first, at the
- * top of `server.ts` and of every test that exercises `src/crypto.ts`'s error
- * text. `locale()` memoises on its first call, so importing this late (after
- * some other path has already resolved a locale) would have no effect.
+ * top of `server.ts`, of `build-server.ts` (in case something builds a server
+ * without going through `server.ts` — a test does exactly this), and of every
+ * test that exercises `src/crypto.ts`'s error text. `locale()` memoises on
+ * its first call, so importing this late — after some other path has already
+ * resolved a locale — would have no effect.
  */
 
 // `globalThis.localStorage` is already declared (as `Storage`) by the "DOM"
 // lib `mcp/tsconfig.json` includes — see that file for why a Node-only
-// program still carries it. So this fills in a real `Storage`, rather than
-// declaring a narrower type of its own, which TypeScript would reject as a
-// conflicting redeclaration of the same global.
+// program still carries it. So a stand-in, when one is needed, fills in a
+// real `Storage` rather than declaring a narrower type of its own, which
+// TypeScript would reject as a conflicting redeclaration of the same global.
 if (typeof globalThis.localStorage === "undefined") {
-  const values = new Map<string, string>([["jsonapi-lens:locale", "en"]]);
+  const values = new Map<string, string>();
   const storage: Storage = {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => {
@@ -56,4 +67,17 @@ if (typeof globalThis.localStorage === "undefined") {
     },
   };
   globalThis.localStorage = storage;
+}
+
+// Unconditional — this is the fix for the gap the header comment describes.
+// Wrapped in a try/catch for the same reason `src/i18n/index.ts`'s own
+// `stored()` wraps its read: a `localStorage` that exists but throws on
+// write (a quota, a read-only host implementation) is a real possibility
+// this module cannot control, and `stored()` already tolerates that by
+// falling through to `navigator`/English — the same fallback this module
+// exists to preempt, so there is nothing further to do here if it happens.
+try {
+  globalThis.localStorage.setItem("jsonapi-lens:locale", "en");
+} catch {
+  /* see comment above */
 }

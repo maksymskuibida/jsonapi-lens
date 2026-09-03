@@ -9,24 +9,34 @@
  *
  * `fetchImpl` is required, with no default — see `mcp/transport.ts`'s header
  * comment for why. Every network call this server makes goes through it.
+ *
+ * `./locale.js` is imported first, for its side effect, rather than trusting
+ * `server.ts` to have done it already: this module is the thing
+ * `docs/test-plans/T7.md` documents building directly (`createMcpServer`),
+ * and a test or a future caller that does so without going through
+ * `server.ts` must not silently fall back to whatever locale the host
+ * happens to negotiate. Importing it here too costs nothing — the module
+ * itself is idempotent — and means the pin travels with the code that
+ * depends on it, not with one particular entry point into that code.
  */
+import "./locale.js";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { isBundlePayload, MAX_BUNDLE_BYTES, open, seal, sealBundle } from "../src/crypto.js";
 import type { BundleEntry, BundlePayload, SharePayload } from "../src/crypto.js";
-import type { Exchange } from "../src/exchange.js";
 
 import { READ_DESCRIPTION, SHARE_DESCRIPTION } from "./descriptions.js";
 import { fetchShareBlob, uploadShare } from "./transport.js";
 import type { FetchLike } from "./transport.js";
 import {
+  assertReadSecret,
   assertShareableDocuments,
+  assertShareSecret,
   assertSingleDocumentWithinCap,
   assertValidLifetime,
   assertValidOrigin,
-  assertValidSecret,
   DEFAULT_LIFETIME,
   DEFAULT_ORIGIN,
   GENERATE_SECRET_COMMAND,
@@ -90,7 +100,11 @@ const shareOutputShape = {
 };
 
 const readInputShape = {
-  id: z.number().describe("The numeric id from a share link's `<origin>/d/<id>:<secret>`."),
+  // .int().positive() refuses "1.5" or "1e21" locally, with a readable zod
+  // message, instead of interpolating it into a path and reporting whatever
+  // came back ("gone or never existed") for a value that was never going to
+  // exist in the first place.
+  id: z.number().int().positive().describe("The numeric id from a share link's `<origin>/d/<id>:<secret>`."),
   secret: z.string().describe("The secret half of the same link."),
   origin: z.string().optional().describe("Which jsonapi-lens deployment to read from."),
 };
@@ -125,10 +139,6 @@ const readOutputShape = {
     .describe('Present when kind is "bundle" — every document in it, never just the first.'),
 };
 
-function toExchange(exchange: Record<string, unknown> | undefined): Exchange | undefined {
-  return exchange as Exchange | undefined;
-}
-
 export function createMcpServer(deps: McpServerDeps): McpServer {
   const { fetchImpl } = deps;
   const configuredOrigin = deps.defaultOrigin ?? DEFAULT_ORIGIN;
@@ -147,7 +157,7 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
       const resolvedOrigin = assertValidOrigin(origin ?? configuredOrigin);
       const resolvedLifetime = lifetime ?? DEFAULT_LIFETIME;
       assertValidLifetime(resolvedLifetime);
-      assertValidSecret(secret);
+      assertShareSecret(secret);
       assertShareableDocuments(documents);
 
       const savedAt = Date.now();
@@ -160,7 +170,7 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
           text: doc.text,
           label: doc.label,
           savedAt,
-          ...(doc.exchange !== undefined ? { exchange: toExchange(doc.exchange) } : {}),
+          ...(doc.exchange !== undefined ? { exchange: doc.exchange } : {}),
         };
         blob = await seal(payload, secret);
         assertSingleDocumentWithinCap(blob, doc.label);
@@ -169,7 +179,7 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
         const entries: BundleEntry[] = documents.map((doc) => ({
           label: doc.label,
           text: doc.text,
-          ...(doc.exchange !== undefined ? { exchange: toExchange(doc.exchange) } : {}),
+          ...(doc.exchange !== undefined ? { exchange: doc.exchange } : {}),
         }));
         const payload: BundlePayload = { kind: "bundle", savedAt, documents: entries };
         // sealBundle refuses an empty bundle/empty document itself too, but
@@ -218,9 +228,9 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
     },
     async ({ id, secret, origin }) => {
       const resolvedOrigin = assertValidOrigin(origin ?? configuredOrigin);
-      assertValidSecret(secret);
+      assertReadSecret(secret);
 
-      const blob = (await fetchShareBlob(fetchImpl, resolvedOrigin, id)) as Bytes;
+      const blob = await fetchShareBlob(fetchImpl, resolvedOrigin, id);
       const payload = await open(blob, secret);
 
       if (isBundlePayload(payload)) {
