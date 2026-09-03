@@ -163,3 +163,25 @@ Leaving the decision inline in each caller (`openShareModal` checking `if (docum
 itself, `openBundleShareModal` never receiving fewer than two by convention) — rejected because
 "by convention" is exactly the kind of invariant that survives until the second caller, and T7 is
 already a known second caller before this entry was written.
+
+### A warning for T2, left here because this is where the wiring already reaches the network
+
+`mintShareEnvelope` seals whatever `Exchange` a `LibraryEntry`/`BundleEntry` carries, unredacted, and
+`panels.ts`'s selection flow hands whole library rows to it — so the moment something writes a real
+`Exchange` onto a saved document, sharing it (singly or in a bundle) uploads that `Exchange` as-is.
+Today this is inert: nothing in this codebase writes an `Exchange` yet, T6's own review confirmed it
+by inspection, and building a redaction gate is explicitly T2's task, not T6's. **T2: redaction has
+to run before a document's `Exchange` reaches `mintShareEnvelope`, on both the single-document and
+the bundle path, since both go through the same function** (see the header of this entry). The
+sealing code itself carries the same warning inline, at the two points `exchange` is read
+(`src/bundle.ts`, `mintShareEnvelope`).
+
+### A number this entry may not keep
+
+This is the first `D3` on any branch, but `docs/DECISIONS.md` does not exist on `main` yet, and both
+T1 and T5 independently created it with their own, different `D2`. Whichever integration merges those
+two will have to renumber one of them, and every `D3`-and-later entry — this one included — most
+likely shifts to `D4`. Do not renumber pre-emptively on this branch; follow whatever number the
+integration assigns once it exists, and update every reference to "D3" in this repository's docs
+(`STATUS.md`'s T6 row, this file's own cross-references, anything in a later task's brief) together,
+in one change, rather than piecemeal.

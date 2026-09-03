@@ -660,6 +660,14 @@ export const en = {
         headline: "That shared bundle is corrupt.",
         hint: "It decrypted, but does not contain a bundle.",
       },
+      // Dead since T6 shipped the bundle import view — `share.ts`'s
+      // `fetchShare` no longer narrows a bundle away and refuse it with this
+      // message, so nothing calls it any more (PR #5 review, N9). Left in
+      // place rather than removed: it stays inside T6's own diff's reach to
+      // delete only by touching T5's `bundle` key, which is the one thing
+      // every concurrent diff on this file was asked to avoid. Safe to
+      // delete (in all three catalogues) whenever someone is next editing
+      // this exact key for another reason.
       unavailable: {
         headline: "This share link contains several documents.",
         hint: "This version of jsonapi-lens has no bundle view yet, so nothing here can display it. Ask for a single-document link instead, or try again later.",
