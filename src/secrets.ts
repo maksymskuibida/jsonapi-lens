@@ -21,14 +21,52 @@
  *     outside `store.ts`/`share.ts`/`crypto.ts`/the Worker may open a
  *     network connection, and this module is not one of those four.
  *
- * Pure data and pure functions — no DOM, no `t()`.
+ * ## `redactExchange`'s scope, precisely — see `docs/task-specs/T2.md`
+ *
+ * A credential in a query parameter (a presigned URL's `X-Amz-Signature`, a
+ * webhook's `?sig=`, an older API's `?api_key=`) is not an edge case; it is
+ * one of the most common places a real request carries one, and a redaction
+ * function that only looks at headers and cookies hands one straight back to
+ * whoever asked for a "redacted" copy. So this module's actual coverage is:
+ *
+ *   - **Headers and cookies**: fully redacted, as before.
+ *   - **The URL and `RequestPart.query`**: fully redacted. A query parameter
+ *     is flagged by name (`isSecretParamName` — a superset of
+ *     `isSecretHeaderName`'s exact list, matched as a substring since a query
+ *     parameter's name is whatever the API author chose, not a small set HTTP
+ *     defines) or by value shape (`detectCredentialShape`, applied to every
+ *     leaf of a decoded value — an array or nested object included). Redacting
+ *     the URL **rewrites the URL string itself** from the redacted parameters
+ *     via `params.ts#encodeParams`, rather than leaving the original text
+ *     sitting beside a scrubbed copy — two representations of the same data
+ *     where only one is scrubbed is worse than neither, because whichever one
+ *     a later reader reaches for is a coin flip.
+ *   - **A form-urlencoded body**: fully redacted, the same way, for the same
+ *     reason — `BodyPart.form` is a `ParamSet` like `query`, so the same
+ *     redaction reuses the same code, and `BodyPart.raw` is **rewritten** from
+ *     the redacted form for the same reason the URL string is.
+ *   - **Any other body** (JSON, plain text, anything `form` was not decoded
+ *     from): **detected, not redacted.** Rewriting arbitrary body text without
+ *     corrupting it is a bigger job than this module attempts tonight, so
+ *     `redactExchange` instead sets `bodyMayContainSecret: true` when a
+ *     request or response body's raw text contains a credential-shaped
+ *     substring, so a caller can warn rather than imply the body is clean.
+ *
+ * What is still out of scope, and disclosed rather than silently absent: a
+ * credential embedded in the URL's **path** rather than its query string, and
+ * full redaction of a non-form body's content. Both are named in
+ * `docs/task-specs/T2.md` rather than left for a reader to discover in the
+ * source.
+ *
+ * Pure data and pure functions — no DOM, no `t()`, no network.
  */
 
-import type { Exchange } from "./exchange.js";
+import type { Exchange, BodyPart } from "./exchange.js";
 import type { HeaderSet } from "./headers.js";
 import type { CookieSet, SetCookieSet } from "./cookies.js";
 import type { JsonObject } from "./types.js";
-import { base64UrlToBytes } from "./params.js";
+import { base64UrlToBytes, decodeParams, encodeParams } from "./params.js";
+import type { ParamEntry, ParamSet, ParamValue } from "./params.js";
 
 /**
  * Header names masked by default regardless of their value, per the spec's
@@ -167,8 +205,20 @@ export const REDACTED_VALUE = "[REDACTED]";
 
 export interface RedactionResult {
   exchange: Exchange;
-  /** How many values were replaced — headers and cookies combined, on both sides of the exchange. */
+  /**
+   * How many values were actually replaced — headers, cookies, URL/query
+   * parameters and form-body parameters, combined, on both sides of the
+   * exchange. Counts only what was rewritten; see `bodyMayContainSecret` for
+   * the one case this function detects but does not redact.
+   */
   count: number;
+  /**
+   * True when a request or response body's raw text — one that was not a
+   * form-urlencoded body fully redacted above — contains a credential-shaped
+   * substring this function did not remove. A caller must treat this as "the
+   * body was not scrubbed, warn rather than reassure", not as informational.
+   */
+  bodyMayContainSecret: boolean;
 }
 
 function redactHeaderSet(headers: HeaderSet | undefined, tally: { count: number }): HeaderSet | undefined {
@@ -195,21 +245,208 @@ function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: { count: n
   return { entries: cookies.entries.map((cookie) => ({ ...cookie, value: REDACTED_VALUE })) };
 }
 
+/* --------------------------------------------------- URL/query redaction --- */
+
 /**
- * A copy of `exchange` with every secret-bearing value replaced, plus a count
- * of how many were. "Secret-bearing" here is headers (masked by name via
- * `isSecretHeaderName`, or by value shape via `detectCredentialShape`) and
- * cookie values — request `Cookie` rows and response `Set-Cookie` rows alike
- * — on both the request and the response. Cookie *values* are always
- * replaced regardless of shape: a cookie is exactly the kind of thing the
- * spec's masked-by-default list already calls out by name (`cookie`,
- * `set-cookie`), and unlike a header, a cookie has no legitimate reason to
- * hold a value someone would want to read back off an exported copy. Cookie
- * *names*, *attributes* (`Domain`, `Path`, `Expires`, ...), the URL, query
- * parameters and body text are left untouched — outside what the spec's
- * "Headers, cookies, and secrets" section asks this module to cover, and a
- * body/URL secret scanner is a different, higher-false-positive feature
- * nobody has asked for.
+ * Substrings that make a query- or form-parameter *name* credential-ish,
+ * matched case-insensitively after stripping `-`/`_`/` ` — so `api_key`,
+ * `API-KEY` and `apiKey` all normalise to `apikey`, and `access_token`/
+ * `X-Token` both contain `token`. Deliberately broader than
+ * `isSecretHeaderName`'s exact list: a header name is a small set HTTP
+ * defines, a parameter name is whatever the API author chose, so this
+ * matches a substring rather than a whole name.
+ *
+ * `sig` is a real false-positive source (`design`, `assign`, `resign`,
+ * `consign` all contain it) — kept anyway, deliberately, on the same
+ * over-mask-rather-than-under-mask trade `detectCredentialShape` already
+ * makes: one unnecessary redaction costs a click to notice; one missed
+ * credential is the failure this module exists to prevent.
+ */
+const SECRET_PARAM_NAME_SUBSTRINGS = ["token", "secret", "signature", "sig", "apikey", "password"];
+
+function normalizeParamName(name: string): string {
+  return name.toLowerCase().replace(/[-_ ]/g, "");
+}
+
+export function isSecretParamName(name: string): boolean {
+  const normalized = normalizeParamName(name);
+  return SECRET_PARAM_NAME_SUBSTRINGS.some((needle) => normalized.includes(needle));
+}
+
+/**
+ * Does any leaf of a decoded parameter value — a plain string, or one nested
+ * in an array/object — look like a credential?
+ */
+function valueHasCredentialShape(value: ParamValue | undefined): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return detectCredentialShape(value) !== null;
+  if (Array.isArray(value)) return value.some(valueHasCredentialShape);
+  if (typeof value === "object") return Object.values(value).some(valueHasCredentialShape);
+  return false; // number, boolean
+}
+
+/**
+ * Should this parameter be redacted — by name, or because any reading of its
+ * value looks like a credential?
+ */
+function shouldRedactParam(entry: ParamEntry): boolean {
+  if (isSecretParamName(entry.name)) return true;
+  if (valueHasCredentialShape(entry.value)) return true;
+  if (entry.alternatives.some((alt) => valueHasCredentialShape(alt.value))) return true;
+  if (entry.conflict?.some((reading) => valueHasCredentialShape(reading.value))) return true;
+  return false;
+}
+
+/** Replace every leaf of a decoded value with the redaction marker, preserving array/object shape where cheap to. */
+function redactParamValue(value: ParamValue): ParamValue {
+  if (Array.isArray(value)) return value.map(() => REDACTED_VALUE);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, ParamValue> = {};
+    for (const key of Object.keys(value)) out[key] = REDACTED_VALUE;
+    return out;
+  }
+  return REDACTED_VALUE;
+}
+
+/**
+ * Redact every value-bearing field of one `ParamEntry` — `raw` (what
+ * `encodeParams` uses for a conflicted entry), `value`, `conflict`, and
+ * `alternatives` (cleared: nothing is left to disambiguate once redacted).
+ */
+function redactParamEntry(entry: ParamEntry): ParamEntry {
+  const redacted: ParamEntry = {
+    ...entry,
+    raw: entry.raw.map((pair) => (pair.value === null ? pair : { key: pair.key, value: REDACTED_VALUE })),
+    alternatives: [],
+  };
+  if (entry.value !== undefined) redacted.value = redactParamValue(entry.value);
+  if (entry.conflict) {
+    redacted.conflict = entry.conflict.map((reading) => ({
+      convention: reading.convention,
+      value: redactParamValue(reading.value),
+    }));
+  }
+  return redacted;
+}
+
+/**
+ * `shouldRedactParam` + `redactParamEntry`, applied across a list of entries —
+ * reused by `query`, a form body, and a URL's decoded query string alike.
+ */
+function redactEntries(
+  entries: ParamEntry[],
+  tally: { count: number },
+): { entries: ParamEntry[]; changed: boolean } {
+  let changed = false;
+  const result = entries.map((entry) => {
+    if (!shouldRedactParam(entry)) return entry;
+    changed = true;
+    tally.count++;
+    return redactParamEntry(entry);
+  });
+  return { entries: result, changed };
+}
+
+function redactParamSet(params: ParamSet | undefined, tally: { count: number }): ParamSet | undefined {
+  if (!params) return params;
+  const { entries, changed } = redactEntries(params.entries, tally);
+  return changed ? { entries } : params;
+}
+
+/**
+ * Split a URL into everything before its query string, the query string
+ * itself (no leading `?`), and everything from a `#` fragment onward — so the
+ * query can be decoded, redacted and re-encoded without disturbing the
+ * origin, path or fragment. Not a general URL parser: it only ever looks for
+ * the first `?` and the first `#`, which is all `redactUrl` needs.
+ */
+function splitUrl(url: string): { prefix: string; query: string; suffix: string } {
+  const hashAt = url.indexOf("#");
+  const withoutFragment = hashAt < 0 ? url : url.slice(0, hashAt);
+  const fragment = hashAt < 0 ? "" : url.slice(hashAt);
+  const queryAt = withoutFragment.indexOf("?");
+  if (queryAt < 0) return { prefix: withoutFragment, query: "", suffix: fragment };
+  return { prefix: withoutFragment.slice(0, queryAt), query: withoutFragment.slice(queryAt + 1), suffix: fragment };
+}
+
+/**
+ * Redact credential-shaped query parameters from a URL, **rewriting the URL
+ * string itself** from the redacted parameters — see this module's header
+ * comment for why leaving the original text next to a scrubbed copy would be
+ * worse than not scrubbing at all. Out of scope: a credential embedded in the
+ * path rather than the query string.
+ */
+function redactUrl(url: string | undefined, tally: { count: number }): string | undefined {
+  if (!url) return url;
+  const { prefix, query, suffix } = splitUrl(url);
+  if (query === "") return url;
+
+  const { entries, changed } = redactEntries(decodeParams(query).entries, tally);
+  if (!changed) return url;
+
+  const redactedQuery = encodeParams({ entries });
+  return redactedQuery ? `${prefix}?${redactedQuery}${suffix}` : `${prefix}${suffix}`;
+}
+
+/* -------------------------------------------------------- body detection --- */
+
+/**
+ * A JWT-shaped substring, matched anywhere in a body rather than requiring
+ * the whole string to be one, per `bodyMightContainCredential`.
+ */
+const JWT_ANYWHERE_RE = /[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/;
+const STRIPE_KEY_ANYWHERE_RE = /\b(?:sk|pk)_[A-Za-z0-9_]{6,}\b/i;
+/**
+ * A `"...token...": "value"` or `token=value`-shaped pair, JSON- or
+ * form-style, naming a credential-ish field rather than being a bare token.
+ */
+const CREDENTIAL_KEY_VALUE_RE =
+  /["']?[\w-]*(?:token|secret|password|signature|api[-_]?key)[\w-]*["']?\s*[:=]\s*["']?[^"'\s,}&]{4,}/i;
+
+/**
+ * Sniff `raw` body text for a credential-shaped substring, without altering
+ * it — full redaction of arbitrary body text (JSON, XML, plain text) is a
+ * bigger job than this function attempts. Coarser than `detectCredentialShape`
+ * on purpose: it matches a pattern *anywhere* in the text rather than
+ * requiring the whole string to be one shape, because a body is prose or
+ * structured data with a credential embedded in it, not a bare token.
+ */
+function bodyMightContainCredential(raw: string): boolean {
+  return JWT_ANYWHERE_RE.test(raw) || STRIPE_KEY_ANYWHERE_RE.test(raw) || CREDENTIAL_KEY_VALUE_RE.test(raw);
+}
+
+/**
+ * A form-urlencoded body (`BodyPart.form` populated) is redacted exactly like
+ * `query` — it is the same `ParamSet` shape — and `raw` is **rewritten** from
+ * the redacted form for the same reason a URL's query string is: a redacted
+ * `form` sitting beside an untouched `raw` would still leak the secret the
+ * moment anything serialises `raw`. Any other body is left untouched and
+ * merely sniffed via `bodyMightContainCredential`.
+ */
+function redactBodyPart(
+  body: BodyPart | undefined,
+  tally: { count: number },
+): { body: BodyPart | undefined; mayContainSecret: boolean } {
+  if (!body) return { body, mayContainSecret: false };
+
+  if (body.form) {
+    const { entries, changed } = redactEntries(body.form.entries, tally);
+    if (changed) {
+      const redactedForm: ParamSet = { entries };
+      return { body: { ...body, raw: encodeParams(redactedForm), form: redactedForm }, mayContainSecret: false };
+    }
+  }
+
+  return { body, mayContainSecret: bodyMightContainCredential(body.raw) };
+}
+
+/**
+ * A copy of `exchange` with every secret-bearing value replaced, a count of
+ * how many were, and a flag for the one thing this function detects but
+ * cannot safely rewrite. See this module's header comment for the exact
+ * scope: headers, cookies, the URL, `query`, and a form body are fully
+ * redacted (the URL and a form body's `raw` are rewritten, not left stale
+ * beside a redacted copy); any other body is flagged, not altered.
  *
  * T2b's Copy/Download and T6's Share call this before writing an `exchange`
  * anywhere that leaves the browser — see this module's header comment for
@@ -218,11 +455,18 @@ function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: { count: n
 export function redactExchange(exchange: Exchange): RedactionResult {
   const tally = { count: 0 };
 
+  const requestBody = redactBodyPart(exchange.request?.body, tally);
+  const responseBody = redactBodyPart(exchange.response?.body, tally);
+  const bodyMayContainSecret = requestBody.mayContainSecret || responseBody.mayContainSecret;
+
   const request = exchange.request
     ? {
         ...exchange.request,
         headers: redactHeaderSet(exchange.request.headers, tally),
         cookies: redactCookieSet(exchange.request.cookies, tally),
+        url: redactUrl(exchange.request.url, tally),
+        query: redactParamSet(exchange.request.query, tally),
+        body: requestBody.body,
       }
     : exchange.request;
 
@@ -231,6 +475,7 @@ export function redactExchange(exchange: Exchange): RedactionResult {
         ...exchange.response,
         headers: redactHeaderSet(exchange.response.headers, tally),
         cookies: redactSetCookieSet(exchange.response.cookies, tally),
+        body: responseBody.body,
       }
     : exchange.response;
 
@@ -238,5 +483,5 @@ export function redactExchange(exchange: Exchange): RedactionResult {
   if (request !== undefined) redacted.request = request;
   if (response !== undefined) redacted.response = response;
 
-  return { exchange: redacted, count: tally.count };
+  return { exchange: redacted, count: tally.count, bodyMayContainSecret };
 }

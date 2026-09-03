@@ -9,13 +9,18 @@ import {
 } from "../src/secrets.js";
 import type { Exchange } from "../src/exchange.js";
 import { headerSet } from "../src/headers.js";
+import { decodeParams, findParam } from "../src/params.js";
 
 /**
  * A JWT built independently of `src/params.ts#bytesToBase64Url`, so this test
  * is not validated by the very encoder it is meant to exercise — only
  * `decodeJwt`'s own `base64UrlToBytes` is under test here.
  */
-function makeJwt(header: unknown, payload: unknown, signature = "sig"): string {
+function makeJwt(
+  header: unknown,
+  payload: unknown,
+  signature = "s1gnatur3_not_verified_but_realistically_long",
+): string {
   const seg = (value: unknown) =>
     btoa(JSON.stringify(value))
       .replace(/\+/g, "-")
@@ -53,7 +58,7 @@ describe("detectCredentialShape", () => {
   });
 
   it("recognises sk_/pk_-prefixed keys", () => {
-    expect(detectCredentialShape("sk_live_4242424242424242")).toEqual({ kind: "stripe-key" });
+    expect(detectCredentialShape("sk_test_4242424242424242")).toEqual({ kind: "stripe-key" });
     expect(detectCredentialShape("pk_test_abcdef123456")).toEqual({ kind: "stripe-key" });
   });
 
@@ -156,7 +161,7 @@ describe("decodeJwt", () => {
 
 describe("redactExchange", () => {
   it("removes an Authorization value from the Copy/Download/Share payload, with a count", () => {
-    const secret = "sk_live_super_secret_value_1234567890";
+    const secret = "sk_test_super_secret_value_1234567890";
     const exchange: Exchange = {
       request: { headers: headerSet([{ name: "Authorization", value: `Bearer ${secret}` }]) },
     };
@@ -221,15 +226,115 @@ describe("redactExchange", () => {
     expect(original).toEqual(snapshot);
   });
 
-  it("leaves the URL, query parameters and body untouched — out of this function's scope", () => {
+  it("redacts a credential in the URL's query string by rewriting the URL itself, not by leaving a scrubbed copy beside the original", () => {
+    const secret = "sk_test_FAKE_NOT_REAL_1234567890_abcXYZ";
+    const exchange: Exchange = {
+      request: { url: `https://api.example.com/v1/charge?amount=100&api_key=${secret}` },
+    };
+    const { exchange: redacted, count } = redactExchange(exchange);
+    expect(count).toBe(1);
+    expect(redacted.request?.url).not.toContain(secret);
+    expect(redacted.request?.url).toContain("amount=100");
+    expect(redacted.request?.url).toMatch(/^https:\/\/api\.example\.com\/v1\/charge\?/);
+    expect(JSON.stringify(redacted)).not.toContain(secret);
+  });
+
+  it("redacts a query parameter by name even when its value looks ordinary", () => {
+    for (const name of ["access_token", "X-Secret", "signature", "sig", "user_password"]) {
+      const url = `https://api.example.com/x?${name}=hello&other=1`;
+      const { exchange: redacted, count } = redactExchange({ request: { url } });
+      expect(count).toBe(1);
+      expect(redacted.request?.url).toContain("other=1");
+      expect(redacted.request?.url).not.toContain(`${name}=hello`);
+    }
+  });
+
+  it("redacts a query parameter by value shape even when its name is innocuous", () => {
+    const jwt = makeJwt({ alg: "none" }, { sub: "x" });
+    const url = `https://api.example.com/x?ref=${encodeURIComponent(jwt)}&page=2`;
+    const { exchange: redacted, count } = redactExchange({ request: { url } });
+    expect(count).toBe(1);
+    expect(redacted.request?.url).not.toContain(jwt);
+    expect(redacted.request?.url).toContain("page=2");
+  });
+
+  it("preserves a URL fragment and a query-free URL", () => {
+    const secret = "sk_test_FAKE_NOT_REAL_1234567890_abcXYZ";
+    const withFragment = redactExchange({
+      request: { url: `https://api.example.com/x?api_key=${secret}#section` },
+    }).exchange.request?.url;
+    expect(withFragment).not.toContain(secret);
+    expect(withFragment).toMatch(/#section$/);
+
+    const noQuery = "https://api.example.com/x";
+    expect(redactExchange({ request: { url: noQuery } }).exchange.request?.url).toBe(noQuery);
+  });
+
+  it("redacts RequestPart.query the same way as the URL, independent of it", () => {
+    const secret = "sk_test_FAKE_NOT_REAL_1234567890_abcXYZ";
+    const exchange: Exchange = { request: { query: decodeParams(`amount=100&api_key=${secret}`) } };
+    const { exchange: redacted, count } = redactExchange(exchange);
+    expect(count).toBe(1);
+    expect(JSON.stringify(redacted)).not.toContain(secret);
+    const query = redacted.request!.query!;
+    expect(findParam(query, "amount")?.value).toBe("100");
+    expect(findParam(query, "api_key")?.value).toBe(REDACTED_VALUE);
+  });
+
+  it("fully redacts a form-urlencoded body, rewriting raw from the redacted form rather than leaving it stale", () => {
+    const secret = "sk_test_FAKE_NOT_REAL_1234567890_abcXYZ";
+    const rawForm = `amount=100&api_key=${secret}`;
     const exchange: Exchange = {
       request: {
-        url: "https://api.example.com/x?token=sk_live_abcdefghijklmnop",
-        body: { raw: "authorization=Bearer abc" },
+        body: { raw: rawForm, contentType: "application/x-www-form-urlencoded", form: decodeParams(rawForm) },
       },
     };
-    const { exchange: redacted } = redactExchange(exchange);
-    expect(redacted.request?.url).toBe(exchange.request?.url);
-    expect(redacted.request?.body).toEqual(exchange.request?.body);
+    const { exchange: redacted, count, bodyMayContainSecret } = redactExchange(exchange);
+    expect(count).toBe(1);
+    expect(bodyMayContainSecret).toBe(false);
+    expect(redacted.request?.body?.raw).not.toContain(secret);
+    expect(redacted.request?.body?.raw).toContain("amount=100");
+    expect(JSON.stringify(redacted)).not.toContain(secret);
+  });
+
+  it("flags, but does not alter, a non-form body containing a credential-shaped value", () => {
+    const secret = "sk_test_FAKE_NOT_REAL_1234567890_abcXYZ";
+    const raw = `{"amount":100,"api_key":"${secret}"}`;
+    const exchange: Exchange = { request: { body: { raw, contentType: "application/json" } } };
+    const { exchange: redacted, count, bodyMayContainSecret } = redactExchange(exchange);
+    expect(bodyMayContainSecret).toBe(true);
+    expect(redacted.request?.body?.raw).toBe(raw); // untouched, as documented
+    expect(count).toBe(0); // nothing was actually redacted -- the flag is the honest signal here
+  });
+
+  it("flags a credential-ish named field even when its value has no distinctive shape of its own", () => {
+    // "hunter2" is not a JWT, not sk_/pk_-prefixed, and far too short to be a
+    // long hex/base64 run -- detectCredentialShape alone would miss it. This
+    // is specifically the key=value/"key":"value" pattern, not the stripe-key
+    // pattern the test above already covers via its sk_-prefixed secret.
+    for (const raw of ['{"amount":100,"password":"hunter2"}', "amount=100&password=hunter2"]) {
+      const exchange: Exchange = { request: { body: { raw, contentType: "text/plain" } } };
+      expect(redactExchange(exchange).bodyMayContainSecret).toBe(true);
+    }
+  });
+
+  it("does not flag prose that merely contains a credential-ish word without a key/value shape", () => {
+    const exchange: Exchange = { request: { body: { raw: "please sign here and return the form" } } };
+    expect(redactExchange(exchange).bodyMayContainSecret).toBe(false);
+  });
+
+  it("does not flag a non-form body with nothing credential-shaped in it", () => {
+    const exchange: Exchange = {
+      response: { body: { raw: '{"amount":100,"currency":"usd"}', contentType: "application/json" } },
+    };
+    expect(redactExchange(exchange).bodyMayContainSecret).toBe(false);
+  });
+
+  it("a JWT embedded in a JSON body is still detected even though the body itself is not redacted", () => {
+    const jwt = makeJwt({ alg: "none" }, { sub: "x" });
+    const exchange: Exchange = {
+      response: { body: { raw: `{"session":"${jwt}"}`, contentType: "application/json" } },
+    };
+    expect(redactExchange(exchange).bodyMayContainSecret).toBe(true);
   });
 });
