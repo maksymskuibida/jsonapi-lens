@@ -67,10 +67,11 @@ note() { printf '  note    %s\n' "$1"; notes=$((notes + 1)); }
 # Resolved in order of trust, each candidate verified before it is used:
 #   1. The pull request's own base branch, when a PR number is given — ground
 #      truth for what the diff will actually be evaluated against on merge.
-#   2. The branch this one tracks (`@{u}`), when one is configured AND it is
-#      not simply this same branch's own copy of itself on the remote (see
-#      below — that copy is what an ordinary `git push -u` sets up, and it
-#      is not a base).
+#   2. The branch this one tracks (`@{u}`), when one is configured AND it
+#      does not already contain HEAD (see below — a same-named remote mirror
+#      of yourself, the ordinary result of `git push -u`, is the common
+#      case, but the same is true of this branch checked out locally under
+#      a different name entirely; neither is a base).
 #   3. `origin/main`, the repository's actual default branch.
 # A candidate that does not resolve is skipped, not fatal — only exhausting
 # all three is. Fails closed on purpose: reporting a pass because the base
@@ -94,21 +95,33 @@ fi
 
 if [ -z "$BASE_REF" ]; then
   upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" || upstream=""
-  # Only trust @{u} when it tracks a DIFFERENTLY-NAMED branch. The ordinary
-  # result of `git push -u origin <branch>` — which is how every branch in
-  # this repository reaches the remote, including this one — is an upstream
-  # that is this same branch's own copy of itself on origin. Comparing
-  # against that finds "no changes" the instant everything is pushed, which
-  # breaks the one thing this fallback tier exists for: a local self-review
-  # before a PR exists. Found by running this exact check, on this exact
-  # branch, right after pushing it. A genuinely different tracked branch
-  # (deliberately pointed at an integration branch under a different name)
-  # is a real signal and is used; a same-named remote mirror of yourself is
-  # not a base, and is discarded here rather than trusted.
+  # Only trust @{u} when it is not simply a copy of HEAD by another name.
+  # Two ways that happens, checked separately because neither one alone
+  # covers the other:
+  #   - Same NAME: the ordinary result of `git push -u origin <branch>` —
+  #     how every branch in this repository reaches the remote, including
+  #     this one — is an upstream that is this same branch's own copy of
+  #     itself on origin. Comparing against that finds "no changes" the
+  #     instant everything is pushed. Found by running this exact check, on
+  #     this exact branch, right after pushing it.
+  #   - Same CONTENT under a DIFFERENT name: checking this branch out
+  #     locally under another name (`git checkout -b review-4
+  #     origin/<branch>`) keeps @{u} pointing at the original upstream, so
+  #     the name check alone does not catch it — and a name check is not
+  #     the right tool for this anyway, since it is really asking "does this
+  #     candidate already contain HEAD", which an ancestry check answers
+  #     directly regardless of what either side is named. Reproduced on
+  #     this exact branch, checked out under a different local name, during
+  #     review.
+  # A genuinely different tracked branch (deliberately pointed at an
+  # integration branch, under its own name, that HEAD is actually ahead of)
+  # is a real signal and passes both checks; a mirror of yourself, named or
+  # not, does not and is discarded here rather than trusted.
   if [ -n "$upstream" ]; then
     current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || current_branch=""
     upstream_name="${upstream#*/}"
-    if [ -n "$current_branch" ] && [ "$upstream_name" = "$current_branch" ]; then
+    if { [ -n "$current_branch" ] && [ "$upstream_name" = "$current_branch" ]; } \
+       || git merge-base --is-ancestor HEAD "$upstream" 2>/dev/null; then
       upstream=""
     fi
   fi
@@ -182,8 +195,16 @@ ADDED="$(printf '%s\n' "$DIFF" | grep '^+' | grep -v '^+++' || true)"
 # are offered to them.
 
 # Added lines confined to application code. Governs: the innerHTML/
-# insertAdjacentHTML scan, the href note.
-DIFF_SRC="$(git diff "$MERGE_BASE"..HEAD -- src)"
+# insertAdjacentHTML scan, the href note. "Application code" here means
+# exactly what src_touched (below) and the evidence-staleness diff already
+# mean it: src AND index.html, not src alone — index.html is 500+ lines of
+# shipped markup with real hrefs, real DOM ids and an inline <script>, and
+# `vite build` ships it as the document. Dropping it from this pathspec was
+# a real regression, caught in review: an innerHTML assignment or an href
+# added inside index.html went uncaught. Never narrow this to `src` again
+# without widening it back everywhere else in this file that means the same
+# thing.
+DIFF_SRC="$(git diff "$MERGE_BASE"..HEAD -- src index.html)"
 ADDED_SRC="$(printf '%s\n' "$DIFF_SRC" | grep '^+' | grep -v '^+++' || true)"
 
 # Added lines confined to vitest specs — test/, excluding test/browser/, the
@@ -344,12 +365,16 @@ else ok "no hardcoded copy detected"
 fi
 
 # jsdom-altitude: a layout assertion in a vitest test cannot fail. The gate
-# condition still checks $CHANGED for any test/ file outside test/browser/,
-# but the pattern match reads ADDED_TEST_UNIT — lines added inside that file
-# set only — because scripts/attack-preflight.sh plants the literal string
-# `scrollY` as its own fixture and is not a vitest spec (see the T9 note
-# above ADDED_SRC).
-if grep -qE '^test/[^b]' <<<"$CHANGED"; then
+# condition and the pattern match both derive from the exact same pathspec
+# that built ADDED_TEST_UNIT above (test/, excluding test/browser/), so the
+# two can never drift apart again the way they already had: this used to be
+# the character class `^test/[^b]`, which excludes every test file whose
+# name BEGINS WITH "b" — test/bundle.test.ts, test/base64.test.ts — not
+# `test/browser/`, so a layout assertion in any such file was silently never
+# scanned. Caught in review. `[ -n "$(git diff --name-only ...)" ]` rather
+# than a piped grep, per this file's own SIGPIPE note at the top: `grep -q`
+# in a pipeline is exactly the hazard that check exists to avoid.
+if [ -n "$(git diff --name-only "$MERGE_BASE"..HEAD -- test ':!test/browser')" ]; then
   if grep -qE 'scrollY|scrollTop|getBoundingClientRect|offsetHeight|offsetTop|clientHeight' <<<"$ADDED_TEST_UNIT"; then
     find_ "a layout measurement is asserted in a vitest test — jsdom has no layout engine, so that assertion cannot fail; it belongs in test/browser/nav-scenarios.js"
   else ok "no layout assertion under jsdom"

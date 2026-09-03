@@ -482,6 +482,63 @@ else
   fail=$((fail+1))
 fi
 
+# --- 22. T9: a real innerHTML in index.html is still found beside the ---
+#          suite (review B1) ------------------------------------------
+#
+# index.html ships as the actual document — vite build's output — with real
+# hrefs, real DOM ids and an inline <script>. B1 in review: DIFF_SRC read
+# only `src`, so an innerHTML assignment or an href added inside index.html
+# went uncaught, a real regression on the project's highest-severity check.
+d=$(fresh_repo_with_attack_suite t9indexhtml)
+cat > "$d/index.html" <<'EOF'
+<!doctype html>
+<script>node.innerHTML = payload;</script>
+EOF
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "a real innerHTML in index.html, alongside the attack suite"
+expect "T9: innerHTML in index.html still found beside the suite" "$d" 1 \
+  "innerHTML/insertAdjacentHTML path is in the diff"
+
+# --- 23. T9: a layout assertion in test/bundle.test.ts is caught --------
+#          (review B2) --------------------------------------------------
+#
+# B2 in review: the gate condition `^test/[^b]` excluded every test file
+# whose name BEGINS WITH "b" — bundle.test.ts, base64.test.ts — not
+# test/browser/, so a layout assertion in one of those files was silently
+# never scanned. T6 is literally "share bundle".
+d=$(fresh_repo t9bundletest)
+mkdir -p "$d/test"
+printf 'expect(window.scrollY).toBe(0);\n' > "$d/test/bundle.test.ts"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm x
+expect "T9: layout assertion in test/bundle.test.ts caught" "$d" 1 \
+  "jsdom has no layout engine"
+
+# --- 24. T9 ceiling: a differently-named upstream containing HEAD is ----
+#         still not mistaken for a base (review S1) ---------------------
+#
+# The same-named-upstream fix (case 21) compares NAMES, so it does not
+# cover checking this exact branch out locally under a DIFFERENT name
+# (`git checkout -b review-4 origin/<branch>`) — reproduced live, on this
+# exact PR branch, during review: @{u} still names the original upstream,
+# under its original name, and HEAD is byte-identical to it. The condition
+# that actually matters is identity, not naming: does the candidate already
+# contain HEAD. Built here without a rename by pointing a differently-named
+# ref at HEAD's own commit, which is the same relationship.
+d=$(fresh_repo t9renamedupstream)
+git -C "$d" remote add origin /nonexistent/dummy.git
+echo "// a real change" >> "$d/src/main.ts"; git -C "$d" commit -qam x
+git -C "$d" update-ref refs/remotes/origin/upstream-branch feat/x
+git -C "$d" branch --set-upstream-to=origin/upstream-branch feat/x >/dev/null
+out="$(cd "$d" && ./scripts/review-preflight.sh 2>&1)"
+if printf '%s' "$out" | grep -qE 'comparing against origin/main' \
+   && ! printf '%s' "$out" | grep -qE "comparing against this branch's upstream"; then
+  printf 'pass  %-42s renamed-upstream identity discarded, fell through\n' "T9 ceiling: differently-named upstream is not a base"
+  pass=$((pass+1))
+else
+  printf 'FAIL  %-42s trusted a differently-named upstream that already contains HEAD\n' "T9 ceiling: differently-named upstream is not a base"
+  printf '%s\n' "$out"
+  fail=$((fail+1))
+fi
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 rm -rf "$WORK"
 [ "$fail" -eq 0 ]

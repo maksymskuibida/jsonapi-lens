@@ -126,6 +126,21 @@ Fixed order, and the deploy is gated on the whole of step 3 passing:
 3. **Verify locally, in full** — `docs/qa-checklists/REGRESSION.md` end to end, **plus** every new
    feature against its own task spec. This is the gate. A failure here is fixed and re-verified; it
    is never deployed and noted.
+3a. **Un-stack before merging.** GitHub evaluates a `pull_request` workflow from the PR's **merge
+   ref** — head merged into base — never from the base branch alone (this is also why
+   `pull_request_target` exists: it is the variant that reads from the base instead). So removing
+   the `branches: [main]` filter (T9) does not, by itself, give an already-open stacked pull request
+   any checks: nothing about `main` enters that PR's merge ref while its base is a feature branch, so
+   it has zero checks before the fix merges and zero after. What actually reaches a stacked PR is the
+   fix landing in **its own** head or base — by merging or rebasing updated `main` into it, or by
+   re-targeting it at `main`. For a release built as a stack, the honest sequence is: merge the
+   tooling and foundation PRs to `main` first, then **rebase every remaining PR onto `main`** so each
+   one is a PR into `main` and gets checks from its own merge ref. **Re-targeting alone may not fire
+   a run**: the default `pull_request` activity types are `opened, synchronize, reopened`, and
+   changing a PR's base is `edited` — if no run appears after re-targeting, push a commit (a rebase
+   does this) or close and reopen the PR. Do not treat a reviewer running the chain by hand as
+   equivalent to a check — it is a mitigation, not a gate, and it does not survive the next push to
+   that branch.
 4. **Deploy once**, all of it, by merging to `main`. `deploy.yml` runs `check`, migrates D1, uploads
    the Worker and assets, and smoke-tests the origin.
 5. **Verify on production** — the same regression checklist again, because layout is what a build
