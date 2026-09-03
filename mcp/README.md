@@ -12,10 +12,13 @@ network connection on its own (see `docs/PROCESS.md` §5).
 
 ## What it can and cannot see
 
-- It generates nothing. **You supply the secret**, as 64 lowercase hex characters from
-  `openssl rand -hex 32`. The server never invents one, and never falls back to generating one if
-  yours is malformed — a caller that believes it knows the secret and does not has minted a link
-  nobody can open, including you.
+- It generates nothing. **You supply the secret** when minting a link with `share`, as 64 lowercase
+  hex characters from `openssl rand -hex 32`. The server never invents one, and never falls back to
+  generating one if yours is malformed — a caller that believes it knows the secret and does not has
+  minted a link nobody can open, including you. `read`, opening a link somebody else already made,
+  is deliberately less strict: it accepts any secret the envelope format itself can carry — the same
+  range this app's `generateSecret()` produces, 8-64 characters — because most links it opens will
+  not have come from this server's own `share` at all. See the *tools* section below.
 - It cannot decrypt without that secret. Sealing and opening both happen with the same
   `src/crypto.ts` this site's browser build uses: AES-256-GCM over a key derived from your secret
   with PBKDF2. The secret never leaves this process except inside the `url` field a successful
@@ -88,6 +91,13 @@ Takes `{ id, secret, origin? }`, fetches the ciphertext, decrypts it, and return
 sealed: `{ kind: "document", label, savedAt, text, exchange? }` for a single document, or
 `{ kind: "bundle", savedAt, documents: [...] }` for a bundle — every document in it, never just the
 first. No parsing, indexing or validation of the text happens here; that is what the browser is for.
+
+**`secret` here is not held to `share`'s 64-hex rule.** Most links `read` opens will have come from
+the browser's own Share button, whose secret is 10 mixed-case characters, nothing like 64 lowercase
+hex — so `read` accepts anything the wire format itself can carry (case-sensitive, never
+normalised), and only refuses something malformed or truncated. A `read` refusal never suggests
+running `openssl rand -hex 32`; there is nothing to generate on this path, only a link to check was
+copied in full.
 
 A wrong secret and a corrupted or tampered blob **fail identically**. This is deliberate — telling
 them apart would hand an attacker a way to test guesses.
