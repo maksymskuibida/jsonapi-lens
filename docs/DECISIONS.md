@@ -194,3 +194,76 @@ no container-name logic at all and would catch more real links. It was rejected 
 above: on a real payload it produces enough wrong links (via nothing more than two unrelated `1`s)
 that the feature would train people to distrust every link it draws, which defeats the point of
 drawing any.
+
+---
+
+## D5 · A decoded parameter is a reading plus its alternatives, never a resolved scalar alone
+
+> **Numbering note:** assigned as the next free slot as of this PR (D3 is reserved by T6's
+> not-yet-merged branch; D4 is T1's, already on `integration/wave1`). Confirm this does not collide
+> before merging — see the T2a pull request body.
+
+**Date:** 2026-09-03 · **Settles:** what `params.ts#decodeParams` hands back for one query-string or
+form-urlencoded parameter, and what T3's importers and T4's diagnostics may assume about it.
+
+### Why this is load-bearing
+
+`docs/task-specs/T2.md`'s Parameters section exists because this codebase has already shipped two
+defects shaped exactly like "a heuristic that looked right and picked silently" — a broken pointer
+from treating any `id`-suffixed key as a reference, and a falsy-`[]` check that skipped restoration
+entirely. A parameter decoder is the same trap with a wider mouth: `a=1,2` is a list under the
+JSON:API convention this tool is built for and the literal three-character string `"1,2"` under
+Express's, and the wire text cannot tell you which. Every later diagnostic (T4) and every importer
+that writes a `ParamSet` (T3) reads or produces this shape, so what "a decoded parameter" *is*
+has to be settled once, here, rather than re-derived differently by each.
+
+### The rule
+
+A `ParamEntry` separates two independent axes of ambiguity, and never collapses either into a single
+guessed answer:
+
+- **Key shape** (which convention governs the pair's syntax — bare, `a[]`, `a[N]`, `a[key]`, `a.key`)
+  is unambiguous for one pair in isolation, but two pairs for the *same top-level name* can use
+  syntaxes that cannot both be true at once (`a=1` beside `a[]=2`). This is a **conflict**:
+  `value`/`convention` are left unset, and `conflict` carries every incompatible reading the wire
+  data implies — not the first one, not the "most common" one, all of them. Detected by bucketing a
+  name's pairs into bare/index-like/key-like and treating more than one non-empty bucket as a
+  conflict, at any count (two incompatible syntaxes or three).
+- **Value shape** (how one scalar wire value reads — comma list, space/pipe list, a JSON literal,
+  base64url-encoded JSON, or plain text) is genuinely ambiguous from the wire text alone. The decoder
+  picks the JSON:API-shaped reading as `value`/`convention` (this tool exists to read JSON:API) and
+  keeps every other plausible reading in `alternatives`, each located by `path` within the
+  parameter's own value — so a leaf several levels deep (`filter[status][in]`'s comma list) can be
+  flagged without disturbing the object around it.
+- `conventions` lists every convention actually used anywhere while decoding one entry, not just the
+  outermost — `filter[status][in]=booked,held` reports both `bracket-object` and `comma`, because
+  both are true of how that one parameter was read.
+- **Nothing here is guessed away silently, and nothing is thrown either.** A malformed key, an
+  unresolvable value, a value that happens to be short/plain — every case in `params.ts` returns a
+  value; none of them raise.
+
+### What this means for T3 and T4
+
+- **T3's importers** produce `Partial<Exchange>` values that merge through `mergeExchange`
+  (`docs/task-specs/T3.md`'s own Interface section). Any importer that builds a `query`/`form`
+  `ParamSet` by hand (rather than by calling `decodeParams` on wire text it already has) must produce
+  entries shaped this way — in particular, it may not resolve an ambiguous value to a bare scalar and
+  drop the alternative, and it may not paper over a genuine key-syntax conflict by picking one
+  reading. If an importer's source format has its own unambiguous notion of a parameter (a HAR
+  entry's already-parsed query array, say), the honest encoding is still `convention: "plain"` per
+  value with no invented ambiguity — never a convention the source format did not actually use.
+- **T4's diagnostics** may read `entry.value`/`entry.convention` as this decoder's best single answer,
+  but a check that depends on knowing whether a value was genuinely ambiguous must look at
+  `alternatives`/`conflict` rather than assume `value` is the only defensible reading. A cross-check
+  that silently prefers `value` over a live `conflict` reproduces the exact failure mode this
+  decision exists to prevent, one layer up.
+
+### Rejected alternative
+
+Picking one reading and exposing the rest only as a debug/verbose field — the shape most decoders
+default to — was rejected because it reintroduces the choice this task exists to remove: a "debug"
+field nobody reads by default is functionally the same as not having the alternative at all, and this
+release has already shipped two defects that were exactly one unread edge case away from being
+caught. Making `alternatives`/`conflict` first-class, typed members of `ParamEntry` — not an optional
+afterthought — is what makes it possible for T2b to render "read as a list, click to read as text"
+as a normal interaction rather than a debugging feature, and for T4 to check them at all.
