@@ -464,7 +464,15 @@
         const url = document.querySelector('.share__url')?.value;
         if (!url) return { name, ok: false, driftPx: 0, detail: 'no link produced' };
         const path = new URL(url).pathname; // "/d/<id>:<secret>"
-        const secret = path.split(':')[1] || '\u0000';
+        // PR #5 review round 2, N15: this used to fall back to a NUL sentinel
+        // (`|| '\u0000'`) when the split found nothing, which would make both
+        // `secretGoneFromUrl` and `secretStillGoneAfterTraversals` below pass
+        // by testing for a byte that was never in the URL to begin with,
+        // rather than failing on the URL shape that produced it. Failing loudly
+        // here instead — exactly like the missing-`url` check two lines up —
+        // is what makes those two assertions mean something.
+        const secret = path.split(':')[1];
+        if (!secret) return { name, ok: false, driftPx: 0, detail: `no secret in link path ${path}` };
 
         document.querySelector('.modal__close')?.click();
 

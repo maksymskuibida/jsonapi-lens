@@ -205,6 +205,21 @@ let soloType: string | null = null;
  * `current` naturally resets to `null` on reload. Content only ever reaches
  * `bundleImportEl` via a live `renderBundleImportView` call in this same
  * page load, so an empty element means exactly "not actually showing".
+ *
+ * PR #5 review round 2, S10 — **the marker is never cleared, so this rests
+ * on an invariant rather than an impossibility.** A `/` entry can carry
+ * `bundle: true` for the rest of the session; that is harmless only because
+ * (a) this function is read *only* from `applyRoute`'s `view` branch, and
+ * (b) nothing replaces a marked entry with a document — every call to `load`
+ * that shows a different one pushes rather than replaces, which is what
+ * un-marks it (`LoadOptions.push`'s own comment, a few hundred lines down,
+ * is where that is enforced and where it would need enforcing again). Break
+ * either half and the S3 leak this whole check exists to fix comes back
+ * through a different door: a marked entry that later shows an ordinary
+ * document via `replace`, then loses `current` (`New document`), then Back,
+ * reports `true` here with `bundleImportEl` still holding whatever bundle
+ * was last rendered in this page load — `s27` would not catch it, since it
+ * never replaces a marked entry.
  */
 interface BundleEntryState {
   bundle?: true;
@@ -1229,7 +1244,23 @@ document.addEventListener("click", (event) => {
 interface LoadOptions {
   /** Write to IndexedDB as the current document, and reset the fragment. */
   persist: boolean;
-  /** Push `/view` onto history rather than replacing the current entry. */
+  /**
+   * Push `/view` onto history rather than replacing the current entry.
+   *
+   * This is also the reason every user-facing call site below passes
+   * `push: true`, and it is load-bearing, not a style choice: `router.ts`'s
+   * `navigate` puts a fresh `null` state on a pushed entry but carries the
+   * *existing* state forward untouched on a replace, so replacing an entry
+   * `markBundleEntry` had marked (see `isBundleEntryShowing`, above the
+   * `load` this option belongs to) would leave that entry both bundle-marked
+   * and showing an ordinary document. Nothing here does that today — the one
+   * `persist: false` call omits `push` deliberately, but only ever runs
+   * after `isBundleEntryShowing` has already read that same entry as false —
+   * but a *new* call that loads a document by replacing rather than pushing
+   * would inherit `bundle: true` from whatever entry it replaces. Pass
+   * `push: true` for a new call site unless you have specifically checked
+   * this, the way the existing one did.
+   */
   push?: boolean;
 }
 

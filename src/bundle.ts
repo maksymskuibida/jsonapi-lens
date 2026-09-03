@@ -400,10 +400,31 @@ export async function renderBundleImportView(
     const attempted = ticked.length;
     importButton.disabled = true;
     cancelButton.disabled = true;
-    void importDocuments(ticked).then((outcome) => {
-      if (outcome.saved.length > 0) handlers.onChange();
-      renderDone(outcome, attempted);
-    });
+    importDocuments(ticked)
+      .then((outcome) => {
+        if (outcome.saved.length > 0) handlers.onChange();
+        renderDone(outcome, attempted);
+      })
+      .catch(() => {
+        // `importDocuments` already swallows every per-document storage
+        // failure itself — `saveToLibrary` never rejects; a blocked write
+        // resolves to `null` and is counted in `failedCount` instead (see
+        // `renderDone` below, and the "storage blocked" test in
+        // `bundle-view.test.ts`) — so reaching this `catch` means something
+        // upstream of that (`draftFrom`, or a future change to either
+        // function) threw outright. Same defect shape PR #5 review's B1
+        // fixed for `renderBundleImportView`'s own call twenty lines above
+        // this one in `main.ts`: a fire-and-forget async call with no
+        // rejection handler, which here would leave `importButton` and
+        // `cancelButton` disabled forever with no way out — not even
+        // `Cancel`, since it was disabled in lock-step above. Rendering the
+        // same "nothing could be saved" outcome a fully-failed import
+        // already produces keeps this path meeting the same acceptance
+        // criterion (`docs/task-specs/T6.md`: "Import with storage blocked
+        // -> reports that nothing could be saved rather than claiming
+        // success") instead of leaving the view stuck.
+        renderDone({ saved: [], failedCount: attempted }, attempted);
+      });
   });
 
   cancelButton.addEventListener("click", () => handlers.onCancel());

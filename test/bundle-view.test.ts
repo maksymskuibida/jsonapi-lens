@@ -4,9 +4,10 @@
  * all. See that file's header comment for why the two cannot share a file.
  */
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderBundleImportView } from "../src/bundle.js";
 import type { BundlePayload } from "../src/crypto.js";
+import * as store from "../src/store.js";
 import { listLibrary, saveToLibrary } from "../src/store.js";
 import type { LibraryEntry } from "../src/store.js";
 import { t } from "../src/i18n/index.js";
@@ -191,6 +192,52 @@ describe("renderBundleImportView", () => {
       expect(changed).toBe(0);
     } finally {
       indexedDB.open = real;
+    }
+  });
+
+  /**
+   * PR #5 review round 2, N16: `importDocuments(ticked)` was a `void`-ed
+   * fire-and-forget call with no `.catch`, the same defect shape B1 fixed for
+   * `renderBundleImportView` itself. `saveToLibrary` never actually rejects
+   * (the test above goes through it failing *without* a rejection, via the
+   * `null`-outcome path store.ts's own header comment documents), so this
+   * spies on the module boundary directly to force the rejection the fix
+   * guards against, rather than one that can happen today. Without the
+   * `.catch` this test times out: `importButton`/`cancelButton` stay
+   * disabled, `renderDone` never runs, and `waitForImportDone` never sees a
+   * `Done` button — this is what "add a test that fails without the
+   * handling" means for this item, since the click handler still runs when
+   * the guard is removed, it just never finishes.
+   */
+  it("catches a rejection from importDocuments and still reports failure, instead of leaving the view stuck", async () => {
+    const spy = vi.spyOn(store, "saveToLibrary").mockRejectedValue(new Error("unexpected"));
+    let changed = 0;
+    const container = attachedContainer();
+    try {
+      await renderBundleImportView(container, bundle([{ label: "a.json", text: "{}" }]), {
+        onOpen: () => {},
+        onCancel: () => {},
+        onChange: () => changed++,
+      });
+
+      const importButton = findButton(container, t().bundleUi.importSelected);
+      const cancelButton = findButton(container, t().bundleUi.cancel);
+      importButton.click();
+
+      // Immediately after the click, both controls are disabled — asserted
+      // here so a future change that skips this step entirely would still
+      // be caught, not just the final outcome.
+      expect(importButton.disabled).toBe(true);
+      expect(cancelButton.disabled).toBe(true);
+
+      await waitForImportDone(container);
+
+      expect(container.querySelector(".bundle-import__subtitle")!.textContent).toBe(
+        t().bundleUi.importFailed,
+      );
+      expect(changed).toBe(0);
+    } finally {
+      spy.mockRestore();
     }
   });
 
