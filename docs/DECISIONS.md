@@ -82,7 +82,12 @@ people's browser history and in the README, for no gain over a distinct first ch
 
 ## D2 · `Exchange` is a placeholder module, not an inline opaque type
 
-**Date:** 2026-09-03 · **Settles:** how T5's types reference a model T2 has not built yet
+**Date:** 2026-09-03 · **Settles:** how T5's types reference a model T2 has not built yet ·
+**Discharged:** 2026-09-03, by T2a — see "What T2a actually did" below. Kept rather than deleted:
+the reasoning for the placeholder is still why `store.ts` and `crypto.ts` (T5) and `mcp/` (T7,
+queued) could be built before this module's real design existed, and a later reader asking "why does
+this codebase have a decision about a type that no longer looks like this" needs that history, not a
+gap where it used to be.
 
 ### Why this is load-bearing
 
@@ -91,9 +96,9 @@ T5 (storage and the share envelope) attaches an optional exchange to four differ
 carry one (`store.ts`, `crypto.ts`). The real shape of a captured HTTP exchange is T2's design, built
 in a later wave, and [T5's task spec](task-specs/T5.md) is explicit that T5 must not block on it.
 
-### The choice
+### The choice, as it stood until T2a
 
-`src/exchange.ts` is a new module exporting one interface:
+`src/exchange.ts` was a new module exporting one interface:
 
 ```ts
 export interface Exchange {
@@ -102,7 +107,8 @@ export interface Exchange {
 ```
 
 Every type that carries an exchange imports `Exchange` from this module, rather than each declaring
-its own inline `Record<string, unknown>`.
+its own inline `Record<string, unknown>`. This is no longer what the file contains — see below — but
+the shape above is what T5, and any code written against T5 before T2a landed, was built against.
 
 ### Why not the inline alternative
 
@@ -114,10 +120,24 @@ if one is missed. A dedicated module means T2 edits **one file** — the body of
 every consumer that only carries the value forward, never reading a field off it, keeps compiling
 unchanged.
 
-### What T2 must do
+### What T2a actually did
 
-Replace the body of `src/exchange.ts` with the real interface. No other file that imports `Exchange`
-needs to change unless it starts reading a specific field off it — none of T5's code does, by design.
+Replaced the body of `src/exchange.ts` with the real model: `Exchange { request?: RequestPart,
+response?: ResponsePart, origin?: OriginMeta }`, `RequestPart`, `ResponsePart` and `BodyPart` (see
+`src/exchange.ts`'s own header comment for the full shape and `mergeExchange`), plus `OriginMeta`
+itself carrying forward this decision's own pattern — an opaque `{ [key: string]: unknown }`, this
+time as a placeholder for **T3**, which depends on T2a and has not landed yet.
+
+The prediction this entry made held exactly: `store.ts` and `crypto.ts` needed **no changes** to
+their own logic, because neither reads a field off an `Exchange` value — both only ever carry one
+forward, whole. Two of T5's *tests* did need a mechanical fix (`test/store.test.ts`,
+`test/crypto.test.ts`): two sample literals hard-coded fields directly on `exchange` (e.g.
+`{ method: "GET", url: "..." }`) rather than nested under `exchange.request`/`exchange.response`,
+which only ever typechecked against the opaque placeholder above. That is a consequence of
+constructing sample data with a guessed shape, not of reading a field off a real value, so it does
+not contradict what this entry predicted — it is the one corner "no other file needs to change"
+did not quite reach, and is called out here so the next placeholder-discharging task knows to check
+for it too.
 
 ### Rejected alternative
 
