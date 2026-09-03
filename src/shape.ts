@@ -120,12 +120,20 @@ function detectStructural(value: JsonValue): { shape: Shape; evidence: ShapeEvid
  * Split into lines and parse each one as JSON, tolerating blank lines
  * (including a trailing one) and reporting the first line that does not
  * parse rather than giving up at it — "one malformed line reports its line
- * number and reads the rest."
+ * number and reads the rest." `malformedCount` is the total, not just
+ * whether `malformedLine` is set, because the caller's plausibility check
+ * needs to tell "one bad line" from "several" — `malformedLine` alone only
+ * ever names the first.
  */
-function parseNdjsonLines(text: string): { records: JsonValue[]; malformedLine: number | null } {
+function parseNdjsonLines(text: string): {
+  records: JsonValue[];
+  malformedLine: number | null;
+  malformedCount: number;
+} {
   const lines = text.split(/\r\n|\r|\n/);
   const records: JsonValue[] = [];
   let malformedLine: number | null = null;
+  let malformedCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!.trim();
@@ -133,11 +141,12 @@ function parseNdjsonLines(text: string): { records: JsonValue[]; malformedLine: 
     try {
       records.push(JSON.parse(line) as JsonValue);
     } catch {
+      malformedCount++;
       if (malformedLine === null) malformedLine = i + 1;
     }
   }
 
-  return { records, malformedLine };
+  return { records, malformedLine, malformedCount };
 }
 
 /**
@@ -159,8 +168,18 @@ export function detectShape(text: string): ShapeDetection {
     return { shape, evidence, value };
   }
 
+  // A reading this permissive would rather hijack a broken single document
+  // than admit it cannot parse one: a comma-broken JSON:API payload has most
+  // of its lines fail (only the innermost objects happen to stand alone as
+  // valid JSON), and a truncated array can leave exactly one bare scalar
+  // line behind. Both must fall through to the ordinary parse error below,
+  // not be presented as a readable JSON-Lines stream that quietly dropped
+  // everything else. "At most one" is the spec's own tolerance — a real
+  // NDJSON stream with a single typo'd line still reads as the rest of it —
+  // and "at least two records" keeps one stray valid-looking line from
+  // outvoting a document that was plainly meant to be parsed whole.
   const ndjson = parseNdjsonLines(trimmed);
-  if (ndjson.records.length > 0) {
+  if (ndjson.records.length >= 2 && ndjson.malformedCount <= 1) {
     return {
       shape: "ndjson",
       evidence: { kind: "ndjson-lines", records: ndjson.records.length, malformedLine: ndjson.malformedLine },

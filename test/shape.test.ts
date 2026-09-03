@@ -126,6 +126,41 @@ describe("detectShape", () => {
       expect(result.evidence).toEqual({ kind: "ndjson-lines", records: 2, malformedLine: 2 });
       expect(result.value).toEqual([{ a: 1 }, { a: 3 }]);
     });
+
+    // Round 2 review, blocker: the NDJSON fallback tolerated any number of
+    // malformed lines, so it could hijack a document that was plainly meant
+    // to be read as one whole thing and silently discard most of it — the
+    // opposite of "one malformed line reports its line number and reads the
+    // rest", which promises exactly one.
+
+    it("does not hijack a comma-broken JSON:API payload into a false NDJSON reading", () => {
+      // Only the two innermost objects happen to stand alone as valid JSON;
+      // the four surrounding lines (`{`, `"data": [`, `]`, `}`) do not, which
+      // is four malformed lines, not one. This must fall through to the
+      // ordinary parse error instead of reporting "2 records".
+      const result = detectShape(
+        '{\n  "data": [\n    {"type":"a","id":"1"}\n    {"type":"a","id":"2"}\n  ]\n}',
+      );
+      expect(result.shape).toBe("plain");
+      expect(result.evidence).toEqual({ kind: "plain-unparseable" });
+      expect(result.value).toBeUndefined();
+    });
+
+    it("does not present a truncated array as a one-record stream, silently dropping the rest", () => {
+      // `[` and `1,` both fail to parse on their own; only the trailing `2`
+      // does. One surviving record is not "at least two", so this must not
+      // read as NDJSON at all — the `1` would otherwise vanish with nothing
+      // reported.
+      const result = detectShape("[\n1,\n2");
+      expect(result.shape).toBe("plain");
+      expect(result.evidence).toEqual({ kind: "plain-unparseable" });
+    });
+
+    it("refuses the NDJSON reading once more than one line fails to parse", () => {
+      const result = detectShape('{"a":1}\nnope\n{"a":2}\nnope again\n{"a":3}');
+      expect(result.shape).toBe("plain");
+      expect(result.evidence).toEqual({ kind: "plain-unparseable" });
+    });
   });
 
   it("never throws, even on unparseable text", () => {
