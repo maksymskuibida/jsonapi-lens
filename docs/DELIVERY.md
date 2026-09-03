@@ -114,6 +114,15 @@ document and a 15-minute lifetime. The QA report says which environment each sha
   evidence against the branch head as part of the preflight. Arming it properly is an open ask in
   `STATUS.md` §4. Recording it as absent is the point: a gate that is described but not installed is
   worse than one that is honestly missing.
+- **A pull request carrying several distinct pieces of work merges with a merge commit, not a
+  squash.** The shared process squash-merges, and that is right when one pull request is one task —
+  a single commit message is then the whole record. It is wrong when a pull request accumulates
+  commits that are each their own distinct piece of work with its own reasoning (T9's pull request,
+  for instance, carries T0's process install, the profile raise to `local+prod-qa`, the production
+  baseline, and T9 itself): squashing would collapse every one of those messages into one and destroy
+  the record of why each was done. `gh pr merge --merge` for a pull request like that; `gh pr merge
+  --squash` (the default) otherwise. This is a per-pull-request judgement call, not a policy change —
+  most pull requests here are one task and still squash.
 
 ## Release sequence
 
