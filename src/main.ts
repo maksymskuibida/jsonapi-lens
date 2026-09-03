@@ -26,6 +26,7 @@ import { resolve as resolvePointer } from "./pointer.js";
 import {
   EAGER_BODY_LIMIT,
   groupsHtml,
+  librarySummary,
   railEntriesForCollections,
   railEntriesForGroups,
   renderDangling,
@@ -345,6 +346,28 @@ function openSection(section: Element): void {
 }
 
 /**
+ * Open every ancestor `<details>` of a plain-JSON anchor, and the anchor
+ * itself when it is one.
+ *
+ * A plain-JSON document has no `.res`-section model — `render-value.ts`'s
+ * generic tree nests a `<details>` inside a `<details>` however deep the
+ * value goes, and only the first level (`AUTO_OPEN_DEPTH`) starts open. A
+ * resolved reference two or more levels deep therefore lands on a real
+ * element that exists but sits inside a *closed* ancestor, which has no
+ * rendered box at all — `openSection`'s single `.res__d` lookup has nothing
+ * analogous to open there, so the target stays invisible even though the
+ * link itself worked. Walking every ancestor and opening each one fixes that
+ * regardless of depth, with no dependence on this document's particular
+ * nesting shape.
+ */
+function openAncestorDetails(target: Element): void {
+  if (target instanceof HTMLDetailsElement) target.open = true;
+  for (let node = target.parentElement; node; node = node.parentElement) {
+    if (node instanceof HTMLDetailsElement) node.open = true;
+  }
+}
+
+/**
  * Resolve `location.hash` against the rendered document.
  *
  * Called on boot (where the browser's own scroll-to-fragment already failed,
@@ -410,7 +433,13 @@ function resolveHash(restore: EntryState | null = null): void {
 
   // Open before scrolling, so the scroll lands against final layout — but never
   // on top of a restored shape, which already says whether this row was open.
-  if (target.classList.contains("res") && !shape) openSection(target);
+  // `shape` only ever describes the JSON:API `.res` model (see `applyOpenRows`),
+  // so a plain-JSON target — which never sets one — always takes the ancestor
+  // branch, and correctly so: there is no restored shape for it to defer to.
+  if (!shape) {
+    if (target.classList.contains("res")) openSection(target);
+    else openAncestorDetails(target);
+  }
 
   if (position) restorePosition(position);
   else target.scrollIntoView({ block: "start" });
@@ -1223,37 +1252,14 @@ function shareDocument(): void {
   openShareModal(current.text, current.label);
 }
 
-/**
- * The three summary fields a `LibraryEntry` row shows, computed from
- * whichever `Lens` is open. `store.ts` only ever serialises these — it does
- * not interpret them — so widening what feeds them is a `main.ts` change,
- * not a schema one; see `docs/STATUS.md` §1a for why that split matters this
- * wave.
- */
-function librarySummary(lens: Lens): Pick<LibraryEntry, "resources" | "types" | "shape"> {
-  if (lens.kind === "jsonapi") {
-    const index = lens.index;
-    return {
-      resources: index.counts.total,
-      types: index.groups.length,
-      shape: index.primaryIsNull
-        ? "data: null"
-        : index.errors.length
-          ? `errors[${index.errors.length}]`
-          : index.primary.length === 1
-            ? "data{1}"
-            : `data[${index.primary.length}]`,
-    };
-  }
-
-  const index = lens.index;
-  const collections = index.collections.filter((c) => c.topLevel).length;
-  return {
-    resources: index.counts.total,
-    types: collections,
-    shape: collections > 0 ? `${index.shape}[${collections}]` : index.shape,
-  };
-}
+// `librarySummary` — the three summary fields a `LibraryEntry` row shows —
+// lives in `render-document.ts` now, not here: it is a pure function of
+// whichever `Lens` is open, and moving it next to `railEntriesForGroups`/
+// `railEntriesForCollections` (the same "one Lens-shaped projection, no rail
+// code of its own" pattern) is what lets it be unit-tested directly instead
+// of only through `parse.ts#readAny`'s determinism test as a proxy. It still
+// never touches `store.ts` — see `docs/STATUS.md` §1a for why that split
+// matters this wave.
 
 function saveCurrent(): void {
   if (!current) return;
@@ -1762,10 +1768,14 @@ async function boot(): Promise<void> {
 
   // Reading IndexedDB takes long enough that a document can be pasted before it
   // finishes — most easily on a cold profile, where opening the database is
-  // slowest. That document is rendered and showing by now, so boot has nothing
-  // left to do: falling through would replace it with the paste view and look
-  // exactly like the paste having been ignored.
-  if (current) return;
+  // slowest. Either outcome of that race already has something on screen that
+  // boot must not disturb: a `jsonapi` paste has rendered and set `current`,
+  // and anything else has shown the shape-offer banner and set `pendingOffer`
+  // instead — `showView("paste")` below unconditionally clears a pending offer
+  // (see `showView`'s own comment), so missing this second case would silently
+  // wipe a banner the user is looking at, with no document and no error to
+  // explain why it vanished.
+  if (current || pendingOffer) return;
 
   showView("paste");
 
