@@ -26,8 +26,11 @@ export const READ_DESCRIPTION = [
   "Fetch and decrypt a jsonapi-lens share link given its id and secret, and return the document " +
     "text exactly as it was shared — or, for a link that carries several documents (a bundle), " +
     "every document in it. No parsing, indexing or reshaping happens here.",
-  "The secret is the same 64-character hex string the link was created with; it is not recoverable " +
-    "from the id alone. A wrong secret and a corrupted or tampered blob fail identically and " +
-    "deliberately — this tool cannot tell you which one happened, because telling them apart would " +
-    "help someone guess the secret.",
+  "Use the secret exactly as it appears in the link — `<origin>/d/<id>:<secret>` — whatever its " +
+    "shape. Most links were minted by jsonapi-lens's own Share button, whose secret is 10 " +
+    "mixed-case letters and digits; never generate a secret to call this tool, and never assume a " +
+    "fixed length or alphabet — it is not recoverable from the id alone, only from the link " +
+    "itself. A wrong secret and a corrupted or tampered blob fail identically and deliberately — " +
+    "this tool cannot tell you which one happened, because telling them apart would help someone " +
+    "guess the secret.",
 ].join("\n\n");
