@@ -112,12 +112,28 @@ function isBareIdKey(key: string): boolean {
   return BARE_ID_KEYS.has(normalizeKey(key));
 }
 
-/** The container name a compound `*_id`/`*Id`/`*_ids`/`*Ids` key implies, or `null` if it is not that shape. */
+/**
+ * The container name a compound `user_id`/`user-id`/`userId`/`userID` key
+ * implies (plural too — `user_ids`/`userIds`/`userIDs`), or `null` if it is
+ * not that shape.
+ *
+ * Tested against the key **as written**, before any normalising — a compound
+ * reference needs a separator (`_`/`-`) or a case boundary (a lower-case
+ * letter or digit immediately before `Id`/`ID`) right in front of the
+ * suffix. Stripping `_`/`-` first, the way a bare key is matched, destroys
+ * exactly the evidence this test needs: `valid`, `is_valid`, `paid` and
+ * `grid` all end in the letters `id` once normalised, but none of them has a
+ * separator or a case change in front of it, so none of them is a reference —
+ * `valid` stays an ordinary value instead of linking into a `vals`
+ * collection, and `is_valid` stays out of the dangling panel instead of
+ * appearing there as a phantom scope `isval`.
+ */
 function referenceContainerName(key: string): string | null {
   if (isBareIdKey(key)) return null;
-  const normalized = normalizeKey(key);
-  if (normalized.length > 3 && normalized.endsWith("ids")) return normalized.slice(0, -3);
-  if (normalized.length > 2 && normalized.endsWith("id")) return normalized.slice(0, -2);
+  const snake = /^(.*)[_-]ids?$/i.exec(key);
+  if (snake && snake[1]!.length > 0) return normalizeKey(snake[1]!);
+  const camel = /^(.*[a-z0-9])(?:Id|ID)s?$/.exec(key);
+  if (camel && camel[1]!.length > 0) return normalizeKey(camel[1]!);
   return null;
 }
 
@@ -447,8 +463,12 @@ function buildIdentities(occurrences: Occurrence[]): {
       continue;
     }
 
-    if (definitionTargets.length === 1 && referenceOccurrences.length === 0) {
-      // A lone, unreferenced id. Not an identity — an ordinary value.
+    if (referenceOccurrences.length === 0) {
+      // Nothing references this (scope, value) at all — not an identity, an
+      // ordinary value, however many definitions share it. A repeated but
+      // unreferenced code (three `products` all coded "USD") is not an
+      // ambiguity to report; it only becomes one once something actually
+      // points at it and has to pick which definition is meant.
       continue;
     }
 

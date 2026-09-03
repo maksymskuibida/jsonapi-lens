@@ -159,6 +159,108 @@ describe("buildJsonIndex — identity: the container-name rule", () => {
   });
 });
 
+describe("buildJsonIndex — identity: a compound reference key needs a real boundary", () => {
+  // Round 2 review, blocker: `referenceContainerName` used to normalise the
+  // key (stripping `_`/`-`) *before* testing the `id` suffix, which destroys
+  // the only evidence that tells `user_id` apart from an ordinary word that
+  // happens to end in the letters "id". `valid`, `is_valid`, `paid`, `grid`,
+  // `void`, `android`, `hybrid`, `fluid`, `rapid` and `solid` are all real
+  // payload keys this must never treat as a reference.
+
+  it("does not read an ordinary key ending in the letters id as a val_id-shaped reference", () => {
+    const index = buildJsonIndex(
+      { valid: 1, vals: [{ id: 1, x: 1 }, { id: 2, x: 2 }] } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    // The old bug linked `/valid` straight to `/vals/0` — a wrong link, not
+    // merely a miss, which is exactly what the spec calls worse than none.
+    expect(index.referenceAt.get("/valid")).toBeUndefined();
+    expect(index.dangling).toEqual([]);
+  });
+
+  it("does not turn is_valid into a dangling reference with a mangled scope", () => {
+    const index = buildJsonIndex({ is_valid: 1, other: 1 } as JsonValue, "plain", {
+      kind: "plain-object",
+    });
+    // The old bug put a phantom `isval` chip in the unresolved-pointers
+    // panel for this ordinary, reference-free document.
+    expect(index.referenceAt.size).toBe(0);
+    expect(index.dangling).toEqual([]);
+  });
+
+  it("still recognises user_id, user-id, userId and userIDs as compound references", () => {
+    const index = buildJsonIndex(
+      {
+        users: [{ id: 1, name: "a" }],
+        a: [{ user_id: 1 }],
+        b: [{ "user-id": 1 }],
+        c: [{ userId: 1 }],
+        d: [{ userIDs: [1] }],
+      } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/a/0/user_id")).toMatchObject({ resolution: "resolved" });
+    expect(index.referenceAt.get("/b/0/user-id")).toMatchObject({ resolution: "resolved" });
+    expect(index.referenceAt.get("/c/0/userId")).toMatchObject({ resolution: "resolved" });
+    expect(index.referenceAt.get("/d/0/userIDs/0")).toMatchObject({ resolution: "resolved" });
+  });
+
+  it("still resolves a bare id-like key regardless of separator or case, unaffected by the boundary check", () => {
+    // The boundary check only changes *compound*-key detection; a bare key
+    // is intercepted earlier by `isBareIdKey` and must keep working exactly
+    // as it always did.
+    const index = buildJsonIndex(
+      { widgets: [{ _id: "w-1" }], refs: [{ widget_id: "w-1" }] } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/refs/0/widget_id")).toMatchObject({ targetPointer: "/widgets/0" });
+  });
+});
+
+describe("buildJsonIndex — identity: no references means no identity, however many definitions", () => {
+  // Round 2 review, blocker: the "a lone, unreferenced id is not an
+  // identity" rule only fired when there was *exactly one* unreferenced
+  // definition — two or more fell through to the ambiguity branch, so an
+  // ordinary repeated value with nothing pointing at it anywhere (three
+  // products all coded "USD") was reported as an ambiguous identity.
+
+  it("does not report ambiguous for a repeated bare id-like value with zero references anywhere", () => {
+    const index = buildJsonIndex(
+      {
+        products: [
+          { code: "USD", price: 1 },
+          { code: "USD", price: 2 },
+          { code: "USD", price: 3 },
+        ],
+      } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.identities).toEqual([]);
+    expect(index.counts.ambiguous).toBe(0);
+    expect(index.definitionAt.size).toBe(0);
+  });
+
+  it("still reports ambiguous once something actually references the repeated value", () => {
+    const index = buildJsonIndex(
+      {
+        products: [{ id: "USD", price: 1 }, { id: "USD", price: 2 }],
+        orders: [{ product_id: "USD" }],
+      } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.counts.ambiguous).toBe(1);
+    expect(index.referenceAt.get("/orders/0/product_id")).toEqual({
+      resolution: "ambiguous",
+      candidates: 2,
+    });
+  });
+});
+
 describe("buildJsonIndex — identity: global (UUID/ULID/ObjectId) matching", () => {
   const UUID_A = "550e8400-e29b-41d4-a716-446655440000";
   const UUID_B = "660e8400-e29b-41d4-a716-446655440001";
@@ -304,9 +406,18 @@ describe("buildJsonIndex — counts", () => {
 });
 
 describe("buildJsonIndex — scale and depth", () => {
-  it("indexes a 200-level-deep document without a stack overflow", () => {
+  it("indexes a document 50,000 levels deep without a stack overflow", () => {
+    // Round 2 review, suggestion: 250 levels does not discriminate an
+    // iterative walk from a recursive one — a recursive implementation
+    // clears 250 easily, so the test was not guarding the property it
+    // exists for. 50,000 does not fit any JS engine's call stack, so this
+    // only passes if the walk is genuinely a loop over an explicit stack,
+    // not the call stack. Built as a JS object graph via a loop, never
+    // through `JSON.stringify`/`JSON.parse` — `JSON.stringify` is itself
+    // recursive and throws well before 50,000 levels, which would make this
+    // test fail for a reason that has nothing to do with `buildJsonIndex`.
     let value: JsonValue = { id: 1, marker: "bottom" };
-    for (let i = 0; i < 250; i++) value = { child: value };
+    for (let i = 0; i < 50_000; i++) value = { child: value };
 
     expect(() => buildJsonIndex(value, "plain", { kind: "plain-object" })).not.toThrow();
   });
