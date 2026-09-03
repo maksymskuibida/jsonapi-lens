@@ -93,11 +93,11 @@ sealed: `{ kind: "document", label, savedAt, text, exchange? }` for a single doc
 first. No parsing, indexing or validation of the text happens here; that is what the browser is for.
 
 **`secret` here is not held to `share`'s 64-hex rule.** Most links `read` opens will have come from
-the browser's own Share button, whose secret is 10 mixed-case characters, nothing like 64 lowercase
-hex — so `read` accepts anything the wire format itself can carry (case-sensitive, never
-normalised), and only refuses something malformed or truncated. A `read` refusal never suggests
-running `openssl rand -hex 32`; there is nothing to generate on this path, only a link to check was
-copied in full.
+the browser's own Share button, whose secret is 10 characters of mixed-case letters, digits, hyphens
+and underscores, nothing like 64 lowercase hex — so `read` accepts anything the wire format itself
+can carry (case-sensitive, never normalised), and only refuses something malformed or truncated. A
+`read` refusal never suggests running `openssl rand -hex 32`; there is nothing to generate on this
+path, only a link to check was copied in full.
 
 A wrong secret and a corrupted or tampered blob **fail identically**. This is deliberate — telling
 them apart would hand an attacker a way to test guesses.

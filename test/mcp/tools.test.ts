@@ -110,9 +110,10 @@ describe("registered tool descriptions", () => {
     // B1 (round 2): read's registered description used to say "the secret is
     // the same 64-character hex string the link was created with" — true of
     // what share mints, false of what a real browser Share-button link
-    // carries (10 mixed-case characters). A model handed a real link would
-    // read that sentence, see the secret doesn't match, and decline to call
-    // the tool at all — the exact failure this test now guards against.
+    // carries (10 characters of mixed-case letters, digits, hyphens and
+    // underscores). A model handed a real link would read that sentence,
+    // see the secret doesn't match, and decline to call the tool at all —
+    // the exact failure this test now guards against.
     const client = await connectedClient(createStubBackend(ORIGIN));
     const { tools } = await client.listTools();
     const read = tools.find((t) => t.name === "read");
