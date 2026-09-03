@@ -5,7 +5,8 @@ import { groupDomId, groupHref, nodeHref, resourceKey, typeSigil } from "./ident
 import { GLOBAL_IDENTITY_SCOPE } from "./json-index.js";
 import { chip, groupRowsHtml } from "./render-resource.js";
 import { renderObjectBlock } from "./render-value.js";
-import type { DocumentIndex, JsonApiError, JsonIndex, TypeGroup } from "./types.js";
+import type { LibraryEntry } from "./store.js";
+import type { DocumentIndex, JsonApiError, JsonIndex, Lens, TypeGroup } from "./types.js";
 
 /**
  * Above this many resources, attribute detail is built on expand rather than
@@ -164,6 +165,41 @@ export function railEntriesForCollections(index: JsonIndex): RailEntry[] {
       href: nodeHref(collection.pointer),
       primary: false,
     }));
+}
+
+/**
+ * The three summary fields a `LibraryEntry` row shows, computed from
+ * whichever `Lens` is open. `store.ts` only ever serialises these — it does
+ * not interpret them — so widening what feeds them lives here rather than in
+ * a schema change there; see `docs/STATUS.md` §1a for why that split matters
+ * this wave. Pure, like `railEntriesForGroups`/`railEntriesForCollections`
+ * above — which is what lets it be tested directly, rather than only through
+ * `parse.ts#readAny`'s determinism test as a proxy for "the round trip
+ * produces a sensible row".
+ */
+export function librarySummary(lens: Lens): Pick<LibraryEntry, "resources" | "types" | "shape"> {
+  if (lens.kind === "jsonapi") {
+    const index = lens.index;
+    return {
+      resources: index.counts.total,
+      types: index.groups.length,
+      shape: index.primaryIsNull
+        ? "data: null"
+        : index.errors.length
+          ? `errors[${index.errors.length}]`
+          : index.primary.length === 1
+            ? "data{1}"
+            : `data[${index.primary.length}]`,
+    };
+  }
+
+  const index = lens.index;
+  const collections = index.collections.filter((c) => c.topLevel).length;
+  return {
+    resources: index.counts.total,
+    types: collections,
+    shape: collections > 0 ? `${index.shape}[${collections}]` : index.shape,
+  };
 }
 
 /* ------------------------------------------------------------------ *
