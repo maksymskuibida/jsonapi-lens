@@ -334,6 +334,22 @@
               <p class="paste__error-where" id="error-where" hidden></p>
             </div>
 
+            <!-- Shown when the pasted text is valid JSON but not JSON:API —
+                 the branch `detectShape` replaces the hard refusal with. A
+                 document that *is* JSON:API never shows this. -->
+            <div class="shape-offer" id="shape-offer" hidden role="status">
+              <p class="shape-offer__headline" id="shape-offer-headline"></p>
+              <p class="shape-offer__hint" id="shape-offer-hint"></p>
+              <div class="shape-offer__actions">
+                <button class="btn btn--primary" type="button" id="shape-offer-plain">
+                  Read as plain JSON
+                </button>
+                <button class="btn" type="button" id="shape-offer-jsonapi">
+                  Read as JSON:API anyway
+                </button>
+              </div>
+            </div>
+
             <div class="samples">
               <span class="samples__label" id="samples-label">Or try</span>
               <div class="samples__list">

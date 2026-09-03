@@ -124,3 +124,73 @@ needs to change unless it starts reading a specific field off it — none of T5'
 Waiting for T2 to land before starting T5 — rejected outright, since it defeats the point of running
 T1 and T5 as a wave. `docs/STATUS.md` §1a's dependency graph (`T5 → {T2, T6, T7}`) requires T5 to ship
 first, and this module is what makes that possible without T5 guessing at T2's design.
+
+---
+
+## D4 · Identity inference is scoped by container name, and would rather miss a link than mint a wrong one
+
+**Date:** 2026-09-03 · **Settles:** what makes a repeated value in plain JSON "the same identity",
+for `src/json-index.ts` and for any later task that reads or extends it (T2's request-scoped
+anchors, T3/T4 reading the model T2 builds on this one)
+
+### Why this is load-bearing
+
+A generic tree view can show that `42` appears in six places; it cannot tell you whether those six
+`42`s mean the same thing. JSON:API answers this by declaring `{type, id}` explicitly. Plain JSON
+never does, so this tool has to infer it — and an inferred link that is wrong is actively worse than
+one that never appears, because a JSON:API-trained eye reads *any* rendered link as a claim the tool
+is making, not a guess. The rule that follows exists to keep every rendered link a claim this tool
+can actually stand behind.
+
+### The rule
+
+A candidate identifier is a scalar at a **bare** id-like key (`id`, `uuid`, `guid`, `key`, `code`,
+`ref`, `slug`, matched case- and separator-insensitively), a scalar at a **compound** key naming a
+container (`user_id`, `fooId`, the plural `order_ids`/`barIds` applied to each element of an array),
+or any string anywhere shaped like a UUID, ULID or 24-hex-character ObjectId.
+
+- A bare-key occurrence is a **definition**, scoped to the container name of the object it sits on —
+  the last non-index segment of *that object's* pointer, not the id field's own pointer. Clicking a
+  reference lands on the object, not on its `id` attribute.
+- A compound-key occurrence is a **reference**, scoped to the name the key implies. Both a
+  definition's and a reference's scope are reduced through the same `canonicalScope` before
+  comparison, which is what lets `user_id` find a `users` collection — see that function's own
+  comment for the one non-obvious rule it needs (`pages → page` without breaking `boxes → box`) and
+  the narrower class it still gets wrong (`house`, `response`).
+- A UUID/ULID/ObjectId match **ignores scope entirely** and matches on value alone, because those
+  formats are unique by construction. This is the one case where matching is *unconditional* — it
+  wins even when a compound key would otherwise imply a different scope, because the format itself
+  is already enough evidence.
+- **Two or more definitions sharing a scope and value make every reference to them ambiguous.**
+  Never resolved by picking the first, the most recently defined, or the one earlier in document
+  order — an ambiguous identity is shown, counted, and left unlinked.
+- **A reference with no matching definition is dangling**, full stop, regardless of how many times
+  it occurs — it feeds the same panel a JSON:API dangling pointer already does.
+- A lone, unreferenced value at a bare id-like key is not treated as an identity at all. It is an
+  ordinary attribute that happens to be named `id`; nothing about it is inferred.
+
+### Why scoping by container name, and not something looser
+
+A looser rule — any repeated value anywhere is "the same identity" — was considered and rejected: a
+bare `1` recurs constantly across unrelated objects in real payloads (page numbers, boolean-ish
+flags, the first row of every table), and treating every recurrence as one identity would produce
+links between things that have nothing to do with each other. Scoping by container name is what
+keeps `orders[].id: 1` and `users[].id: 1` from ever being confused, without needing a person to
+disambiguate anything by hand.
+
+### What this means for later tasks
+
+T2's request-scoped anchors (`q_`, `b_`, `d_` in D1, above) sit beside this graph rather than
+inside it — a request body's own plain-JSON identities are a
+separate `JsonIndex`, not merged into the response's. Cross-document identity (matching an id
+between a request and its response, or between two separately pasted documents) is explicitly out
+of scope for T1 and is not something this decision authorises; if a later task wants it, that is a
+new decision, not an extension of this one read loosely.
+
+### Rejected alternative
+
+Matching greedily — any two equal scalars are the same identity regardless of key or scope — needs
+no container-name logic at all and would catch more real links. It was rejected for the reason
+above: on a real payload it produces enough wrong links (via nothing more than two unrelated `1`s)
+that the feature would train people to distrust every link it draws, which defeats the point of
+drawing any.
