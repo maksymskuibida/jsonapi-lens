@@ -36,7 +36,15 @@ export type NestedAnnotation =
 export type ScalarAnnotation =
   | { kind: "resolved"; href: string }
   | { kind: "ambiguous"; count: number }
-  | { kind: "dangling" };
+  | { kind: "dangling" }
+  /**
+   * A definition exists, but past whatever cap the render layer put on how
+   * much of its collection gets built — `render-json.ts`'s `EAGER_BODY_LIMIT`
+   * today. Text, like `ambiguous`/`dangling`, rather than a link with no
+   * target: "a wrong link is worse than none" applies just as much to a link
+   * that goes nowhere as to one that goes to the wrong place.
+   */
+  | { kind: "unrendered" };
 
 /** A single scalar, typed so the shape of the data is legible at a glance. */
 function renderScalar(value: JsonValue): HTMLElement {
@@ -110,6 +118,12 @@ function renderAnnotatedScalar(value: JsonValue, annotation: ScalarAnnotation): 
       });
     case "dangling":
       return el("span", { class: "v v--ref v--ref-dangling", title: t().identity.danglingTitle, text });
+    case "unrendered":
+      return el("span", {
+        class: "v v--ref v--ref-unrendered",
+        title: t().identity.unrenderedTitle,
+        text,
+      });
   }
 }
 

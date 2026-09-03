@@ -35,13 +35,39 @@ import { el } from "./dom.js";
 import { t } from "./i18n/index.js";
 import { nodeDomId, nodeHref } from "./ident.js";
 import { EAGER_BODY_LIMIT } from "./render-document.js";
-import { resolve as resolvePointer } from "./pointer.js";
+import { join as pointerJoin, parse as parsePointer, resolve as resolvePointer } from "./pointer.js";
 import { renderObjectBlock, renderTopLevelValue } from "./render-value.js";
 import type { NestedAnnotation, ScalarAnnotation, TreeAnnotations } from "./render-value.js";
 import type { JsonCollection, JsonIndex, JsonObject, JsonValue } from "./types.js";
 
 function isPlainObject(value: JsonValue): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The member index of `pointer` under whichever top-level collection encloses
+ * it — checking `pointer` itself and every ancestor, since a definition can
+ * sit several levels inside one member (`{users: [{profile: {id: 4}}, …]}`
+ * defines at `/users/0/profile`, not at `/users/0`) — or `null` when nothing
+ * about `pointer` is inside a top-level collection at all.
+ */
+function topLevelMemberIndex(
+  pointer: string,
+  topLevelByPointer: Map<string, JsonCollection>,
+): number | null {
+  let prefix = "";
+  for (const segment of parsePointer(pointer)) {
+    if (topLevelByPointer.has(prefix)) {
+      const index = Number(segment);
+      return Number.isInteger(index) ? index : null;
+    }
+    // `pointerJoin` re-escapes `~`/`/` inside `segment` — `parsePointer` above
+    // already undid that escaping, so rebuilding the prefix without it would
+    // stop matching a real collection pointer the moment a key contains
+    // either character.
+    prefix = pointerJoin(prefix, segment);
+  }
+  return null;
 }
 
 /**
@@ -62,6 +88,21 @@ export function buildAnnotations(index: JsonIndex): TreeAnnotations {
   }
   for (const pointer of index.definitionAt.keys()) anchorPointers.add(pointer);
 
+  // A reference whose target sits past `EAGER_BODY_LIMIT` inside its
+  // top-level collection has nothing in the DOM to land on: `renderJsonGroup`
+  // only builds a collection's first `EAGER_BODY_LIMIT` members, and neither
+  // that member's own row nor anything nested inside it exists past the cut.
+  // Linking there anyway would be exactly the dead anchor the spec's "a
+  // reference … is an `<a>` whose target element exists in the DOM" forbids,
+  // so such a reference renders as `unrendered` text instead — the identity
+  // graph itself still calls it `resolved` (see `types.ts`), because it is;
+  // this is a render-time seam, not an identity fact, which is why the check
+  // lives here rather than in `json-index.ts`.
+  function targetIsRendered(pointer: string): boolean {
+    const memberIndex = topLevelMemberIndex(pointer, topLevelByPointer);
+    return memberIndex === null || memberIndex < EAGER_BODY_LIMIT;
+  }
+
   return {
     nestedAt(pointer: string): NestedAnnotation | null {
       const collection = topLevelByPointer.get(pointer);
@@ -80,7 +121,9 @@ export function buildAnnotations(index: JsonIndex): TreeAnnotations {
       if (!reference) return null;
       switch (reference.resolution) {
         case "resolved":
-          return { kind: "resolved", href: nodeHref(reference.targetPointer) };
+          return targetIsRendered(reference.targetPointer)
+            ? { kind: "resolved", href: nodeHref(reference.targetPointer) }
+            : { kind: "unrendered" };
         case "ambiguous":
           return { kind: "ambiguous", count: reference.candidates };
         case "dangling":

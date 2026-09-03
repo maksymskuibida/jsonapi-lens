@@ -3416,8 +3416,13 @@ body.has-modal {
   text-decoration-style: dotted;
 }
 
+/* Three reasons a value is text instead of a link: more than one candidate
+   definition, no definition at all, or a definition that exists but was cut
+   from the render (a collection past `EAGER_BODY_LIMIT`) — the `title`
+   attribute is what tells them apart, not colour. */
 .v--ref-ambiguous,
-.v--ref-dangling {
+.v--ref-dangling,
+.v--ref-unrendered {
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   color: var(--absent-text);

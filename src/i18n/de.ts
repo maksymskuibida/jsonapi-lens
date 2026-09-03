@@ -395,6 +395,8 @@ export const de: Messages = {
     ambiguousTitle: (count) =>
       `${f.n(count)} mögliche ${f.plural(count, { one: "Definition", other: "Definitionen" })} für diesen Wert — nicht verlinkt, weil unklar ist, welche gemeint ist`,
     danglingTitle: "Für diesen Wert wurde keine Definition im Dokument gefunden",
+    unrenderedTitle:
+      "Für diesen Wert gibt es eine Definition im Dokument, aber die Sammlung ist zu groß, um sie hier anzuzeigen",
     global: "Kennung",
   },
 

@@ -447,6 +447,8 @@ export const en = {
     ambiguousTitle: (count: number) =>
       `${f.n(count)} possible ${f.plural(count, { one: "definition", other: "definitions" })} for this value — not linked, because it is not clear which one is meant`,
     danglingTitle: "No definition for this value was found in the document",
+    unrenderedTitle:
+      "This value is defined further down, but the collection is too large to show it here",
     /** Stands in for the internal global-identity scope when a UUID/ULID/ObjectId match has no container name to show. */
     global: "identifier",
   },
