@@ -257,6 +257,17 @@ anything else that handles the link — unlike a `#fragment`, which browsers nev
 strips the secret from the address bar as soon as a link opens, and accepts `/d/<id>#<secret>` if you
 prefer the fragment form, but links are minted in the path form.
 
+## MCP server
+
+An assistant can mint and read share links without a browser: [`mcp/`](mcp/) is a stdio
+[MCP](https://modelcontextprotocol.io) server exposing `share` and `read`, built on the exact same
+[`src/crypto.ts`](src/crypto.ts) the browser uses — never a second implementation, so a link minted
+by one side always opens on the other. It generates no secret itself: minting a link with `share`
+needs a 64-character hex secret from `openssl rand -hex 32`, refusing anything else rather than
+guessing; opening one with `read` accepts whatever the link format itself can carry, since most
+links it opens were minted by the browser's own Share button, not by this server. See
+[`mcp/README.md`](mcp/README.md) for how to register it and what it can and cannot see.
+
 ## Findability
 
 The site is one HTML file and one bundle, which means everything a crawler is told has to be told
