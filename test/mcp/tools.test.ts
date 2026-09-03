@@ -135,6 +135,32 @@ describe("registered tool descriptions", () => {
     expect(description.toLowerCase()).toMatch(/mixed-case/);
     expect(description.toLowerCase()).toMatch(/not recoverable/);
   });
+
+  it("read's description names the full secret alphabet, hyphen and underscore included", async () => {
+    // Approval-round finding, the same failure shape as B1r in miniature:
+    // this description used to say the Share-button secret was "10
+    // mixed-case letters and digits" — true of only 72.9% of real
+    // generateSecret() outputs. generateSecret()'s actual alphabet
+    // (src/crypto.ts's SECRET_ALPHABET) also draws from `-` and `_`, which
+    // land in about 27% of real 10-character secrets (62 of 64 alphabet
+    // characters are letters/digits, so P(a 10-char secret has none of the
+    // other 2) = (62/64)^10 ≈ 72.8% — matching the empirical figure). A
+    // model told "letters and digits" and handed a real secret containing
+    // `-`/`_` could reasonably treat it as mistyped and decline or "correct"
+    // it — on roughly a quarter of every link this tool will ever be asked
+    // to open. Pinned so the character class cannot silently drop out of
+    // the description again the way it did here.
+    const client = await connectedClient(createStubBackend(ORIGIN));
+    const { tools } = await client.listTools();
+    const read = tools.find((t) => t.name === "read");
+    const description = (read!.description ?? "").toLowerCase();
+
+    expect(description).toMatch(/hyphen/);
+    expect(description).toMatch(/underscore/);
+    // The mixed-case claim is still true and still worth stating — this is
+    // additive, not a replacement.
+    expect(description).toMatch(/mixed-case/);
+  });
 });
 
 describe("share", () => {

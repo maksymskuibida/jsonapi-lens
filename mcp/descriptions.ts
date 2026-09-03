@@ -28,9 +28,10 @@ export const READ_DESCRIPTION = [
     "every document in it. No parsing, indexing or reshaping happens here.",
   "Use the secret exactly as it appears in the link — `<origin>/d/<id>:<secret>` — whatever its " +
     "shape. Most links were minted by jsonapi-lens's own Share button, whose secret is 10 " +
-    "mixed-case letters and digits; never generate a secret to call this tool, and never assume a " +
-    "fixed length or alphabet — it is not recoverable from the id alone, only from the link " +
-    "itself. A wrong secret and a corrupted or tampered blob fail identically and deliberately — " +
-    "this tool cannot tell you which one happened, because telling them apart would help someone " +
-    "guess the secret.",
+    "characters of mixed-case letters, digits, hyphens and underscores — about a quarter of real " +
+    "secrets contain a `-` or `_`, so do not treat one as a typo or try to \"correct\" it; never " +
+    "generate a secret to call this tool, and never assume a fixed length or alphabet — it is not " +
+    "recoverable from the id alone, only from the link itself. A wrong secret and a corrupted or " +
+    "tampered blob fail identically and deliberately — this tool cannot tell you which one " +
+    "happened, because telling them apart would help someone guess the secret.",
 ].join("\n\n");
