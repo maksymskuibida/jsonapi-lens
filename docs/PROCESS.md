@@ -187,6 +187,23 @@ Each with its consequence, because a rule without one gets applied only to the c
   tab, and after a deploy run it again with `--url`.
 - **Header comments are design rationale, not decoration.** A change that contradicts one is either
   wrong or needs the comment updated in the same diff.
+- **A bare `grep` reporting no match is not evidence of absence.** Three separate ways this release
+  produced a false "I searched and found nothing":
+  - **A NUL byte in the file makes macOS `grep` silently report zero matches.** Confirmed here:
+    on a file containing one, `grep -c pattern` prints *nothing* and exits 1, while `grep -ac`
+    finds it. `git grep` and ripgrep both see through it; plain `grep` does not, and it does not
+    warn. A stray NUL was found in `test/browser/nav-scenarios.js` for exactly this reason.
+    T6's implementer reports that writing the six characters of a `\u0000` escape into a
+    Write/Edit parameter can land a real NUL in the file — **I could not reproduce that cleanly and
+    am recording it as reported rather than established**, but scan for NUL before committing a
+    file you wrote by hand.
+  - **A worktree grep cannot see commit messages, and `git log -S` cannot either** — it searches
+    content changes, not message text. `git log --all --grep` is the third tool needed. A secret
+    hid in a commit message from both of the first two.
+  - **The same false belief written independently in several places** is not found by fixing one
+    instance. T7's wrong claim about a secret's alphabet appeared in five places because each was
+    written from the belief rather than copied; only a sweep for the belief closed it.
+
 - **A gate is never weakened to get green.** A skipped test, a widened exclusion, a cast past a
   type error at a boundary: blocking defects, not fixes.
 
