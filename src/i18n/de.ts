@@ -600,4 +600,26 @@ export const de: Messages = {
     storedDocument: "gespeichertes Dokument",
     sharedDocument: (id) => `geteiltes Dokument ${f.n(id)}`,
   },
+
+  bundleUi: {
+    shareButton: "Teilen",
+    cancel: "Abbrechen",
+    tickToShare: "Wählen Sie mindestens ein Dokument aus, um einen Link zu erstellen.",
+    selectRow: (label) => `${label} auswählen`,
+    selectionMissing: (labels) => `Nicht mehr gespeichert, daher nicht enthalten: ${labels}`,
+    shareSubtitle: (n, size) =>
+      `${f.n(n)} ${f.plural(n, { one: "Dokument", other: "Dokumente" })} · ${size}`,
+
+    importTitle: "Geteilte Dokumente importieren",
+    importCount: (n) =>
+      `${f.n(n)} ${f.plural(n, { one: "Dokument", other: "Dokumente" })} in diesem Link`,
+    alreadySaved: "Bereits gespeichert",
+    importSelected: "Ausgewählte importieren",
+    tickToImport: "Wählen Sie mindestens ein Dokument zum Importieren aus.",
+    open: "Öffnen",
+    imported: (saved, total) =>
+      `${f.n(saved)} von ${f.n(total)} ${total === 1 ? "Dokument" : "Dokumenten"} gespeichert.`,
+    importFailed: "Es konnte nichts gespeichert werden. Möglicherweise blockiert Ihr Browser den Speicher.",
+    done: "Fertig",
+  },
 };

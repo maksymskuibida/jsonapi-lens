@@ -21,6 +21,7 @@ import { legal } from "./legal/index.js";
 import { domId, parseDomId, resourceKey } from "./ident.js";
 import { openJumpModal } from "./jump.js";
 import { openLibraryModal, openRawModal, openSaveModal, openShortcutsModal } from "./panels.js";
+import { isWellFormedBundlePayload, renderBundleImportView } from "./bundle.js";
 import { DocumentError, readDocument } from "./parse.js";
 import { resolve as resolvePointer } from "./pointer.js";
 import {
@@ -39,7 +40,7 @@ import type { LegalRoute, Route } from "./router.js";
 import { applyPageMeta, applyRouteMeta, documentMeta, metaForRoute } from "./seo.js";
 import { renderLegalPage } from "./views/legal.js";
 import { fetchShare, openShareModal } from "./share.js";
-import { ShareError } from "./crypto.js";
+import { isBundlePayload, ShareError } from "./crypto.js";
 import {
   clearDocument,
   countLibrary,
@@ -105,6 +106,13 @@ const libraryEl = need<HTMLButtonElement>("open-library");
 const libraryCountEl = need("library-count");
 const legalEl = need("legal");
 const languageEl = need<HTMLSelectElement>("language");
+
+// Reached only when a share link decrypts to a version-3 bundle. Created here
+// rather than as static markup in index.html, unlike every sibling view,
+// because that keeps this hook to main.ts down to what is below: no new
+// element for T1's concurrent rewrite of this file to carry forward.
+const bundleImportEl = el("div", { hidden: true });
+need("view").append(bundleImportEl);
 
 /* ------------------------------------------------------------- language --- */
 
@@ -172,6 +180,61 @@ interface Loaded {
 let current: Loaded | null = null;
 let soloType: string | null = null;
 
+/**
+ * Is `/view`'s current history entry a bundle-import entry? Review finding
+ * (PR #5, S3): a plain sticky module flag — set once on a bundle load, never
+ * cleared — leaked into a *later, unrelated* navigation: bundle -> Cancel ->
+ * paste -> paste a document -> New document -> Back showed the stale import
+ * view where a document used to be, because the flag had no notion of which
+ * history entry it was ever about.
+ *
+ * "Was this /view entry a bundle?" is a property of the **entry**, not of
+ * the module, so it is answered from `history.state` — stamped once, right
+ * after `loadSharedDocument` replaces the URL — exactly the way
+ * `EntryState` already answers "what was this entry scrolled to?" a few
+ * hundred lines up. A `history.pushState`/`replaceState` elsewhere in this
+ * file that does not spread the bundle marker forward (every other one
+ * passes `null` or a fresh `EntryState`) is what un-marks an entry; nothing
+ * has to remember to clear it by hand.
+ *
+ * The second half of the check — `bundleImportEl.hasChildNodes()` — is what
+ * keeps a *cold* reload of a bundle-marked entry from showing a blank
+ * container: the secret is gone from the URL by the time this state exists
+ * (see `loadSharedDocument`), so a reload cannot re-fetch or re-render the
+ * bundle regardless of what `history.state` still claims, the same way
+ * `current` naturally resets to `null` on reload. Content only ever reaches
+ * `bundleImportEl` via a live `renderBundleImportView` call in this same
+ * page load, so an empty element means exactly "not actually showing".
+ *
+ * PR #5 review round 2, S10 — **the marker is never cleared, so this rests
+ * on an invariant rather than an impossibility.** A `/` entry can carry
+ * `bundle: true` for the rest of the session; that is harmless only because
+ * (a) this function is read *only* from `applyRoute`'s `view` branch, and
+ * (b) nothing replaces a marked entry with a document — every call to `load`
+ * that shows a different one pushes rather than replaces, which is what
+ * un-marks it (`LoadOptions.push`'s own comment, a few hundred lines down,
+ * is where that is enforced and where it would need enforcing again). Break
+ * either half and the S3 leak this whole check exists to fix comes back
+ * through a different door: a marked entry that later shows an ordinary
+ * document via `replace`, then loses `current` (`New document`), then Back,
+ * reports `true` here with `bundleImportEl` still holding whatever bundle
+ * was last rendered in this page load — `s27` would not catch it, since it
+ * never replaces a marked entry.
+ */
+interface BundleEntryState {
+  bundle?: true;
+}
+
+function isBundleEntryShowing(): boolean {
+  const state = history.state as BundleEntryState | null;
+  return state?.bundle === true && bundleImportEl.hasChildNodes();
+}
+
+/** Mark the current history entry as a bundle-import entry, preserving whatever else it already carries. */
+function markBundleEntry(): void {
+  history.replaceState({ ...(history.state as object | null), bundle: true }, "");
+}
+
 /* ---------------------------------------------------------------- theme --- */
 
 type Theme = "auto" | "light" | "dark";
@@ -228,11 +291,12 @@ async function refreshLibraryCount(): Promise<void> {
 
 /* ----------------------------------------------------------- view state --- */
 
-function showView(which: "boot" | "paste" | "doc" | "legal", bootMessage?: string): void {
+function showView(which: "boot" | "paste" | "doc" | "legal" | "bundle", bootMessage?: string): void {
   bootEl.hidden = which !== "boot";
   pasteEl.hidden = which !== "paste";
   docEl.hidden = which !== "doc";
   legalEl.hidden = which !== "legal";
+  bundleImportEl.hidden = which !== "bundle";
   newDocEl.hidden = which !== "doc";
   topbarDocEl.hidden = which !== "doc";
   if (which === "boot") bootMessageEl.textContent = bootMessage ?? t().boot.reading;
@@ -1180,7 +1244,23 @@ document.addEventListener("click", (event) => {
 interface LoadOptions {
   /** Write to IndexedDB as the current document, and reset the fragment. */
   persist: boolean;
-  /** Push `/view` onto history rather than replacing the current entry. */
+  /**
+   * Push `/view` onto history rather than replacing the current entry.
+   *
+   * This is also the reason every user-facing call site below passes
+   * `push: true`, and it is load-bearing, not a style choice: `router.ts`'s
+   * `navigate` puts a fresh `null` state on a pushed entry but carries the
+   * *existing* state forward untouched on a replace, so replacing an entry
+   * `markBundleEntry` had marked (see `isBundleEntryShowing`, above the
+   * `load` this option belongs to) would leave that entry both bundle-marked
+   * and showing an ordinary document. Nothing here does that today — the one
+   * `persist: false` call omits `push` deliberately, but only ever runs
+   * after `isBundleEntryShowing` has already read that same entry as false —
+   * but a *new* call that loads a document by replacing rather than pushing
+   * would inherit `bundle: true` from whatever entry it replaces. Pass
+   * `push: true` for a new call site unless you have specifically checked
+   * this, the way the existing one did.
+   */
   push?: boolean;
 }
 
@@ -1441,15 +1521,58 @@ document.addEventListener("keydown", (event) => {
 
 /* --------------------------------------------------------------- routes --- */
 
-/** Load a document that arrived as a share link. */
+/**
+ * Load a document that arrived as a share link — or, since T6, a bundle of
+ * several. `fetchShare` hands back whichever the link decrypted to;
+ * `isBundlePayload` alone is *not* enough to trust `payload.documents`
+ * (PR #5 review, B1): it tests only `.kind`, so a version-2 blob crafted
+ * with an extra `kind: "bundle"` field passes both version-2 validation and
+ * this check while carrying no `documents` array at all.
+ * `isWellFormedBundlePayload` is the second, stricter check that catches
+ * exactly that mismatch, thrown as the same readable `ShareError` a
+ * genuinely corrupt bundle already produces — see `t().bundle.errors.corrupt`.
+ * Beyond that, everything a bundle does (the import list, duplicate
+ * detection, writing to the library) lives in `renderBundleImportView`,
+ * which this function now `await`s rather than fires and forgets, so *any*
+ * exception inside it — this one included — reaches the `catch` below
+ * instead of becoming an unhandled rejection behind a blank page.
+ */
 async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Promise<void> {
   showView("boot", t().boot.fetchingShare);
 
   try {
     const payload = await fetchShare(route.id, route.secret);
-    // Drop the key from the visible URL and from history before rendering, so
-    // it does not sit in the address bar or leak through a later Referer.
+    // Drop the key from the visible URL and from history before rendering
+    // either kind, so it does not sit in the address bar or leak through a
+    // later Referer.
     navigate(VIEW_PATH, { replace: true });
+
+    if (isBundlePayload(payload)) {
+      if (!isWellFormedBundlePayload(payload)) {
+        throw new ShareError(t().bundle.errors.corrupt.headline, t().bundle.errors.corrupt.hint);
+      }
+      // The import view is about to occupy /view in place of whatever this
+      // tab had open, so the `view` route's usual "is there a current
+      // document" check must not find a stale one on a later Back/Forward.
+      current = null;
+      markBundleEntry();
+      showView("bundle");
+      await renderBundleImportView(bundleImportEl, payload, {
+        onOpen: (entry) => {
+          void load(entry.text, entry.label, { persist: true, push: true });
+        },
+        onCancel: () => {
+          navigate(PASTE_PATH);
+          applyRouteMeta({ kind: "paste" });
+          showView("paste");
+          offerResume();
+          window.scrollTo(0, 0);
+        },
+        onChange: () => void refreshLibraryCount(),
+      });
+      return;
+    }
+
     await load(payload.text, payload.label || t().labels.sharedDocument(route.id), {
       persist: true,
     });
@@ -1489,6 +1612,16 @@ async function applyRoute(): Promise<void> {
     // Idempotent: traversing between fragments on /view must not re-render.
     if (current) {
       showView("doc");
+      return;
+    }
+    // A Back or Forward onto the bundle import view: its content is already
+    // rendered in `bundleImportEl` and merely hidden, exactly like every
+    // resource section underneath the document view, so showing it again is
+    // all a traversal needs. See `isBundleEntryShowing`'s own comment for why
+    // this is read from the history entry rather than a module flag, and why
+    // that is also what keeps a cold reload from showing an empty container.
+    if (isBundleEntryShowing()) {
+      showView("bundle");
       return;
     }
     const stored = await loadDocument();
