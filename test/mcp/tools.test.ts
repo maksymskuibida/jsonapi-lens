@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMcpServer } from "../../mcp/build-server.js";
 import { GENERATE_SECRET_COMMAND, LIFETIME_KEYS } from "../../mcp/validate.js";
-import { open } from "../../src/crypto.js";
+import { generateSecret, open, seal } from "../../src/crypto.js";
+import type { SharePayload } from "../../src/crypto.js";
 import { createStubBackend } from "./stub-backend.js";
 import type { StubBackend } from "./stub-backend.js";
 
@@ -459,18 +460,55 @@ describe("read", () => {
     expect(textOf(result)).toMatch(/version/i);
   });
 
-  for (const badSecret of ["short", "g".repeat(64), SECRET_A.toUpperCase()]) {
-    it(`refuses an unusable secret (${JSON.stringify(badSecret).slice(0, 20)}…) before any network call`, async () => {
+  // Deliberately NOT the same list `share` refuses: `read` accepts anything
+  // the wire format can produce (8-64 of [A-Za-z0-9_-]), so a share-only
+  // restriction like uppercase hex or a non-hex letter is not invalid here —
+  // that is the whole fix for B1. What is still invalid for `read` is
+  // outside the *format's* own range: too short, too long, or a character
+  // the format never allows at all.
+  for (const badSecret of ["short", "a".repeat(65), "", "has a space in it!!"]) {
+    it(`refuses a malformed secret (${JSON.stringify(badSecret).slice(0, 20)}…) before any network call, without suggesting openssl`, async () => {
       const backend = createStubBackend(ORIGIN);
       const client = await connectedClient(backend);
       const result = asToolResult(
         await client.callTool({ name: "read", arguments: { id: 1, secret: badSecret } }),
       );
       expect(result.isError).toBe(true);
-      expect(textOf(result)).toContain(GENERATE_SECRET_COMMAND);
+      const text = textOf(result);
+      expect(text.toLowerCase()).toMatch(/malformed|truncated/);
+      // The bug this guards against: read's old refusal told the reader to
+      // run `openssl rand -hex 32`, which makes no sense on a path where the
+      // caller does not get to choose the secret.
+      expect(text).not.toContain(GENERATE_SECRET_COMMAND);
+      expect(text.toLowerCase()).not.toContain("generate");
       expect(backend.calls).toHaveLength(0);
     });
   }
+
+  it("opens a link sealed with a real generateSecret() output — this is B1: read must open what the browser actually mints", async () => {
+    const backend = createStubBackend(ORIGIN);
+    const client = await connectedClient(backend);
+
+    // generateSecret() is the browser's own secret generator (src/crypto.ts):
+    // 10 mixed-case base64url characters, nothing like share's 64-hex. Sealed
+    // directly with the bare seal() — this is the shape a real Share button
+    // click produces, not something the `share` tool here would ever mint
+    // (its own policy is stricter on purpose; see mcp/validate.ts).
+    const browserSecret = generateSecret();
+    const payload: SharePayload = { text: "hello from a browser-minted link", label: "browser.json", savedAt: 1 };
+    const blob = await seal(payload, browserSecret);
+    await backend.fetchImpl(`${ORIGIN}/api/shares?lifetime=1d`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: blob,
+    });
+
+    const result = asToolResult(
+      await client.callTool({ name: "read", arguments: { id: 1, secret: browserSecret } }),
+    );
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({ kind: "document", text: "hello from a browser-minted link" });
+  });
 });
 
 describe("secrets never appear in a log, error, or any result field other than url", () => {

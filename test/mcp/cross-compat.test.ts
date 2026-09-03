@@ -21,7 +21,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMcpServer } from "../../mcp/build-server.js";
-import { open, seal, sealBundle } from "../../src/crypto.js";
+import { generateSecret, open, seal, sealBundle } from "../../src/crypto.js";
 import type { BundlePayload, SharePayload } from "../../src/crypto.js";
 import fixture from "../fixtures/share-v2-compat.json" with { type: "json" };
 import { createStubBackend } from "./stub-backend.js";
@@ -105,21 +105,33 @@ describe("this server mints, the browser's own open() reads it back", () => {
 });
 
 describe("a payload built the way src/share.ts's browser UI builds one, this server's read tool reads it back", () => {
-  it("a single document sealed with the bare seal()", async () => {
+  it("a single document sealed with the bare seal(), under a real generateSecret() output", async () => {
     const backend = createStubBackend(ORIGIN);
     const client = await connectedClient(backend);
+
+    // The whole point of this test is the secret, not just the payload
+    // shape: generateSecret() (src/crypto.ts) is what a real Share button
+    // click actually calls — 10 mixed-case base64url characters, nothing
+    // like the 64-hex `share` tool above mints. A version of this test that
+    // used a 64-hex secret here would not have caught B1 (read refusing
+    // every real browser-minted link), because that secret shape is not one
+    // a browser would ever produce.
+    const browserSecret = generateSecret();
+    expect(browserSecret).not.toMatch(/^[0-9a-f]{64}$/);
 
     // Exactly the shape `openShareModal` in src/share.ts constructs: no
     // `kind` field, `text`/`label`/`savedAt` only.
     const payload: SharePayload = { text: '{"data":null}', label: "browser.json", savedAt: 1_700_000_000_000 };
-    const blob = await seal(payload, HEX_SECRET);
+    const blob = await seal(payload, browserSecret);
     await backend.fetchImpl(`${ORIGIN}/api/shares?lifetime=1d`, {
       method: "POST",
       headers: { "content-type": "application/octet-stream" },
       body: blob,
     });
 
-    const result = asToolResult(await client.callTool({ name: "read", arguments: { id: 1, secret: HEX_SECRET } }));
+    const result = asToolResult(
+      await client.callTool({ name: "read", arguments: { id: 1, secret: browserSecret } }),
+    );
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
       kind: "document",
@@ -129,9 +141,10 @@ describe("a payload built the way src/share.ts's browser UI builds one, this ser
     });
   });
 
-  it("a bundle sealed with the bare sealBundle(), every document present", async () => {
+  it("a bundle sealed with the bare sealBundle(), every document present, under a real generateSecret() output", async () => {
     const backend = createStubBackend(ORIGIN);
     const client = await connectedClient(backend);
+    const browserSecret = generateSecret();
 
     const payload: BundlePayload = {
       kind: "bundle",
@@ -142,14 +155,16 @@ describe("a payload built the way src/share.ts's browser UI builds one, this ser
         { label: "z.json", text: "30" },
       ],
     };
-    const blob = await sealBundle(payload, HEX_SECRET);
+    const blob = await sealBundle(payload, browserSecret);
     await backend.fetchImpl(`${ORIGIN}/api/shares?lifetime=1d`, {
       method: "POST",
       headers: { "content-type": "application/octet-stream" },
       body: blob,
     });
 
-    const result = asToolResult(await client.callTool({ name: "read", arguments: { id: 1, secret: HEX_SECRET } }));
+    const result = asToolResult(
+      await client.callTool({ name: "read", arguments: { id: 1, secret: browserSecret } }),
+    );
     expect(result.structuredContent?.kind).toBe("bundle");
     const documents = result.structuredContent?.documents as { label: string; text: string }[];
     expect(documents).toHaveLength(3);
@@ -159,22 +174,40 @@ describe("a payload built the way src/share.ts's browser UI builds one, this ser
 
 describe("the T5 compatibility fixture", () => {
   it("opens through the exact open() this server imports, unmodified", async () => {
-    // This fixture's own secret ("fixtureT5x", 10 characters) is not 64
-    // lowercase hex, so it cannot flow through this server's *registered*
-    // `read` tool — that 64-hex requirement is this MCP surface's own
-    // deliberate policy (docs/task-specs/T7.md; consistent between `share`
-    // and `read` by construction, since both call the same
-    // `mcp/validate.ts#assertValidSecret`), not a property of the shared
-    // envelope format. What this fixture actually guards is one level
-    // underneath that policy: that `src/crypto.ts`'s `open` — the exact
-    // function `mcp/build-server.ts` imports and calls — has not drifted
-    // from what sealed a real link before bundles or this server existed.
-    // Calling it directly, as done here, is what proves that.
+    // Proves the crypto dependency itself has not drifted, independent of
+    // this server's own tool-level validation (checked separately, below).
     const blob = new Uint8Array(Buffer.from(fixture.blobBase64, "base64")) as Uint8Array<ArrayBuffer>;
     const opened = (await open(blob, fixture.secret)) as SharePayload;
 
     expect(opened.text).toBe(fixture.payload.text);
     expect(opened.label).toBe(fixture.payload.label);
     expect(opened.savedAt).toBe(fixture.payload.savedAt);
+  });
+
+  it("opens through the registered read tool end to end", async () => {
+    // The fixture's secret ("fixtureT5x", 10 characters) is exactly the
+    // shape assertReadSecret exists to accept — real, pre-bundle, pre-T7
+    // link secrets are not 64-hex, and B1's fix is precisely that `read`
+    // must open this without complaint.
+    const backend = createStubBackend(ORIGIN);
+    const client = await connectedClient(backend);
+    const blob = Buffer.from(fixture.blobBase64, "base64");
+
+    await backend.fetchImpl(`${ORIGIN}/api/shares?lifetime=1d`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: new Uint8Array(blob) as Uint8Array<ArrayBuffer>,
+    });
+
+    const result = asToolResult(
+      await client.callTool({ name: "read", arguments: { id: 1, secret: fixture.secret } }),
+    );
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      kind: "document",
+      label: fixture.payload.label,
+      savedAt: fixture.payload.savedAt,
+      text: fixture.payload.text,
+    });
   });
 });
