@@ -55,11 +55,20 @@ render path — this half of T2 has no observable surface. That is T2b's job, on
 | 29 | `redactExchange` on an exchange carrying `Authorization`, request cookies and response `Set-Cookie` values | Every secret-bearing value replaced with `[REDACTED]`; the count matches; the secret does not appear anywhere in `JSON.stringify` of the result | automated (vitest) |
 | 30 | `redactExchange` on an exchange with nothing secret | Count `0`; result deep-equals the input | automated (vitest) |
 | 31 | `redactExchange` does not mutate its argument | The input is unchanged after the call | automated (vitest) |
-| 32 | `mergeExchange` — a field present in the base and absent from the incoming | Survives unchanged | automated (vitest) |
-| 33 | `mergeExchange` — associativity, two differently-shaped triples | `(a·b)·c` deep-equals `a·(b·c)` | automated (vitest) |
-| 34 | `mergeExchange` with both sides having no request/response at all | Result has no `request`/`response` key at all — not `{}` | automated (vitest) |
-| 35 | Hostile values (`<script>`, `"><img src=x onerror=alert(1)>`) as a header name/value, a cookie name/value, and a query parameter name/value | Preserved exactly — recoverable byte for byte from the raw pair, and from `value` or a named `alternative` — never stripped, escaped, or silently discarded | automated (vitest) |
-| 36 | `store.ts`/`crypto.ts` (T5) continue to compile and pass against the real `Exchange` type | Unaffected — see "What should NOT have changed" | automated (vitest, pre-existing suite) |
+| 32 | A credential-shaped query parameter in a URL, by name (`api_key`, `access_token`, `signature`, `sig`, `*password*`) and by value shape with an innocuous name | Redacted and counted; an untouched parameter beside it survives | automated (vitest) |
+| 33 | The same URL redaction, asserted against the **URL string itself** | The returned URL contains no occurrence of the secret — not merely a count — because the URL is rewritten from the redacted parameters, not left stale beside a scrubbed copy | automated (vitest) |
+| 34 | A URL with a `#fragment` after its query string; a URL with no query string at all | Fragment preserved after redaction; query-free URL returned unchanged | automated (vitest) |
+| 35 | `RequestPart.query` carrying a credential, independent of the URL | Redacted the same way as the URL's own query string | automated (vitest) |
+| 36 | A form-urlencoded body (`BodyPart.form` populated) carrying a credential | `form` redacted; `raw` **rewritten** from the redacted form, not left stale; `bodyMayContainSecret` false | automated (vitest) |
+| 37 | A non-form body (e.g. `application/json`) containing a credential-shaped value | `bodyMayContainSecret: true`; `raw` left byte-for-byte unchanged; count unaffected — the flag is the honest signal, not a claim of having scrubbed it | automated (vitest) |
+| 38 | A non-form body with nothing credential-shaped in it | `bodyMayContainSecret: false` | automated (vitest) |
+| 39 | `mergeExchange` — a field present in the base and absent from the incoming | Survives unchanged | automated (vitest) |
+| 40 | `mergeExchange` — associativity, two differently-shaped triples | `(a·b)·c` deep-equals `a·(b·c)` | automated (vitest) |
+| 41 | `mergeExchange` with both sides having no request/response at all | Result has no `request`/`response` key at all — not `{}` | automated (vitest) |
+| 42 | Hostile values (`<script>`, `"><img src=x onerror=alert(1)>`) as a header name/value, a cookie name/value, and a query parameter name/value | Preserved exactly — recoverable byte for byte from the raw pair, and from `value` or a named `alternative` — never stripped, escaped, or silently discarded | automated (vitest) |
+| 43 | `store.ts`/`crypto.ts` (T5) continue to compile and pass against the real `Exchange` type | Unaffected — see "What should NOT have changed" | automated (vitest, pre-existing suite) |
+| 44 | Differential test against `URLSearchParams`: repeated keys, ordinary percent-decoding, a leading `?` | Agreement — this module and the platform read the boring, unambiguous cases identically | automated (vitest) |
+| 45 | Differential test against `URLSearchParams`: a comma/pipe/space list, JSON-in-a-value, base64url JSON, bracket notation, valueless-vs-empty | Deliberate disagreement on the primary reading, asserted explicitly — and for the value conventions, the platform's own reading recovered as this module's `alternative` | automated (vitest) |
 
 **Altitude note.** Everything above is pure logic with no DOM and no layout, so every case is a
 `vitest` case running in milliseconds — there is nothing here for `test/browser/nav-scenarios.js` to
@@ -99,34 +108,64 @@ corresponding `it(...)` in `test/{exchange,params,headers,cookies,secrets}.test.
   are not valid base64url JSON, and — found during review, not named in the spec — a segment length
   that makes base64 padding impossible and `atob` itself throw (case 28).
 - Redaction removes the secret from the serialised output, not just from a rendered view; counts
-  what it removed; touches nothing outside headers and cookies (URL, query parameters and body are
-  explicitly out of this function's scope — see `secrets.ts`'s header comment); and never mutates its
-  input (cases 29–31).
+  what it removed; and never mutates its input (cases 29–31).
+- **Redaction's coverage is wider than headers and cookies, deliberately, per
+  `docs/task-specs/T2.md`'s "Redaction's exact coverage" bullet: a credential in a query string is
+  not an edge case.** The URL and `RequestPart.query` are fully redacted, by parameter name (a
+  substring match — `token`, `secret`, `signature`, `sig`, `apikey`, `password` — wider than the
+  header list, since a parameter name is not a small set HTTP defines) or by value shape (cases
+  32–33). A form-urlencoded body is redacted the same way (case 36).
+- **Redacting the URL and a form body rewrites the string itself.** Case 33 asserts this against the
+  returned URL string, not against the count — a redacted `ParamSet` sitting beside an untouched
+  original string would still leak the secret the moment anything serialises the original, so
+  "rewritten" is the property under test, not merely "some field changed."
+- A `#fragment` after the query string survives redaction unchanged, and a URL with no query string
+  at all is returned as-is rather than mangled (case 34).
+- A non-form body (JSON, in the tests) is **detected, not redacted**: `bodyMayContainSecret` is `true`
+  when a credential-shaped substring is found, the raw text is left byte-for-byte untouched, and the
+  case asserts both halves of that — flagged *and* unaltered — because a caller that only checks one
+  half could still present a false "clean" (cases 37–38).
+- What is still genuinely out of scope, and named in `docs/task-specs/T2.md` rather than left for a
+  reader to discover here: a credential embedded in the URL's path rather than its query string, and
+  full redaction of a non-form body's content.
 
 **The merge contract**
 
 - Non-destructive and associative, the two properties `docs/task-specs/T2.md` requires explicitly,
-  each proved by a test that would fail if the property did not hold (cases 32–33) — confirmed by
+  each proved by a test that would fail if the property did not hold (cases 39–40) — confirmed by
   deliberately breaking each guard during development and watching the corresponding test fail
   before restoring it.
 - The specific historical failure mode this codebase has already shipped once in a different feature
   — an empty value read as present rather than absent (`docs/task-specs/T2.md`'s own framing: "`[]`
   is truthy, so restoration never ran") — has a dedicated regression test: merging two exchanges with
-  no request/response anywhere must not manufacture a present-but-empty part (case 34).
+  no request/response anywhere must not manufacture a present-but-empty part (case 41).
 
 **Injection — adapted to this module's altitude**
 
 - This module produces no DOM and no HTML string, so it has no injection surface of its own. What it
-  must not do is mangle a hostile value on the way through — case 35 puts `<script>...</script>` and
+  must not do is mangle a hostile value on the way through — case 42 puts `<script>...</script>` and
   `"><img src=x onerror=alert(1)>` through a header, a cookie, and a query parameter (both name and
   value), and confirms each survives byte for byte or is fully recoverable via a named alternative.
   Escaping happens exactly once, downstream, in T2b's render paths.
 
+**Differential testing against the platform**
+
+- `URLSearchParams` is a reference implementation this module can be checked against for free: cases
+  44–45 assert agreement on the unambiguous cases (repeated keys, ordinary percent-decoding, a
+  leading `?`) and **deliberate** disagreement — asserted explicitly, not merely absent — on every
+  convention this module reads differently (comma/pipe/space lists, JSON-in-a-value, base64url JSON,
+  bracket notation, and the valueless-vs-empty distinction the spec explicitly requires and the
+  platform does not draw). A future change that accidentally made this module agree with the platform
+  on one of the deliberate-disagreement cases would silently undo the exact behaviour the spec asks
+  for, so those cases fail loudly rather than passing by coincidence.
+
 **What this task does not attempt**
 
-- A body/URL secret scanner. `redactExchange`'s scope is headers and cookies, matching the spec's
-  "Headers, cookies, and secrets" section exactly; a secret pasted directly into a URL or a request
-  body is not caught, and this is a documented limitation, not an oversight.
+- Full redaction of a non-form request/response body's content (JSON, XML, plain text). Detected and
+  flagged (`bodyMayContainSecret`), not rewritten — a documented limitation
+  (`docs/task-specs/T2.md`'s "Redaction's exact coverage"), not an oversight.
+- Detecting a credential embedded in the URL's **path** rather than its query string. Also named in
+  the spec rather than left for a reader to discover here.
 - Deep, arbitrary-nesting conflict detection beyond the top level (case 21's fold-into-an-object
   fallback for `a[b]=1` beside `a[b][c]=2`, or an index-like segment beside a key-like one below the
   top level) is a disclosed simplification: the spec's own conflict example, and every JSON:API
