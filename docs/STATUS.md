@@ -19,13 +19,15 @@ blocker) · **🔒 not built** (deliberate — reason in §3) · **📋 queued**
 
 | Unit | Status | Spec | Notes |
 |---|---|---|---|
-| T0 · Delivery process | 🔨 | — | This change. `DELIVERY.md`, `PROCESS.md`, three agents, templates, preflight + attack suite, labels, the `pull_request` CI trigger that was missing, and the fixes from the T0 review. |
+| T0 · Delivery process | 🔨 | — | This change. `DELIVERY.md`, `PROCESS.md`, three agents, templates, preflight + attack suite, labels, the `pull_request` CI trigger that was missing, and the fixes from the T0 review. **Note:** that trigger still missed a case — see T9. |
+| T9 · Preflight self-fixtures | 🔨 | [T9](task-specs/T9.md) | `review-preflight.sh`'s code invariants (innerHTML, href, network-call, DOM-id, hardcoded-copy, jsdom-altitude) now read only the files each governs — `src/` **and `index.html`**, and `test/` excluding `test/browser/` — instead of the whole diff, so the attack suite's own planted fixtures, and documentation prose describing the same rules, stop misreporting. `BASE_REF` is resolved (PR base → this branch's upstream, checked by identity not name → `origin/main`) instead of hardcoded, and fails closed if none resolve. Also removes `deploy.yml`'s `pull_request: branches: [main]` filter — but GitHub evaluates a `pull_request` event from the PR's **merge ref**, not its base branch, so this gives checks to any *new* pull request regardless of base, **not** to a pull request that is already open and stacked on a branch predating this fix (see T9's spec for what actually reaches one of those). `scripts/attack-preflight.sh`: 26 → 45 passed, 0 failed; every case still fails against a gate stubbed to `exit 2`, `exit 1` **and** `exit 0`. Review caught and fixed two narrowing regressions (`index.html` had dropped out of the innerHTML/href scope; a pre-existing character-class bug excluded every test file named `test/b*`), one identity-vs-naming gap in the upstream check, and one missing ceiling case (a legitimate `test/browser/` layout assertion) whose absence let a later widening pass 44/44 green while silently reintroducing T1's original bug — the exact hazard of scoping a gate too far, twice over. **Touches `.github/`, outside the normal implementer bounds — see the pull request body for why.** **Merges on review + its own attack suite, with no `qa:passed` label — a stated exception, not an oversight**, because this task has no observable surface and a browser QA pass would verify nothing about it that the attack suite does not already verify more precisely. Evidence: 45 attack-suite cases (26 pre-existing + 19 new), all 45 still failing against the gate stubbed to `exit 2`, `exit 1` **and** `exit 0`; the reviewer independently probed 17 base-ref resolver paths (none exiting 0 on a silent "skip") and 8 planted mutations (7 caught outright, the 8th — a missing `test/browser/` ceiling case — found and closed with a new case in the same review). |
 | T1 · Plain JSON | 🔨 | [T1](task-specs/T1.md) | Shape detection, the branch out of `assertJsonApi`, an **inferred identity graph** — a repeated identifier becomes a link, the way a `{type, id}` pointer already does — and the [D1](DECISIONS.md) anchor scope table. Branch `feat/T1-plain-json`, PR open. |
 | T5 · Storage + share envelope | 🔨 | [T5](task-specs/T5.md) | [PR #1](https://github.com/maksymskuibida/jsonapi-lens/pull/1), branch `feat/T5-share-envelope`, CI green. An optional exchange on stored documents and share payloads, IndexedDB v3, and a **bundle** payload at envelope version 3. No UI, so T2/T6/T7 can build on it in parallel. The `Exchange` placeholder is [D2](DECISIONS.md); `DB_VERSION` and `LibraryEntry`'s summary fields are `store.ts`'s alone per §1a below. |
 | T2 · Exchange, form and review | 🔨 | [T2](task-specs/T2.md) | Split into two pull requests — see the split note at the top of the spec. **T2a** (this PR, branch `feat/T2a-exchange-model`): the `Exchange`/`RequestPart`/`ResponsePart`/`BodyPart` model filling in T5's [D2](DECISIONS.md) placeholder, `mergeExchange`, the parameter decoder (`params.ts`, every row of the spec's table plus JSON:API's `include`/`fields`/`sort`/`page`/`filter`), header/cookie parsing, and secret detection/JWT decoding/redaction (`secrets.ts`). Pure modules only — no form, no review, no anchors minted, nothing wired into `main.ts`; no observable surface, so no QA notes and no evidence file for this PR (see its body). **T2b** (not started): the field-separated form, the request/response/both review, request-scoped anchors, and persistence/share wiring — everything that renders what T2a decodes. |
 | T6 · Share a bundle | 📋 | [T6](task-specs/T6.md) | In the saved list: a Share button puts a checkbox on each row and swaps the buttons for Cancel and Create link. Disabled with nothing selected; one selection makes a document link, several make a bundle. Opening a bundle offers its documents for import — all, a selection, or cancel. |
 | T7 · MCP server | 📋 | [T7](task-specs/T7.md) | `share` takes a document list and an AI-supplied `openssl rand -hex 32` secret, seals one document or a bundle, returns the id, and documents how to build the URL. `read` takes an id and a secret and returns the document. |
 | T3 · Importers | 📋 | [T3](task-specs/T3.md) | cURL, raw HTTP request, raw HTTP response, bare URL, HAR, and **JSON transport logs** — a serialised Python `logging` record with HTTP transport fields, where two records correlate on a shared id and merge in either order. |
+| T8 · Pre-existing defects | 📋 | [T8](task-specs/T8.md) | Five defects the production baseline found, live on prod today and none of them ours: value formatting ignoring the app's language (**high**), a malformed share link reported as a missing page, `/view`'s title falling back whenever there is a hash, a stale saved-count on delete, and five untranslated string groups. |
 | T4 · Diagnostics | 📋 | [T4](task-specs/T4.md) | The request-vs-response cross-checks, linked at both ends and surfaced inline on the rows they explain. |
 
 ## 1a · Waves
@@ -36,10 +38,10 @@ are assigned **disjoint file sets**, because the alternative is two agents rebas
 | Wave | Tasks | Owns |
 |---|---|---|
 | 1 | **T1** ‖ **T5** | T1: `parse.ts`, `ident.ts`, the new JSON index, the rail, **all of `main.ts`**, i18n `shape`/`identity`. T5: `store.ts`, `crypto.ts`, `share.ts`, i18n `bundle`. See the note below — the first draft of this split was wrong. |
-| 2 | **T2** ‖ **T6** ‖ **T7** | T2: the new request modules + the document view. T6: `panels.ts` + the bundle route. T7: a new `mcp/` tree only. T2 and T6 both touch `main.ts` in different regions; second to land rebases. |
+| 2 | **T2** ‖ **T6** ‖ **T7** ‖ **T8** | T2: the new request modules, `main.ts`, `render-document.ts`, `types.ts`, `styles.css`. T6: `panels.ts` + the bundle route. T7: a new `mcp/` tree only. T8: `format.ts`, `i18n/intl.ts`, `router.ts`, `seo.ts`, `render-resource.ts`. T2 and T6 both touch `main.ts` in different regions; second to land rebases. **T8 runs after T1 merges** — it edits files T1 owns. D4 goes to whichever of T6/T8 gets there first; see T8's ownership note. |
 | 3 | **T3** ‖ **T4** | T3: the importer modules. T4: the checks module. Both read T2's model and neither owns it. |
 
-Dependencies: **T1 → T2 → {T3, T4}** and **T5 → {T2, T6, T7}**. Everything else is parallel.
+Dependencies: **T1 → T2 → {T3, T4}**, **T5 → {T2, T6, T7}**, and **T1 → T8**. Everything else is parallel.
 
 **The wave-1 split needed correcting mid-flight, and the reason generalises.** `src/main.ts`
 builds a `LibraryEntry` out of `resources`, `types` and `shape` — three fields that only existed on
@@ -60,7 +62,7 @@ force, not just which files each task obviously edits.
 | `docs/templates/` — task spec, test plan, QA notes, QA report, evidence | ✅ |
 | `scripts/review-preflight.sh` | ✅ |
 | Forge labels — `reviewed:*`, `qa:*` | ✅ |
-| `deploy.yml` — `check` job also runs on `pull_request` | ✅ |
+| `deploy.yml` — `check` job also runs on `pull_request` | ✅ — but only when the PR's base was `main`; T9 removes that filter, which reaches every *new* pull request but not one already open and stacked on a branch that predates the fix, since GitHub reads a `pull_request` event's workflow from the PR's merge ref, not its base branch — un-stacking (`DELIVERY.md`) is what closes the gap for those |
 | Project `CLAUDE.md` pointing at the flow | ✅ |
 | Task specs T1–T7 | ✅ |
 | `test/hygiene.test.ts` + synthesised fixtures | ✅ |
@@ -74,11 +76,24 @@ force, not just which files each task obviously edits.
 | `qa-api` agent | 🔒 | The only HTTP surface is `/api/shares` and `/api/health`, with no published schema a blind agent could derive cases from. Revisit if the share API grows a documented contract. |
 | `qa-device` agent | 🔒 | There is no native app. |
 | Required-reviewer on the `production` environment | 🔒 | Single maintainer. A self-approved deploy gate is theatre, and a gate that gets waived on its first use never comes back. |
-| Production QA pass (`local+prod-qa`) | 🔒 | The target profile above this one. Needs a written regression checklist and a decision that a QA agent may drive the public origin. `deploy.yml` already smoke-tests after release, and `test/browser/run.mjs` already accepts `--url`, so this is a short step when it is wanted. |
+| — | — | *(Production QA is no longer deferred: the profile is `local+prod-qa`, `docs/qa-checklists/REGRESSION.md` is the checklist, and the release sequence is in `DELIVERY.md`.)* |
+
+## 3a · Production baseline
+
+`docs/qa-reports/prod-baseline-2026-09-02.md` records the state of production **before** this
+release: 70 of 71 checklist lines passing, the browser scenario suite 24/24 against the live origin,
+zero network requests carrying document content, and five pre-existing defects now specified as
+**T8**. The one untested line is private-window/storage-blocked behaviour, for which the automation
+harness has no incognito primitive.
+
+It exists so the post-deploy pass is a **diff** rather than a fresh opinion. Without it, every
+failure found after the release would be ambiguous between "we broke it" and "it was always like
+that" — and five of them would have been misattributed.
 
 ## 4 · Open asks — not ours to close
 
 | Ask | Owner | Blocks |
 |---|---|---|
-| Protect `main` — require a pull request and the `check` status context | @maksymskuibida (repo admin) | Nothing is enforced today: `main` is unprotected, so a direct push bypasses review, QA and CI-before-merge in one step. Free on a public repo. |
+| Protect `main` — require a pull request and the `check` status context | @maksymskuibida (repo admin) | Nothing is enforced today: `main` is unprotected, so a direct push bypasses review, QA and CI-before-merge in one step. Free on a public repo. **Deliberately not done by an agent** — it is a repository setting, not a code change, and changing account settings unasked is out of bounds. Passed over rather than blocked on, per `DELIVERY.md` *Running unattended*. |
+| Cover the "create a store during an upgrade" branch in `store.ts` | whichever task first adds an object store | **Demonstrated, not suspected**: PR #1's reviewer made `library` creation conditional on `oldVersion === 0` and **all 230 tests still passed.** The v2→v3 test covers the *guarded* path, so a destructive migration is caught; the *creating* path (v1→v3, or any store a later task adds) has none. Harmless while no task adds a store — a trap the moment one does. |
 | Arm the evidence staleness gate | next session | The "ran it, then changed the code" failure. `scripts/check-evidence.sh` is not installed; the SHA is checked by hand at preflight, which catches carelessness but not drift. |

@@ -3,13 +3,21 @@ name: Deploy
 on:
   push:
     branches: [main]
-  # A pull request runs `check` and nothing else: the `deploy` job is guarded on
-  # `github.event_name != 'pull_request'`, so a branch is verified without being
-  # released. Before this existed the workflow fired only on push to `main`,
-  # which meant a pull request got no checks at all and "CI must pass before
-  # merge" was describing something that had never been true.
+  # A pull request runs `check` and nothing else, regardless of what branch it
+  # targets: the `deploy` job is guarded on `github.event_name != 'pull_request'`
+  # below, not on this trigger's branch filter, so a branch is verified without
+  # being released no matter what it is stacked on.
+  #
+  # This used to carry `branches: [main]`, which filters on the PR's BASE
+  # branch — so a pull request stacked on another feature branch (rather than
+  # opened directly against `main`) got zero checks at all, silently (T9,
+  # 2026-09; found while several implementer branches were stacked this way).
+  # Before the trigger existed at all, the workflow fired only on push to
+  # `main`, which meant EVERY pull request got no checks, and "CI runs on a
+  # pull request" (PROCESS.md §8) was describing something that had never
+  # been true for any of them. Leaving the base-branch filter in place would
+  # have made the same row false again for a narrower, quieter set of PRs.
   pull_request:
-    branches: [main]
   # Lets a failed deploy be retried without an empty commit.
   workflow_dispatch:
 

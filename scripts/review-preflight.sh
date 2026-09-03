@@ -3,8 +3,8 @@
 # Review preflight — answers the mechanical half of a review deterministically,
 # so the reviewer spends its budget on judgement instead of re-deriving facts.
 #
-# Usage:  scripts/review-preflight.sh <pr-number>
-#         scripts/review-preflight.sh            # the current branch vs origin/main
+# Usage:  scripts/review-preflight.sh <pr-number>   # diffs against that PR's own base branch
+#         scripts/review-preflight.sh               # this branch's upstream, else origin/main
 #
 # Exit codes:  0 clean · 1 findings · 2 could not determine (fails closed)
 #
@@ -31,7 +31,6 @@
 set -uo pipefail
 
 PR="${1:-}"
-BASE_REF="origin/main"
 findings=0
 notes=0
 
@@ -52,11 +51,100 @@ ok()   { printf '  ok      %s\n' "$1"; }
 find_() { printf '  FINDING %s\n' "$1"; findings=$((findings + 1)); }
 note() { printf '  note    %s\n' "$1"; notes=$((notes + 1)); }
 
-git fetch --quiet origin main 2>/dev/null || note "could not fetch origin/main; comparing against the local ref"
+# ------------------------------------------------------------ resolve the base ---
+#
+# BASE_REF used to be the literal constant `origin/main`. That is wrong for a
+# reason deeper than style: implementer branches in this repository fork from
+# a shared integration branch, not from `main` directly, so `main` does not
+# yet contain that branch's own commits — including, while it is unmerged,
+# this very script and its attack suite. A hardcoded `origin/main` always
+# diffs against a stale ancestor, and every commit the integration branch
+# carries that `main` does not reads as part of THIS diff. That is a second,
+# deeper source of the same class of false finding T9 exists to fix by
+# scoping WHAT each invariant reads (see ADDED_SRC below): this is about
+# WHERE the diff starts.
+#
+# Resolved in order of trust, each candidate verified before it is used:
+#   1. The pull request's own base branch, when a PR number is given — ground
+#      truth for what the diff will actually be evaluated against on merge.
+#   2. The branch this one tracks (`@{u}`), when one is configured AND it
+#      does not already contain HEAD (see below — a same-named remote mirror
+#      of yourself, the ordinary result of `git push -u`, is the common
+#      case, but the same is true of this branch checked out locally under
+#      a different name entirely; neither is a base).
+#   3. `origin/main`, the repository's actual default branch.
+# A candidate that does not resolve is skipped, not fatal — only exhausting
+# all three is. Fails closed on purpose: reporting a pass because the base
+# could not be determined turns every misconfiguration (network, `gh`
+# unavailable or unauthenticated, a renamed default branch) into a silent
+# green, which is worse than refusing to answer.
+BASE_REF=""
+BASE_SOURCE=""
+
+if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then
+  pr_base="$(gh pr view "$PR" --json baseRefName --jq .baseRefName 2>/dev/null)" || pr_base=""
+  if [ -n "$pr_base" ]; then
+    git fetch --quiet origin "$pr_base" 2>/dev/null \
+      || note "could not fetch origin/$pr_base; trying the local ref"
+    if git rev-parse --verify --quiet "origin/$pr_base" >/dev/null 2>&1; then
+      BASE_REF="origin/$pr_base"
+      BASE_SOURCE="the base branch of PR #$PR ($BASE_REF)"
+    fi
+  fi
+fi
+
+if [ -z "$BASE_REF" ]; then
+  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" || upstream=""
+  # Only trust @{u} when it is not simply a copy of HEAD by another name.
+  # Two ways that happens, checked separately because neither one alone
+  # covers the other:
+  #   - Same NAME: the ordinary result of `git push -u origin <branch>` —
+  #     how every branch in this repository reaches the remote, including
+  #     this one — is an upstream that is this same branch's own copy of
+  #     itself on origin. Comparing against that finds "no changes" the
+  #     instant everything is pushed. Found by running this exact check, on
+  #     this exact branch, right after pushing it.
+  #   - Same CONTENT under a DIFFERENT name: checking this branch out
+  #     locally under another name (`git checkout -b review-4
+  #     origin/<branch>`) keeps @{u} pointing at the original upstream, so
+  #     the name check alone does not catch it — and a name check is not
+  #     the right tool for this anyway, since it is really asking "does this
+  #     candidate already contain HEAD", which an ancestry check answers
+  #     directly regardless of what either side is named. Reproduced on
+  #     this exact branch, checked out under a different local name, during
+  #     review.
+  # A genuinely different tracked branch (deliberately pointed at an
+  # integration branch, under its own name, that HEAD is actually ahead of)
+  # is a real signal and passes both checks; a mirror of yourself, named or
+  # not, does not and is discarded here rather than trusted.
+  if [ -n "$upstream" ]; then
+    current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || current_branch=""
+    upstream_name="${upstream#*/}"
+    if { [ -n "$current_branch" ] && [ "$upstream_name" = "$current_branch" ]; } \
+       || git merge-base --is-ancestor HEAD "$upstream" 2>/dev/null; then
+      upstream=""
+    fi
+  fi
+  if [ -n "$upstream" ]; then
+    git fetch --quiet 2>/dev/null || true
+    if git rev-parse --verify --quiet "$upstream" >/dev/null 2>&1; then
+      BASE_REF="$upstream"
+      BASE_SOURCE="this branch's upstream ($BASE_REF)"
+    fi
+  fi
+fi
+
+if [ -z "$BASE_REF" ]; then
+  git fetch --quiet origin main 2>/dev/null || note "could not fetch origin/main; comparing against the local ref"
+  BASE_REF="origin/main"
+  BASE_SOURCE="origin/main (default — no PR base or upstream resolved)"
+fi
+
 git rev-parse --verify --quiet "$BASE_REF" >/dev/null || {
   echo "FATAL: cannot resolve $BASE_REF — refusing to report a pass" >&2
   exit 2
 }
+note "comparing against $BASE_SOURCE"
 
 MERGE_BASE="$(git merge-base "$BASE_REF" HEAD 2>/dev/null)" || {
   echo "FATAL: no merge base with $BASE_REF — refusing to report a pass" >&2
@@ -66,6 +154,68 @@ MERGE_BASE="$(git merge-base "$BASE_REF" HEAD 2>/dev/null)" || {
 CHANGED="$(git diff --name-only "$MERGE_BASE"..HEAD)"
 DIFF="$(git diff "$MERGE_BASE"..HEAD)"
 ADDED="$(printf '%s\n' "$DIFF" | grep '^+' | grep -v '^+++' || true)"
+
+# T9: scripts/attack-preflight.sh plants, as its own fixtures, one example of
+# every pattern several checks below search for — a conflict-marker sequence,
+# a focused-test call, an innerHTML assignment, an href construction, a
+# scroll-position read — because planting one of each is how it proves every
+# check fires. Any diff that touches that file (every branch's diff until T0
+# merges, and every future edit to the suite after that) used to read as
+# unrelated violations in application code that do not exist, because the
+# checks below scanned `$ADDED` — every added line in the whole diff —
+# rather than the lines the invariant is actually about. Two different fixes
+# for two different kinds of check (docs/task-specs/T9.md):
+#
+#   - The CODE INVARIANTS (the innerHTML/insertAdjacentHTML scan and the href
+#     note; the network-call, DOM-id and hardcoded-copy scans already read
+#     per-file under src/ and were never affected; the jsdom-altitude scan
+#     needs the equivalent for test/) are assertions about application code,
+#     so they read ADDED_SRC / ADDED_TEST_UNIT below. Both are built with a
+#     git pathspec that names what to INCLUDE, not what to exclude — so
+#     scoping them can never be widened by accident to cover a file it
+#     shouldn't, in scripts/ or anywhere else. This also settles a longer-
+#     lived version of the same bug: PROCESS.md and the agent briefs discuss
+#     these very invariants in prose (an innerHTML assignment, a scheme
+#     allowlist, and so on), and would otherwise trip their own checks on
+#     every future pull request that so much as edits that paragraph — not
+#     just until T0 merges, but forever. Reading only src/ (and, below, only
+#     test/) means a check never sees prose about it in the first place,
+#     regardless of which file the prose lives in.
+#   - Conflict markers and focused/skipped tests are genuinely about any
+#     file — a real one committed to scripts/ is a real problem — so those
+#     two read ADDED_EXCEPT_ATTACK_SUITE, which excludes exactly one path, by
+#     its exact name, and nothing else. A glob such as `scripts/attack-*.sh`
+#     would risk exempting some future attack-*.sh that is not this suite;
+#     excluding the literal path cannot. This pair keeps the narrower,
+#     file-based exemption rather than a path-inclusion one, precisely
+#     because they are supposed to fire on any file — the two are asymmetric
+#     on purpose, not an oversight.
+#
+# Nothing about which patterns are searched changes here, only which lines
+# are offered to them.
+
+# Added lines confined to application code. Governs: the innerHTML/
+# insertAdjacentHTML scan, the href note. "Application code" here means
+# exactly what src_touched (below) and the evidence-staleness diff already
+# mean it: src AND index.html, not src alone — index.html is 500+ lines of
+# shipped markup with real hrefs, real DOM ids and an inline <script>, and
+# `vite build` ships it as the document. Dropping it from this pathspec was
+# a real regression, caught in review: an innerHTML assignment or an href
+# added inside index.html went uncaught. Never narrow this to `src` again
+# without widening it back everywhere else in this file that means the same
+# thing.
+DIFF_SRC="$(git diff "$MERGE_BASE"..HEAD -- src index.html)"
+ADDED_SRC="$(printf '%s\n' "$DIFF_SRC" | grep '^+' | grep -v '^+++' || true)"
+
+# Added lines confined to vitest specs — test/, excluding test/browser/, the
+# one place a layout measurement belongs. Governs: the jsdom-altitude scan.
+DIFF_TEST_UNIT="$(git diff "$MERGE_BASE"..HEAD -- test ':!test/browser')"
+ADDED_TEST_UNIT="$(printf '%s\n' "$DIFF_TEST_UNIT" | grep '^+' | grep -v '^+++' || true)"
+
+# Added lines for the whole diff except the attack suite's own fixtures.
+# Governs: the conflict-marker and focused/skipped-test hygiene checks.
+DIFF_EXCEPT_ATTACK_SUITE="$(git diff "$MERGE_BASE"..HEAD -- ':!scripts/attack-preflight.sh')"
+ADDED_EXCEPT_ATTACK_SUITE="$(printf '%s\n' "$DIFF_EXCEPT_ATTACK_SUITE" | grep '^+' | grep -v '^+++' || true)"
 
 [ -n "$CHANGED" ] || { echo "FATAL: no changes against $BASE_REF — nothing to review" >&2; exit 2; }
 
@@ -126,12 +276,17 @@ fi
 # ---------------------------------------------------------------- hygiene ---
 
 say "Hygiene"
-if grep -qE '^\+.*(<<<<<<<|>>>>>>>|^\+=======$)' <<<"$ADDED"; then
+# Both checks below read ADDED_EXCEPT_ATTACK_SUITE, not ADDED: they are
+# genuinely about any file, so a real hit anywhere else must still fire — but
+# scripts/attack-preflight.sh plants a conflict-marker sequence and a focused-
+# test call as its own fixtures, so it alone is exempt. See the T9 note above
+# ADDED_SRC.
+if grep -qE '^\+.*(<<<<<<<|>>>>>>>|^\+=======$)' <<<"$ADDED_EXCEPT_ATTACK_SUITE"; then
   find_ "conflict markers in the diff"
 else ok "no conflict markers"
 fi
 
-if grep -qE '\b(it|test|describe)\.(only|skip)\b|\bxit\(|\bxdescribe\(' <<<"$ADDED"; then
+if grep -qE '\b(it|test|describe)\.(only|skip)\b|\bxit\(|\bxdescribe\(' <<<"$ADDED_EXCEPT_ATTACK_SUITE"; then
   find_ "focused or skipped test added — \`.only\` hides the rest of the suite, \`.skip\` hides the case"
 else ok "no focused or skipped tests"
 fi
@@ -144,15 +299,24 @@ fi
 
 say "Project invariants"
 
-# XSS: an innerHTML assignment, or a template literal building a tag, in the diff.
-if grep -qE 'innerHTML|insertAdjacentHTML|outerHTML' <<<"$ADDED"; then
+# XSS: an innerHTML assignment, or a template literal building a tag, in the
+# diff. Reads ADDED_SRC, not ADDED — this is an assertion about application
+# code, and scripts/attack-preflight.sh plants the literal string `innerHTML`
+# as its own fixture (see the T9 note above ADDED_SRC).
+if grep -qE 'innerHTML|insertAdjacentHTML|outerHTML' <<<"$ADDED_SRC"; then
   find_ "an innerHTML/insertAdjacentHTML path is in the diff — trace one hostile payload value by hand through it (PROCESS.md §4)"
 else ok "no raw HTML assignment added"
 fi
 
-# A URL rendered as an href needs a scheme allowlist, not an escape.
-if grep -qE 'href:|href="\$\{|"href",' <<<"$ADDED"; then
+# A URL rendered as an href needs a scheme allowlist, not an escape. Also
+# scoped to ADDED_SRC for the same reason. Unlike the other invariants this
+# one is advisory (a note, not a finding) — but it still gets a real `ok`
+# line for the quiet case, not just silence, because an absence-only
+# assertion passes against a gate stubbed dead as readily as against a
+# working one (see the attack suite's expect_ok).
+if grep -qE 'href:|href="\$\{|"href",' <<<"$ADDED_SRC"; then
   note "an href is built in the diff — javascript: and data: survive HTML escaping; check for a scheme allowlist"
+else ok "no href built in the diff"
 fi
 
 # fetch outside the three modules allowed one.
@@ -200,9 +364,18 @@ if [ -n "$copyoffenders" ]; then
 else ok "no hardcoded copy detected"
 fi
 
-# jsdom-altitude: a layout assertion in a vitest test cannot fail.
-if grep -qE '^test/[^b]' <<<"$CHANGED"; then
-  if grep -qE 'scrollY|scrollTop|getBoundingClientRect|offsetHeight|offsetTop|clientHeight' <<<"$ADDED"; then
+# jsdom-altitude: a layout assertion in a vitest test cannot fail. The gate
+# condition and the pattern match both derive from the exact same pathspec
+# that built ADDED_TEST_UNIT above (test/, excluding test/browser/), so the
+# two can never drift apart again the way they already had: this used to be
+# the character class `^test/[^b]`, which excludes every test file whose
+# name BEGINS WITH "b" — test/bundle.test.ts, test/base64.test.ts — not
+# `test/browser/`, so a layout assertion in any such file was silently never
+# scanned. Caught in review. `[ -n "$(git diff --name-only ...)" ]` rather
+# than a piped grep, per this file's own SIGPIPE note at the top: `grep -q`
+# in a pipeline is exactly the hazard that check exists to avoid.
+if [ -n "$(git diff --name-only "$MERGE_BASE"..HEAD -- test ':!test/browser')" ]; then
+  if grep -qE 'scrollY|scrollTop|getBoundingClientRect|offsetHeight|offsetTop|clientHeight' <<<"$ADDED_TEST_UNIT"; then
     find_ "a layout measurement is asserted in a vitest test — jsdom has no layout engine, so that assertion cannot fail; it belongs in test/browser/nav-scenarios.js"
   else ok "no layout assertion under jsdom"
   fi

@@ -1,5 +1,5 @@
 ---
-profile: local-qa
+profile: local+prod-qa
 primary-branch: main
 task-ledger: docs/STATUS.md
 status-ledger: docs/STATUS.md
@@ -19,7 +19,7 @@ skill-version: 2026-09-02
 How work ships here. The process itself is in [PROCESS.md](PROCESS.md); this file is the
 configuration, plus the reasoning behind the choices that are not obvious.
 
-## Profile: `local-qa`
+## Profile: `local+prod-qa`
 
 There is no environment between merge and the user: a push to `main` runs the checks and, if they
 pass, deploys the Worker and assets to `https://jsonapi.mstool.dev`. So QA cannot run *after* merge
@@ -34,11 +34,17 @@ history restoration that landed on the right pixel while the row underneath it h
 expanding. `npm test` was green for it. jsdom has no layout, so every browser scenario passes
 vacuously there.
 
-`local+prod-qa` is the target above this, and it is a short step rather than a rewrite: the deploy
-workflow already runs a post-deploy smoke test against the live origin, and `test/browser/run.mjs`
-already accepts `--url`. What has to exist first is a written regression checklist and the decision
-that a QA agent may drive the public origin. Until then, production verification is the smoke test
-in `deploy.yml` and nothing more, and `PROCESS.md` says so.
+**Production verification is now part of a release**, which is what moves this from `local-qa` to
+`local+prod-qa`. The two things that had to exist first now do: `docs/qa-checklists/REGRESSION.md`
+is the written checklist, and a QA agent may drive `https://jsonapi.mstool.dev` after a deploy.
+`test/browser/run.mjs` already accepts `--url`, and `deploy.yml` already smoke-tests the origin, so
+the addition is the human-facing pass rather than new machinery.
+
+**There is no test account, because the product has no accounts** — which removes the usual
+`local+prod-qa` hazard. The one piece of server state is the share table, so the rule that replaces
+it is: a share link created against production during verification uses a **synthetic document and
+the shortest lifetime (15m)**, never a real payload. Everything else the app does on production is
+local to the browser by construction.
 
 ## Roles
 
@@ -46,7 +52,7 @@ in `deploy.yml` and nothing more, and `PROCESS.md` says so.
 |---|---|---|
 | `implementer` | `sonnet` | Writes every commit that lands. Also the author for work that looks too small to dispatch — a docs fix, a workflow edit, a one-line correction after review. |
 | `reviewer` | `sonnet`, escalated per call | Read-only plus the `gh pr` commands. Escalate to `opus` for anything touching `crypto.ts`/`share.ts`, the IndexedDB schema, the anchor and history model, or an `innerHTML` render path. |
-| `qa-web` | `sonnet` | Drives the real app in a real browser, blind to the source. This is the only QA surface — the product is a web page and has no other. |
+| `qa-web` | `sonnet` | Drives the real app in a real browser, blind to the source. The only QA surface — the product is a web page and has no other. Runs **once per wave locally** before merge, and **once against production** after the release. |
 
 No `qa-api` agent: the only HTTP surface is `/api/shares` and `/api/health`, and it has no published
 schema a blind agent could derive cases from. No `qa-device`: there is no native app.
@@ -83,9 +89,9 @@ Toolchain notes that have cost a run elsewhere and apply here:
 | **prod** | `https://jsonapi.mstool.dev` — Cloudflare Worker + assets, D1 database `jsonapi-lens-shares`. Deployed by `.github/workflows/deploy.yml` on every push to `main`. There is nothing between merge and this. |
 
 There is no test tenant, because the product has no accounts. The one piece of server state is the
-share table, and a QA agent must not create share links against production — sharing uploads
-ciphertext to a real D1 database with a real lifetime. Share behaviour is verified locally under
-`wrangler dev`, or not at all, and the QA report says which.
+share table. Locally, `/api/*` is not served by the Vite dev server, so share behaviour cannot be
+exercised there at all — it is verified **on production, after the deploy**, with a synthetic
+document and a 15-minute lifetime. The QA report says which environment each share check ran in.
 
 ## Labels
 
@@ -108,3 +114,57 @@ ciphertext to a real D1 database with a real lifetime. Share behaviour is verifi
   evidence against the branch head as part of the preflight. Arming it properly is an open ask in
   `STATUS.md` §4. Recording it as absent is the point: a gate that is described but not installed is
   worse than one that is honestly missing.
+- **A pull request carrying several distinct pieces of work merges with a merge commit, not a
+  squash.** The shared process squash-merges, and that is right when one pull request is one task —
+  a single commit message is then the whole record. It is wrong when a pull request accumulates
+  commits that are each their own distinct piece of work with its own reasoning (T9's pull request,
+  for instance, carries T0's process install, the profile raise to `local+prod-qa`, the production
+  baseline, and T9 itself): squashing would collapse every one of those messages into one and destroy
+  the record of why each was done. `gh pr merge --merge` for a pull request like that; `gh pr merge
+  --squash` (the default) otherwise. This is a per-pull-request judgement call, not a policy change —
+  most pull requests here are one task and still squash.
+
+## Release sequence
+
+Fixed order, and the deploy is gated on the whole of step 3 passing:
+
+1. **Build** every wave locally. Waves run concurrently inside themselves; the waves themselves are
+   ordered by `STATUS.md` §1a.
+2. **Review** every pull request. Escalate the model for anything touching `crypto.ts`/`share.ts`,
+   the IndexedDB schema, the anchor and history model, or an `innerHTML` path.
+3. **Verify locally, in full** — `docs/qa-checklists/REGRESSION.md` end to end, **plus** every new
+   feature against its own task spec. This is the gate. A failure here is fixed and re-verified; it
+   is never deployed and noted.
+3a. **Un-stack before merging.** GitHub evaluates a `pull_request` workflow from the PR's **merge
+   ref** — head merged into base — never from the base branch alone (this is also why
+   `pull_request_target` exists: it is the variant that reads from the base instead). So removing
+   the `branches: [main]` filter (T9) does not, by itself, give an already-open stacked pull request
+   any checks: nothing about `main` enters that PR's merge ref while its base is a feature branch, so
+   it has zero checks before the fix merges and zero after. What actually reaches a stacked PR is the
+   fix landing in **its own** head or base — by merging or rebasing updated `main` into it, or by
+   re-targeting it at `main`. For a release built as a stack, the honest sequence is: merge the
+   tooling and foundation PRs to `main` first, then **rebase every remaining PR onto `main`** so each
+   one is a PR into `main` and gets checks from its own merge ref. **Re-targeting alone may not fire
+   a run**: the default `pull_request` activity types are `opened, synchronize, reopened`, and
+   changing a PR's base is `edited` — if no run appears after re-targeting, push a commit (a rebase
+   does this) or close and reopen the PR. Do not treat a reviewer running the chain by hand as
+   equivalent to a check — it is a mitigation, not a gate, and it does not survive the next push to
+   that branch.
+4. **Deploy once**, all of it, by merging to `main`. `deploy.yml` runs `check`, migrates D1, uploads
+   the Worker and assets, and smoke-tests the origin.
+5. **Verify on production** — the same regression checklist again, because layout is what a build
+   changes and a build is what sits between steps 3 and 5, then every new feature again.
+6. **Fix forward and re-verify.** There is no staging to roll back to; a re-run of the workflow at an
+   earlier commit is the rollback, and it is the last resort rather than the first.
+
+## Running unattended
+
+This project is worked in long autonomous stretches while its maintainer is away, so two rules
+exist that would otherwise be judgement calls:
+
+- **No gate may wait on a human.** A gate that cannot be satisfied without the maintainer is either
+  satisfied another way or recorded as an open ask in `STATUS.md` §4 and passed over — never waived
+  silently, and never blocked on.
+- **Broken does not ship, and broken does not stay.** If a feature cannot be made to work, it is
+  removed from the release rather than deployed half-working; if it breaks production, it is fixed
+  forward or reverted before the run ends. "Deployed and noted as broken" is not an outcome.
