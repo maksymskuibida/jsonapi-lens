@@ -92,6 +92,26 @@ async function readErrorDetail(response: MinimalResponse): Promise<string | null
   }
 }
 
+/**
+ * A thrown `fetch` failure, made readable. Node's real `fetch` (undici) wraps
+ * the actual reason in `.cause` behind a generic outer message — every one of
+ * a refused redirect, a refused connection, and a DNS failure surfaces as the
+ * identical `TypeError: fetch failed`, with `unexpected redirect`,
+ * `bad port`/`ECONNREFUSED`, or `getaddrinfo ENOTFOUND …` respectively sitting
+ * one level down in `.cause`. Without unwrapping it, adding `redirect:
+ * "error"` made the security property durable at the cost of making its own
+ * failure indistinguishable from an unrelated outage — exactly the kind of
+ * message this project's own rules call a `TypeError` about `undefined` in
+ * spirit: technically thrown, practically undiagnosable.
+ */
+function describeFetchFailure(cause: unknown): string {
+  if (!(cause instanceof Error)) return String(cause);
+  const inner = (cause as { cause?: unknown }).cause;
+  const innerMessage =
+    inner instanceof Error ? inner.message : typeof inner === "string" ? inner : null;
+  return innerMessage ? `${cause.message} (${innerMessage})` : cause.message;
+}
+
 export async function uploadShare(
   fetchImpl: FetchLike,
   origin: string,
@@ -108,7 +128,7 @@ export async function uploadShare(
     });
   } catch (cause) {
     throw new Error(
-      `Could not reach ${origin}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Could not reach ${origin}: ${describeFetchFailure(cause)}`,
     );
   }
 
@@ -146,7 +166,7 @@ export async function fetchShareBlob(
     response = await fetchImpl(`${origin}/api/shares/${id}`, { redirect: "error" });
   } catch (cause) {
     throw new Error(
-      `Could not reach ${origin}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Could not reach ${origin}: ${describeFetchFailure(cause)}`,
     );
   }
 
