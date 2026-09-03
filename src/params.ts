@@ -97,7 +97,47 @@ export type ParamConvention =
   | "bracket-object"
   | "dot-path"
   | "json-value"
-  | "base64url-json";
+  | "base64url-json"
+  | "truncated";
+
+/**
+ * A recognisable, never-collides-with-real-data marker for a value this
+ * module refused to decode further — see `MAX_PARAM_DEPTH`.
+ */
+export const TRUNCATED_VALUE = "[TRUNCATED]";
+
+/**
+ * Maximum bracket/dot nesting this module will build a tree for, on encode or
+ * decode. Real JSON:API parameters never nest past two or three levels
+ * (`filter[status][in]`); this exists purely as a hard, cheap floor under
+ * `decodeParams`/`encodeParams`'s "never throws" promise — unbounded
+ * recursion here is a `RangeError` a few thousand bracket segments in,
+ * reachable from a single ~15 kB pasted key, and `encodeParams` can be handed
+ * a `ParamSet` built by hand (T3, a test) rather than one this module
+ * produced itself, so the encode side needs its own bound rather than relying
+ * on decode having already capped what it could ever see.
+ */
+const MAX_PARAM_DEPTH = 32;
+
+/**
+ * `__proto__`, `constructor` and `prototype` are never used as an object key
+ * anywhere in this module, on purpose — see the "tree building" section
+ * header below for why a query string is exactly the kind of untrusted input
+ * this has to be defended against unconditionally, not merely detected.
+ */
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * A plain object with **no prototype at all** — `obj[key] = value` on one of
+ * these is an ordinary own-property write for *any* string `key`, including
+ * `__proto__`/`constructor`/`prototype`, because there is no inherited
+ * accessor or non-writable built-in property for those names to collide
+ * with. Every object this module builds from a dynamic, wire-controlled key
+ * uses this instead of a `{}` literal.
+ */
+function safeObject<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
 
 export interface ParamReading {
   convention: ParamConvention;
@@ -143,6 +183,15 @@ export interface ParamEntry {
    * them picked.
    */
   conflict?: ParamReading[];
+  /**
+   * `__proto__`/`constructor`/`prototype` segments encountered anywhere in
+   * this entry's key path and excluded from `value` rather than used as an
+   * object key — present only when at least one was. The wire pair itself is
+   * never lost (it is still in `raw`); only its place in the decoded tree is
+   * refused. See the "tree building" section header for why these three
+   * names are rejected outright rather than merely handled safely.
+   */
+  unsafeSegments?: string[];
 }
 
 export interface ParamSet {
@@ -348,6 +397,31 @@ function decodeLeaf(text: string): LeafReading {
 
 /* -------------------------------------------------------- tree building --- */
 
+/**
+ * Every object below is built from a **wire-controlled key** — one straight
+ * out of a pasted URL or form body — and JavaScript has three property names
+ * that turn an ordinary `obj[key] = value` write into something else
+ * entirely: `__proto__` is an accessor that reassigns the object's own
+ * prototype instead of creating a property, and `constructor`/`prototype`
+ * chain into the real, non-writable `Object.prototype`/`Function.prototype`
+ * and throw under strict mode (which every ES module runs under, including
+ * this one). `include=__proto__.polluted` and `a[__proto__][x]=1` are both
+ * reachable from a single pasted query string, and the first one pollutes
+ * `Object.prototype` process-wide with no error and no visibly wrong output.
+ *
+ * The fix is structural, not a list of three strings to special-case: every
+ * function below builds its tree on `safeObject()` — `Object.create(null)`,
+ * which has no inherited accessor and no non-writable property for any key
+ * to collide with, so `obj[key] = value` is an ordinary write for *any*
+ * `key` at all. `UNSAFE_KEYS` is rejected outright on top of that, as an
+ * independent second layer: a caller reading `entry.value` should not have
+ * to know which internal representation produced it, and data that
+ * originated here may still end up copied by some *other* module's naive
+ * `for…in`/spread loop onto a normal-prototype object — refusing to let
+ * these three names become a key at all is what keeps that downstream copy
+ * safe too, not just this module's own reads.
+ */
+
 interface InternalPair {
   rawValue: string | null;
   remaining: KeySegment[];
@@ -358,6 +432,11 @@ interface BuiltNode {
   /** Outermost first, de-duplicated by the caller. */
   usedConventions: ParamConvention[];
   alternatives: ParamAlternative[];
+  /**
+   * `__proto__`/`constructor`/`prototype` segments rejected anywhere in this
+   * subtree — see `ParamEntry.unsafeSegments`.
+   */
+  rejected: string[];
 }
 
 function isIndexLike(segment: KeySegment): boolean {
@@ -375,65 +454,130 @@ function decodeOnePair(rawValue: string | null): LeafReading | null {
 
 /** One or more pairs whose path is now empty — a scalar, or (repeated) an array built purely from repetition. */
 function buildLeafNode(pairs: InternalPair[]): BuiltNode {
-  if (pairs.length === 0) return { value: null, usedConventions: [], alternatives: [] };
+  if (pairs.length === 0) return { value: null, usedConventions: [], alternatives: [], rejected: [] };
 
   if (pairs.length === 1) {
     const decoded = decodeOnePair(pairs[0]!.rawValue);
-    if (decoded === null) return { value: null, usedConventions: ["valueless"], alternatives: [] };
+    if (decoded === null) return { value: null, usedConventions: ["valueless"], alternatives: [], rejected: [] };
     return {
       value: decoded.value,
       usedConventions: [decoded.convention],
       alternatives: decoded.alternatives.map((alt) => ({ path: [], ...alt })),
+      rejected: [],
     };
   }
 
   const decoded = pairs.map((pair) => decodeOnePair(pair.rawValue));
   const alternatives: ParamAlternative[] = [];
+  // Each repetition keeps its own reading's convention — a plain
+  // `usedConventions: ["repeated-key"]` here would silently drop "comma" from
+  // `a=1,2&a=3`, which is exactly the D5 violation this line exists to avoid.
+  const usedConventions = new Set<ParamConvention>(["repeated-key"]);
   decoded.forEach((d, i) => {
-    if (d) for (const alt of d.alternatives) alternatives.push({ path: [i], ...alt });
+    if (d) {
+      usedConventions.add(d.convention);
+      for (const alt of d.alternatives) alternatives.push({ path: [i], ...alt });
+    }
   });
   return {
     value: decoded.map((d) => (d ? d.value : null)),
-    usedConventions: ["repeated-key"],
+    usedConventions: [...usedConventions],
     alternatives,
+    rejected: [],
   };
 }
 
-/** Pairs whose next path segment is `index` (`[]`) or `indexed` (`[N]`) — builds an array. */
-function buildArray(pairs: InternalPair[], depth: number): BuiltNode {
-  const byIndex = new Map<number, InternalPair[]>();
-  const appended: InternalPair[][] = [];
+interface ArrayGroup {
+  kind: "indexed" | "appended";
+  index?: number;
+  firstSeenAt: number;
+  items: InternalPair[];
+}
 
-  for (const pair of pairs) {
+/** Build an array's `value` (and merged conventions/alternatives/rejected) from one fixed ordering of its groups. */
+function buildArrayFromGroups(groups: ArrayGroup[], depth: number): BuiltNode {
+  const usedConventions = new Set<ParamConvention>();
+  const alternatives: ParamAlternative[] = [];
+  const rejected: string[] = [];
+  const value = groups.map((group, i) => {
+    const child = buildNode(group.items, depth + 1);
+    for (const c of child.usedConventions) usedConventions.add(c);
+    for (const alt of child.alternatives) alternatives.push({ ...alt, path: [i, ...alt.path] });
+    rejected.push(...child.rejected);
+    return child.value;
+  });
+  return { value, usedConventions: [...usedConventions], alternatives, rejected };
+}
+
+/**
+ * Pairs whose next path segment is `index` (`[]`) or `indexed` (`[N]`) —
+ * builds an array. Two cases:
+ *
+ *   - **Pure `[N]`, or pure `[]`.** Unambiguous: `[N]` positions are
+ *     explicit and sorted numerically regardless of wire order
+ *     (`a[3]=x&a[1]=y` -> `[y, x]`, per the spec's table), and `[]` has no
+ *     position to sort by other than the order it arrived in.
+ *   - **`[]` and `[N]` mixed for the same array** (`a[]=1&a[0]=2`) is
+ *     genuinely ambiguous — PHP and `qs` give the indices priority; this
+ *     module gives wire order priority, as its most literal,
+ *     least-surprising reading — but *either* choice made silently, with the
+ *     other simply discarded, is the exact "guessed away" failure D5
+ *     forbids. So wire order is `value`, and the indices-first ordering is
+ *     attached as a `[]`-pathed `alternative` whenever it would actually
+ *     read differently.
+ */
+function buildArray(pairs: InternalPair[], depth: number): BuiltNode {
+  const byIndex = new Map<number, ArrayGroup>();
+  const groups: ArrayGroup[] = []; // wire order: each group appended exactly once, at its first occurrence
+
+  pairs.forEach((pair, position) => {
     const segment = pair.remaining[0]!;
     const rest: InternalPair = { rawValue: pair.rawValue, remaining: pair.remaining.slice(1) };
     if (segment.kind === "indexed") {
-      const bucket = byIndex.get(segment.index);
-      if (bucket) bucket.push(rest);
-      else byIndex.set(segment.index, [rest]);
+      let group = byIndex.get(segment.index);
+      if (!group) {
+        group = { kind: "indexed", index: segment.index, firstSeenAt: position, items: [] };
+        byIndex.set(segment.index, group);
+        groups.push(group);
+      }
+      group.items.push(rest);
     } else {
       // Each `[]` occurrence is its own array element — a bracket-list of
       // objects (`a[][x]=1&a[][y]=2` pairing up into one element) is a PHP-ism
       // outside the spec's table and is not attempted here.
-      appended.push([rest]);
+      groups.push({ kind: "appended", firstSeenAt: position, items: [rest] });
+    }
+  });
+
+  const hasIndexed = groups.some((g) => g.kind === "indexed");
+  const hasAppended = groups.some((g) => g.kind === "appended");
+
+  // Indices first (sorted numerically), appended after (in wire order) — the
+  // only ordering for a *pure* form of either, and one of the two candidate
+  // readings when mixed.
+  const indexedThenAppended = [...groups].sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "indexed" ? -1 : 1;
+    return a.kind === "indexed" ? (a.index ?? 0) - (b.index ?? 0) : a.firstSeenAt - b.firstSeenAt;
+  });
+
+  // Only when genuinely mixed does wire order (`groups`, unsorted) differ
+  // from — and take priority over — the indexed-first reading.
+  const mixed = hasIndexed && hasAppended;
+  const primary = buildArrayFromGroups(mixed ? groups : indexedThenAppended, depth);
+  if (hasIndexed) primary.usedConventions = dedupe(["indexed", ...primary.usedConventions]);
+  if (hasAppended) primary.usedConventions = dedupe(["bracket-list", ...primary.usedConventions]);
+
+  if (mixed) {
+    const alternate = buildArrayFromGroups(indexedThenAppended, depth);
+    if (JSON.stringify(alternate.value) !== JSON.stringify(primary.value)) {
+      primary.alternatives = [
+        ...primary.alternatives,
+        { path: [], convention: "indexed", value: alternate.value },
+      ];
     }
   }
 
-  const usedConventions = new Set<ParamConvention>();
-  if (byIndex.size > 0) usedConventions.add("indexed");
-  if (appended.length > 0) usedConventions.add("bracket-list");
-
-  const groups = [...[...byIndex.keys()].sort((a, b) => a - b).map((index) => byIndex.get(index)!), ...appended];
-
-  const alternatives: ParamAlternative[] = [];
-  const value = groups.map((group, i) => {
-    const child = buildNode(group, depth + 1);
-    for (const c of child.usedConventions) usedConventions.add(c);
-    for (const alt of child.alternatives) alternatives.push({ ...alt, path: [i, ...alt.path] });
-    return child.value;
-  });
-
-  return { value, usedConventions: [...usedConventions], alternatives };
+  return primary;
 }
 
 /**
@@ -446,6 +590,7 @@ function buildObject(pairs: InternalPair[], depth: number, stringifyIndexKeys = 
   const slots = new Map<string, InternalPair[]>();
   const order: string[] = [];
   const usedConventions = new Set<ParamConvention>();
+  const rejected: string[] = [];
 
   for (const pair of pairs) {
     const segment = pair.remaining[0]!;
@@ -461,6 +606,15 @@ function buildObject(pairs: InternalPair[], depth: number, stringifyIndexKeys = 
       // `stringifyIndexKeys` — defensive, not expected to run.
       key = "";
     }
+
+    if (UNSAFE_KEYS.has(key)) {
+      // Never becomes an own key of `value` below — see the "tree building"
+      // section header. The wire pair is still in `raw` on the entry; only
+      // its place in the decoded tree is refused.
+      rejected.push(key);
+      continue;
+    }
+
     const rest: InternalPair = { rawValue: pair.rawValue, remaining: pair.remaining.slice(1) };
     const bucket = slots.get(key);
     if (bucket) bucket.push(rest);
@@ -471,15 +625,16 @@ function buildObject(pairs: InternalPair[], depth: number, stringifyIndexKeys = 
   }
 
   const alternatives: ParamAlternative[] = [];
-  const value: Record<string, ParamValue> = {};
+  const value = safeObject<ParamValue>();
   for (const key of order) {
     const child = buildNode(slots.get(key)!, depth + 1);
     for (const c of child.usedConventions) usedConventions.add(c);
     for (const alt of child.alternatives) alternatives.push({ ...alt, path: [key, ...alt.path] });
+    rejected.push(...child.rejected);
     value[key] = child.value;
   }
 
-  return { value, usedConventions: [...usedConventions], alternatives };
+  return { value, usedConventions: [...usedConventions], alternatives, rejected };
 }
 
 /**
@@ -496,6 +651,16 @@ function buildObject(pairs: InternalPair[], depth: number, stringifyIndexKeys = 
  * inside one object than silently choose a shape for the whole parameter.
  */
 function buildNode(pairs: InternalPair[], depth: number): BuiltNode {
+  if (depth > MAX_PARAM_DEPTH) {
+    // A ~15 kB key of nested brackets is pasteable text, and unbounded
+    // recursion here is a `RangeError` a few thousand levels in — see
+    // `MAX_PARAM_DEPTH`. Stop, rather than throw: the entry as a whole still
+    // decodes to *something*, with `"truncated"` in its `conventions` saying
+    // so, instead of taking down whichever caller did not wrap this in a
+    // `try`/`catch` because this module promises it never needs one.
+    return { value: TRUNCATED_VALUE, usedConventions: ["truncated"], alternatives: [], rejected: [] };
+  }
+
   const leaves = pairs.filter((pair) => pair.remaining.length === 0);
   const deeper = pairs.filter((pair) => pair.remaining.length > 0);
 
@@ -548,12 +713,14 @@ function buildEntry(name: string, pairs: ParsedPair[]): ParamEntry {
       convention: node.usedConventions[0] ?? "plain",
       value: node.value,
     }));
+    const unsafeSegments = dedupe(built.flatMap((node) => node.rejected));
     return {
       name,
       raw,
       conventions: dedupe(built.flatMap((node) => node.usedConventions)),
       alternatives: [],
       conflict,
+      ...(unsafeSegments.length > 0 ? { unsafeSegments } : {}),
     };
   }
 
@@ -564,6 +731,7 @@ function buildEntry(name: string, pairs: ParsedPair[]): ParamEntry {
 
   const node = buckets[0]!.build();
   const conventions = dedupe(node.usedConventions);
+  const unsafeSegments = dedupe(node.rejected);
   return {
     name,
     raw,
@@ -571,6 +739,7 @@ function buildEntry(name: string, pairs: ParsedPair[]): ParamEntry {
     convention: conventions[0] ?? "plain",
     conventions,
     alternatives: node.alternatives,
+    ...(unsafeSegments.length > 0 ? { unsafeSegments } : {}),
   };
 }
 
@@ -618,11 +787,32 @@ function stringifyLeaf(value: ParamValue): string {
  * Encode one nested value inside an array or object using a fixed,
  * shape-driven scheme — see the module header for why this does not need to
  * know which bracket convention originally produced the value.
+ *
+ * An empty-string object key is encoded with a trailing **dot**
+ * (`name.` — dot-path syntax for an empty segment) rather than `name[]`,
+ * which this module's own `parseParamKey` would read back as an
+ * array-append token, not an object key: three different decode paths can
+ * legitimately produce an object with a `""` key (`a[=1`'s unterminated
+ * bracket, `a..b=1`'s empty dot segment, and `buildNode`'s own synthetic fold
+ * for a value that is both a leaf and nested deeper), so this has to hold
+ * for all of them, not just the one in whatever example prompted it. `name.`
+ * decoded through `parseParamKey` produces exactly one segment, `{key: "",
+ * syntax: "dot"}` — an object, never an array — so the round trip holds
+ * regardless of which of the three paths produced the original key.
+ *
+ * `depth` bounds recursion independently of whatever produced `value` — see
+ * `MAX_PARAM_DEPTH`'s comment for why the encode side cannot assume its
+ * input came from this module's own (already-capped) decoder.
  */
-function encodeChild(name: string, value: ParamValue): string[] {
+function encodeChild(name: string, value: ParamValue, depth = 0): string[] {
+  if (depth > MAX_PARAM_DEPTH) return [`${encodeURIComponent(name)}=${encodeURIComponent(TRUNCATED_VALUE)}`];
   if (value === null) return [encodeURIComponent(name)];
-  if (Array.isArray(value)) return value.flatMap((v) => encodeChild(`${name}[]`, v));
-  if (typeof value === "object") return Object.entries(value).flatMap(([k, v]) => encodeChild(`${name}[${k}]`, v));
+  if (Array.isArray(value)) return value.flatMap((v) => encodeChild(`${name}[]`, v, depth + 1));
+  if (typeof value === "object") {
+    return Object.entries(value).flatMap(([k, v]) =>
+      encodeChild(k === "" ? `${name}.` : `${name}[${k}]`, v, depth + 1),
+    );
+  }
   return [`${encodeURIComponent(name)}=${encodeURIComponent(stringifyLeaf(value))}`];
 }
 
@@ -650,7 +840,8 @@ function encodeEntry(name: string, value: ParamValue, convention: ParamConventio
     case "bracket-object":
     case "dot-path": {
       const obj = value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
-      return Object.entries(obj).flatMap(([k, v]) => encodeChild(`${name}[${k}]`, v));
+      // See encodeChild's header for why an empty-string key uses `name.`, not `name[]`.
+      return Object.entries(obj).flatMap(([k, v]) => encodeChild(k === "" ? `${name}.` : `${name}[${k}]`, v));
     }
     case "json-value":
       return [`${encodedName}=${encodeURIComponent(JSON.stringify(value))}`];
@@ -709,19 +900,29 @@ function stringListValue(value: ParamValue | undefined): string[] {
  * module follows: an empty tree would otherwise be indistinguishable from
  * "no `include` was sent" for the one case where something was sent but this
  * module could not make sense of it.
+ *
+ * Builds on `safeObject()` and skips a `__proto__`/`constructor`/`prototype`
+ * segment rather than descending into it — `include=__proto__.polluted` is a
+ * value an attacker controls completely, split on `.` with no relation to
+ * `parseParamKey`'s own key parsing, so it needs this module's prototype-
+ * pollution defence independently rather than inheriting `buildObject`'s.
+ * `hasOwnProperty` is checked explicitly on descent, rather than `??`,
+ * so existence is decided from the object's own properties alone — see the
+ * "tree building" section header for why that pattern is load-bearing here
+ * specifically, on data one step further from this module's own key parser.
  */
 export function includeTree(params: ParamSet): IncludeTree | undefined {
   const entry = findParam(params, "include");
   if (!entry || entry.conflict) return undefined;
 
-  const tree: IncludeTree = {};
+  const tree: IncludeTree = safeObject();
   for (const path of stringListValue(entry.value)) {
     if (path === "") continue;
     let node = tree;
     for (const segment of path.split(".")) {
-      if (segment === "") continue;
-      node[segment] = node[segment] ?? {};
-      node = node[segment]!;
+      if (segment === "" || UNSAFE_KEYS.has(segment)) break;
+      if (!Object.prototype.hasOwnProperty.call(node, segment)) node[segment] = safeObject();
+      node = node[segment] as IncludeTree;
     }
   }
   return tree;

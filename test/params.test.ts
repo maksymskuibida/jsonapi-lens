@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { decodeParams, encodeParams, findParam, includeTree, sortFields } from "../src/params.js";
-import type { ParamEntry } from "../src/params.js";
+import { decodeParams, encodeParams, findParam, includeTree, sortFields, TRUNCATED_VALUE } from "../src/params.js";
+import type { ParamEntry, ParamSet, ParamValue } from "../src/params.js";
 
 /** The value/convention of the one entry named `name`, or `undefined` if there isn't one. */
 function readOf(wire: string, name: string): ParamEntry | undefined {
@@ -369,5 +369,207 @@ describe("differential test against URLSearchParams", () => {
     // This module keeps the distinction the spec explicitly asks for.
     expect(readOf("a=", "a")?.value).toBe("");
     expect(readOf("a", "a")?.value).toBeNull();
+  });
+});
+
+/**
+ * B1/B2/B3 — a permanent hostile corpus for a *decoder*, not just for markup.
+ * `__proto__`/`constructor`/`prototype` are ordinary property names on any
+ * plain-object-shaped tree this module builds from a wire-controlled key, and
+ * a pasted query string is exactly the kind of untrusted input that reaches
+ * this code path. Every case here failed before this fix — either by
+ * polluting `Object.prototype` process-wide, by throwing, or by silently
+ * discarding the parameter while still reading successfully through the
+ * (now-polluted) prototype chain.
+ */
+describe("prototype-pollution safety (B1/B2/B3) — a permanent hostile corpus", () => {
+  it("includeTree: a __proto__ segment never reaches Object.prototype", () => {
+    const before = ({} as Record<string, unknown>)["polluted"];
+    includeTree(decodeParams("include=__proto__.polluted"));
+    expect(({} as Record<string, unknown>)["polluted"]).toBe(before); // still undefined
+    expect(Object.prototype).not.toHaveProperty("polluted");
+  });
+
+  it("includeTree: a __proto__ segment mixed with a safe path pollutes nothing and still builds the safe part", () => {
+    expect(() => includeTree(decodeParams("include=a.__proto__.b,legs.station"))).not.toThrow();
+    const tree = includeTree(decodeParams("include=a.__proto__.b,legs.station"));
+    expect(tree).toEqual({ a: {}, legs: { station: {} } });
+    expect(Object.prototype).not.toHaveProperty("b");
+  });
+
+  it("includeTree: constructor.prototype.x does not throw", () => {
+    expect(() => includeTree(decodeParams("include=constructor.prototype.x"))).not.toThrow();
+    expect(includeTree(decodeParams("include=constructor.prototype.x"))).toEqual({});
+  });
+
+  it("buildObject via bracket key: a[__proto__][x]=1 does not pollute, does not throw, and reports the rejection instead of discarding the pair silently", () => {
+    expect(() => decodeParams("a[__proto__][x]=1")).not.toThrow();
+    const entry = readOf("a[__proto__][x]=1", "a");
+    expect(({} as Record<string, unknown>)["x"]).toBeUndefined(); // no pollution
+    expect(entry?.value).toEqual({}); // the unsafe branch contributes no key to the tree
+    expect(Object.keys(entry?.value as object)).toEqual([]);
+    // Both toEqual and JSON.stringify above only ever see OWN enumerable
+    // properties, so neither would actually notice a corrupted prototype —
+    // that is exactly how the original bug "returned a perfectly plausible
+    // value". The direct, discriminating check is that "x" is not reachable
+    // through `value`'s own prototype chain at all, and that the chain
+    // itself was never touched.
+    expect((entry?.value as Record<string, unknown> | undefined)?.["x"]).toBeUndefined();
+    expect(Object.getPrototypeOf(entry?.value)).toBeNull();
+    expect(entry?.unsafeSegments).toEqual(["__proto__"]);
+    // The wire pair itself is never lost, even though it never entered the tree.
+    expect(entry?.raw).toEqual([{ key: "a[__proto__][x]", value: "1" }]);
+  });
+
+  it("buildObject via dot path: a.__proto__.x=1 and a.constructor.prototype=1 do not pollute or throw", () => {
+    expect(() => decodeParams("a.__proto__.x=1")).not.toThrow();
+    expect(() => decodeParams("a.constructor.prototype=1")).not.toThrow();
+    expect(({} as Record<string, unknown>)["x"]).toBeUndefined();
+    expect(readOf("a.__proto__.x=1", "a")?.unsafeSegments).toEqual(["__proto__"]);
+  });
+
+  it("a bare unsafe bracket key alone reports the rejection and an empty object, never a crash", () => {
+    for (const key of ["__proto__", "constructor", "prototype"]) {
+      expect(() => decodeParams(`a[${key}]=1`)).not.toThrow();
+      const entry = readOf(`a[${key}]=1`, "a");
+      expect(entry?.value).toEqual({});
+      expect(entry?.unsafeSegments).toEqual([key]);
+    }
+    // The real accessor is untouched throughout.
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+  });
+
+  it("a safe key beside an unsafe one in the same object: the safe key still decodes, JSON.stringify works, no pollution", () => {
+    const entry = readOf("a[__proto__][x]=1&a[b]=2", "a");
+    expect(entry?.value).toEqual({ b: "2" });
+    expect(JSON.stringify(entry?.value)).toBe('{"b":"2"}');
+    expect((entry?.value as Record<string, unknown> | undefined)?.["x"]).toBeUndefined();
+    expect(Object.getPrototypeOf(entry?.value)).toBeNull();
+    expect(entry?.unsafeSegments).toEqual(["__proto__"]);
+  });
+
+  it("an unsafe segment inside an array element does not pollute or throw either", () => {
+    expect(() => decodeParams("a[][__proto__][x]=1")).not.toThrow();
+    const entry = readOf("a[][__proto__][x]=1", "a");
+    expect(({} as Record<string, unknown>)["x"]).toBeUndefined();
+    expect(entry?.unsafeSegments).toEqual(["__proto__"]);
+  });
+});
+
+describe("B4 — bounded recursion, never a RangeError", () => {
+  it("decodeParams does not throw on thousands of bracket segments", () => {
+    const wire = "a" + "[b]".repeat(5000) + "=1";
+    expect(() => decodeParams(wire)).not.toThrow();
+    const entry = readOf(wire, "a");
+    expect(entry?.conventions).toContain("truncated");
+  });
+
+  it("encodeParams does not throw on a deeply nested value, even one this module did not decode itself", () => {
+    let value: ParamValue = "1";
+    for (let i = 0; i < 20000; i++) value = { b: value };
+    const set: ParamSet = {
+      entries: [
+        {
+          name: "a",
+          raw: [],
+          value,
+          convention: "bracket-object",
+          conventions: ["bracket-object"],
+          alternatives: [],
+        },
+      ],
+    };
+    expect(() => encodeParams(set)).not.toThrow();
+  });
+
+  it("a moderate, realistic nesting depth (well under the bound) is unaffected", () => {
+    const wire = "a" + "[b]".repeat(5) + "=1";
+    const entry = readOf(wire, "a");
+    expect(entry?.conventions).not.toContain("truncated");
+    roundTrips(wire, "a");
+  });
+
+  it("truncation is visible in the value, not silently absorbed", () => {
+    const wire = "a" + "[b]".repeat(5000) + "=1";
+    const entry = readOf(wire, "a");
+    expect(JSON.stringify(entry?.value)).toContain(TRUNCATED_VALUE);
+  });
+});
+
+describe("S5 — conventions no longer drop the inner reading of a repeated key", () => {
+  it("a=1,2&a=3 names both repeated-key and comma", () => {
+    const entry = readOf("a=1,2&a=3", "a");
+    expect(entry?.value).toEqual([["1", "2"], "3"]);
+    expect(entry?.conventions).toEqual(expect.arrayContaining(["repeated-key", "comma"]));
+  });
+
+  it("a=1|2&a=x%20y&a=3 names pipe-delimited and space-delimited too, alongside repeated-key", () => {
+    const entry = readOf("a=1|2&a=x%20y&a=3", "a");
+    expect(entry?.conventions).toEqual(
+      expect.arrayContaining(["repeated-key", "pipe-delimited", "space-delimited"]),
+    );
+  });
+});
+
+describe("S6 — mixed [] and [N] forms are disclosed, not silently resolved", () => {
+  it("a[]=1&a[0]=2 keeps wire order as the primary reading", () => {
+    const entry = readOf("a[]=1&a[0]=2", "a");
+    expect(entry?.value).toEqual(["1", "2"]);
+  });
+
+  it("a[0]=2&a[]=1 — the reverse wire text — is distinguishable from the above, not collapsed to the same array", () => {
+    const entry = readOf("a[0]=2&a[]=1", "a");
+    expect(entry?.value).toEqual(["2", "1"]);
+  });
+
+  it("the indices-first reading is offered as a named alternative whenever it actually differs", () => {
+    const entry = readOf("a[]=1&a[0]=2", "a");
+    expect(entry?.alternatives).toEqual(
+      expect.arrayContaining([{ path: [], convention: "indexed", value: ["2", "1"] }]),
+    );
+  });
+
+  it("sparse, out-of-order indices with no [] mixed in are unaffected — still sorted numerically, no alternative manufactured", () => {
+    const entry = readOf("a[3]=x&a[7]=y", "a");
+    expect(entry?.value).toEqual(["x", "y"]);
+    expect(entry?.alternatives).toEqual([]);
+  });
+});
+
+describe("S7 — an empty-string object key round-trips as an object, never as an array", () => {
+  it("a[=1 (unterminated, empty bracket content) stays an object through a full round trip", () => {
+    const entry = readOf("a[=1", "a");
+    expect(entry?.value).toEqual({ "": "1" });
+    const reEncoded = encodeParams(decodeParams("a[=1"));
+    const decodedAgain = readOf(reEncoded, "a");
+    expect(decodedAgain?.value).toEqual({ "": "1" });
+    expect(Array.isArray(decodedAgain?.value)).toBe(false);
+  });
+
+  it("a..b=1 (an empty dot segment) also stays an object through a full round trip", () => {
+    const entry = readOf("a..b=1", "a");
+    expect(entry?.value).toEqual({ "": { b: "1" } });
+    const reEncoded = encodeParams(decodeParams("a..b=1"));
+    const decodedAgain = readOf(reEncoded, "a");
+    expect(decodedAgain?.value).toEqual({ "": { b: "1" } });
+    expect(Array.isArray(decodedAgain?.value)).toBe(false);
+  });
+
+  it("the synthetic fold for a leaf beside a deeper path (a[b]=1 & a[b][c]=2) round-trips too", () => {
+    const wire = "a[b]=1&a[b][c]=2";
+    roundTrips(wire, "a");
+  });
+});
+
+describe("S9 — the base64url-JSON length floor is doing real work, not just the object/array-only rule", () => {
+  it("cursor=e30 (base64url of {}) is too short to be read as base64url JSON, and stays plain", () => {
+    const entry = readOf("cursor=e30", "cursor");
+    expect(entry?.convention).toBe("plain");
+    expect(entry?.value).toBe("e30");
+  });
+
+  it("cursor=WzFd (base64url of [1]) is likewise too short", () => {
+    const entry = readOf("cursor=WzFd", "cursor");
+    expect(entry?.convention).toBe("plain");
   });
 });
