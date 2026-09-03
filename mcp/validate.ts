@@ -4,38 +4,80 @@
  * secret fails in microseconds rather than after a 12 MB gzip or a real
  * `fetch`.
  *
- * None of this duplicates `src/crypto.ts`. `assertValidSecret` enforces a
- * *narrower* rule than `crypto.ts`'s own `[MIN_SECRET_CHARS, MAX_SECRET_CHARS]`
- * range (8-64 of `[A-Za-z0-9_-]`) — this module's job is to hold the MCP
- * caller to the one shape this task actually offers (64 lowercase hex, from
- * `openssl rand -hex 32`), not to re-derive what `crypto.ts` already accepts.
- * A secret that passes here always passes there too, by construction (64 hex
- * characters is a subset of `[A-Za-z0-9_-]{8,64}`).
+ * None of this duplicates `src/crypto.ts`'s crypto. It duplicates one of its
+ * *policy* decisions on purpose, split in two, because `share` and `read` are
+ * answering different questions about a secret:
+ *
+ *   - `share` **mints** a link. It gets to be picky about what it accepts,
+ *     because it controls what comes out the other end — `assertShareSecret`
+ *     insists on exactly 64 lowercase hex, the output of
+ *     `openssl rand -hex 32`, which is a real strengthening over what
+ *     `crypto.ts` would otherwise allow.
+ *   - `read` **opens** a link somebody else already made — most often the
+ *     browser, whose `generateSecret()` (`src/crypto.ts`) produces 10
+ *     *mixed-case* base64url characters, nothing like 64 lowercase hex. A
+ *     `read` that enforced `share`'s minting policy would refuse every link
+ *     the product has ever produced. So `assertReadSecret` accepts anything
+ *     the wire format itself can produce — `crypto.ts`'s own
+ *     `[MIN_SECRET_CHARS, MAX_SECRET_CHARS]` of `[A-Za-z0-9_-]`, the same
+ *     range `SHARE_PATTERN` in `router.ts` parses out of a URL — and refuses,
+ *     never normalises, anything outside it.
+ *
+ * A secret `assertShareSecret` accepts always passes `assertReadSecret` too,
+ * by construction (64 lowercase hex is a subset of `[A-Za-z0-9_-]{8,64}`),
+ * so `share` immediately followed by `read` on the same secret can never
+ * disagree with itself.
  */
 
-import { MAX_BUNDLE_BYTES } from "../src/crypto.js";
+import { MAX_BUNDLE_BYTES, MAX_SECRET_CHARS, MIN_SECRET_CHARS } from "../src/crypto.js";
 import { formatBytes } from "../src/format.js";
 
 /* ------------------------------------------------------------- secret ---- */
 
-const SECRET_HEX_LENGTH = 64;
-const SECRET_PATTERN = /^[0-9a-f]{64}$/;
+const SHARE_SECRET_HEX_LENGTH = 64;
+const SHARE_SECRET_PATTERN = /^[0-9a-f]{64}$/;
 export const GENERATE_SECRET_COMMAND = "openssl rand -hex 32";
 
 /**
- * 64 lowercase hex characters, exactly — the output shape of
- * `openssl rand -hex 32`. Uppercase is refused rather than normalised: two
- * call sites (`share` and `read`) silently agreeing to lowercase a caller's
- * uppercase input is one more place for the two to drift out of step, and a
- * caller that pastes a secret with different casing than it was generated
- * with almost certainly mistyped or mis-copied it — accepting it either way
- * hides that mistake instead of catching it.
+ * What `share` will mint under: 64 lowercase hex characters, exactly — the
+ * output shape of `openssl rand -hex 32`. Uppercase is refused rather than
+ * normalised: two call sites silently agreeing to lowercase a caller's
+ * uppercase input is one more place to drift out of step, and a caller that
+ * pastes a secret with different casing than it generated it with almost
+ * certainly mistyped or mis-copied it — accepting it either way hides that
+ * mistake instead of catching it. This message's advice ("generate one with
+ * openssl") is specific to minting; `assertReadSecret` below never gives it,
+ * because a `read` caller does not get to choose the secret.
  */
-export function assertValidSecret(secret: string): void {
-  if (SECRET_PATTERN.test(secret)) return;
+export function assertShareSecret(secret: string): void {
+  if (SHARE_SECRET_PATTERN.test(secret)) return;
   throw new Error(
-    `The secret must be exactly ${SECRET_HEX_LENGTH} lowercase hex characters (0-9, a-f) — ` +
+    `The secret must be exactly ${SHARE_SECRET_HEX_LENGTH} lowercase hex characters (0-9, a-f) — ` +
       `this one has ${secret.length}. Generate one with: ${GENERATE_SECRET_COMMAND}`,
+  );
+}
+
+const READ_SECRET_PATTERN = new RegExp(`^[A-Za-z0-9_-]{${MIN_SECRET_CHARS},${MAX_SECRET_CHARS}}$`);
+
+/**
+ * What `read` will open: anything the envelope format itself accepts —
+ * `crypto.ts`'s own secret range, case-sensitive, never normalised (case
+ * matters to the key derivation; silently folding it would open the wrong
+ * document or, more likely, nothing at all). Covers a real
+ * `generateSecret()` output, a hand-typed `/d/<id>#<secret>` secret, and a
+ * `share`-minted 64-hex secret all at once — deliberately not covers
+ * anything `seal`/`open` themselves would refuse, so this never rejects a
+ * secret `crypto.ts` would have accepted.
+ */
+export function assertReadSecret(secret: string): void {
+  if (READ_SECRET_PATTERN.test(secret)) return;
+  const badCharset = /[^A-Za-z0-9_-]/.test(secret)
+    ? ` and uses a character outside A-Z, a-z, 0-9, "-" or "_"`
+    : "";
+  throw new Error(
+    `That secret looks malformed or truncated: a share secret is ${MIN_SECRET_CHARS} to ` +
+      `${MAX_SECRET_CHARS} characters of A-Z, a-z, 0-9, "-" or "_" — this one has ${secret.length} ` +
+      `character${secret.length === 1 ? "" : "s"}${badCharset}. Check that the link was copied in full.`,
   );
 }
 
@@ -62,10 +104,19 @@ export function assertValidLifetime(lifetime: string): asserts lifetime is Lifet
 export const DEFAULT_ORIGIN = "https://jsonapi.mstool.dev";
 
 /**
- * An origin, and nothing more. A path or query is refused rather than
- * stripped — silently normalising `https://host/some/path` down to
- * `https://host` would upload wherever the caller typed, having told them
- * their mistake, which is worse than refusing outright.
+ * An origin, and nothing more. A path, a query, or a userinfo is refused
+ * rather than stripped or normalised — the whole point of this being a
+ * refusal is that `https://host/some/path` and `https://host` are different
+ * places, and silently rewriting one to the other, having told nobody, would
+ * be exactly the mistake this function exists to catch.
+ *
+ * Userinfo is the sharpest version of that mistake: `new URL(origin).origin`
+ * silently discards it, so `https://jsonapi.mstool.dev@evil.example.com` reads
+ * — to a human, or to a model that only skimmed the string — as
+ * `jsonapi.mstool.dev`, but `.origin` on that value is `https://evil.example.com`.
+ * This is the one function in the whole server that decides which host a
+ * document gets uploaded to, so it is the one place a plausible-looking
+ * wrong host actually matters.
  */
 export function assertValidOrigin(origin: string): string {
   let parsed: URL;
@@ -76,6 +127,13 @@ export function assertValidOrigin(origin: string): string {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(`"${origin}" must use http or https, not "${parsed.protocol.replace(/:$/, "")}".`);
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new Error(
+      `"${origin}" carries a "user@" (or "user:pass@") before the host. That part is not the host — ` +
+        `this would actually upload to "${parsed.origin}", not what the rest of the string suggests. ` +
+        `Pass an origin only, e.g. "${DEFAULT_ORIGIN}".`,
+    );
   }
   if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
     throw new Error(

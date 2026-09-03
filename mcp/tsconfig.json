@@ -4,20 +4,30 @@
   // so its globals differ (`types: ["node"]` is what supplies `process`,
   // `Buffer` and Node's own ambient `fetch`/`Response`/`crypto` typings).
   //
-  // `lib` still carries "DOM", even though nothing this tree runs touches a
-  // document or a window. `src/crypto.ts` pulls in the whole of
-  // `src/i18n/index.ts` (for `t()`) and, through it, all three catalogues —
-  // and `en.ts`/`de.ts`/`uk.ts` import `src/dom.ts` for unrelated messages
-  // this server never reaches, while `i18n/index.ts` itself references
-  // `location`/`document`/`history` in branches already guarded at runtime
+  // `lib` still carries "DOM" (and "DOM.Iterable", matching the root config
+  // exactly), even though nothing this tree runs touches a document or a
+  // window. `src/crypto.ts` pulls in the whole of `src/i18n/index.ts` (for
+  // `t()`) and, through it, all three catalogues — and `en.ts`/`de.ts`/
+  // `uk.ts` import `src/dom.ts` for unrelated messages this server never
+  // reaches, while `i18n/index.ts` itself references `location`/`document`/
+  // `history` in branches already guarded at runtime
   // (`typeof location === "undefined"`) but not type-guarded. One `tsc`
   // program typechecks a file's *whole* import graph under one `lib` set, so
   // there is no way to typecheck `crypto.ts` here without also satisfying
   // those references — dropping "DOM" does not prove this tree avoids the
   // browser, it just fails to typecheck a file this task must import as-is.
+  //
+  // Matching the root's `lib` exactly, rather than picking the smallest set
+  // that happens to typecheck today, matters for a reason specific to
+  // importing `src/`: this program and the root one now both typecheck
+  // `src/crypto.ts`'s whole import graph, under two different `lib` sets. If
+  // they diverge, a later `src/` change that iterates a DOM collection (using
+  // something `DOM.Iterable` provides) can pass `npx tsc --noEmit` and fail
+  // `npx tsc -p mcp/tsconfig.json --noEmit` alone, in a change that has
+  // nothing to do with `mcp/`.
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "types": ["node"],

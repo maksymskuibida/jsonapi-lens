@@ -43,6 +43,7 @@ export interface FetchInit {
   method?: string;
   headers?: Record<string, string>;
   body?: Uint8Array<ArrayBuffer>;
+  redirect?: "error" | "follow" | "manual";
 }
 
 export type FetchLike = (url: string, init?: FetchInit) => Promise<MinimalResponse>;
@@ -62,6 +63,14 @@ export interface CreatedShare {
  * what a convincing redirect would produce. A response whose `url` is empty
  * (never true of Node's real `fetch`, only possible from a hand-built test
  * double) is passed through rather than treated as a mismatch.
+ *
+ * Every call below also passes `redirect: "error"`, which on a real `fetch`
+ * makes a redirect anywhere — same host or not — reject before a response
+ * ever exists to inspect. That makes the property this function polices true
+ * by the request's own stated intent rather than by an accident of how
+ * `undici` currently happens to fail a cross-origin `POST` redirect. This
+ * function stays regardless: a hand-built test double, or any future
+ * `fetchImpl` that is not `fetch` itself, is not bound by `redirect` at all.
  */
 function assertSameOrigin(response: MinimalResponse, expectedOrigin: string): void {
   if (!response.url) return;
@@ -95,6 +104,7 @@ export async function uploadShare(
       method: "POST",
       headers: { "content-type": "application/octet-stream" },
       body: blob,
+      redirect: "error",
     });
   } catch (cause) {
     throw new Error(
@@ -126,10 +136,14 @@ export async function uploadShare(
  * the Worker's own response cannot tell those two apart, so naming one over
  * the other here would be a guess dressed as a fact.
  */
-export async function fetchShareBlob(fetchImpl: FetchLike, origin: string, id: number): Promise<Uint8Array> {
+export async function fetchShareBlob(
+  fetchImpl: FetchLike,
+  origin: string,
+  id: number,
+): Promise<Uint8Array<ArrayBuffer>> {
   let response: MinimalResponse;
   try {
-    response = await fetchImpl(`${origin}/api/shares/${id}`);
+    response = await fetchImpl(`${origin}/api/shares/${id}`, { redirect: "error" });
   } catch (cause) {
     throw new Error(
       `Could not reach ${origin}: ${cause instanceof Error ? cause.message : String(cause)}`,
