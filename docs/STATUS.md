@@ -19,7 +19,8 @@ blocker) · **🔒 not built** (deliberate — reason in §3) · **📋 queued**
 
 | Unit | Status | Spec | Notes |
 |---|---|---|---|
-| T0 · Delivery process | 🔨 | — | This change. `DELIVERY.md`, `PROCESS.md`, three agents, templates, preflight + attack suite, labels, the `pull_request` CI trigger that was missing, and the fixes from the T0 review. |
+| T0 · Delivery process | 🔨 | — | This change. `DELIVERY.md`, `PROCESS.md`, three agents, templates, preflight + attack suite, labels, the `pull_request` CI trigger that was missing, and the fixes from the T0 review. **Note:** that trigger still missed a case — see T9. |
+| T9 · Preflight self-fixtures | 🔨 | [T9](task-specs/T9.md) | `review-preflight.sh`'s code invariants (innerHTML, href, network-call, DOM-id, hardcoded-copy, jsdom-altitude) now read only the files each governs — `src/`, and `test/` excluding `test/browser/` — instead of the whole diff, so the attack suite's own planted fixtures, and documentation prose describing the same rules, stop misreporting. `BASE_REF` is resolved (PR base → this branch's upstream → `origin/main`) instead of hardcoded, and fails closed if none resolve. Also fixes `deploy.yml`'s `pull_request` trigger, which still filtered on the PR's *base* branch and so gave **zero CI** to any PR stacked on a feature branch rather than opened directly against `main` — this repository's actual PR shape. `scripts/attack-preflight.sh`: 26 → 40 passed, 0 failed; every case still fails against a gate stubbed dead. **Touches `.github/`, outside the normal implementer bounds — see the pull request body for why.** |
 | T1 · Plain JSON | 📋 | [T1](task-specs/T1.md) | Shape detection, the branch out of `assertJsonApi`, an **inferred identity graph** — a repeated identifier becomes a link, the way a `{type, id}` pointer already does — and the [D1](DECISIONS.md) anchor scope table. |
 | T5 · Storage + share envelope | 📋 | [T5](task-specs/T5.md) | An optional exchange on stored documents and share payloads, IndexedDB v3, and a **bundle** payload at envelope version 3. No UI, so T2/T6/T7 can build on it in parallel. |
 | T2 · Exchange, form and review | 📋 | [T2](task-specs/T2.md) | The `Exchange` model (every part optional and mergeable), the **field-separated form**, and the request/response/both review: params through one decoder, headers, cookies, bodies as nested lenses, request-scoped anchors, masking and redaction. |
@@ -61,7 +62,7 @@ force, not just which files each task obviously edits.
 | `docs/templates/` — task spec, test plan, QA notes, QA report, evidence | ✅ |
 | `scripts/review-preflight.sh` | ✅ |
 | Forge labels — `reviewed:*`, `qa:*` | ✅ |
-| `deploy.yml` — `check` job also runs on `pull_request` | ✅ |
+| `deploy.yml` — `check` job also runs on `pull_request` | ✅ — but only when the PR's base was `main`; T9 removes that filter |
 | Project `CLAUDE.md` pointing at the flow | ✅ |
 | Task specs T1–T7 | ✅ |
 | `test/hygiene.test.ts` + synthesised fixtures | ✅ |
