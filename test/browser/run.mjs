@@ -138,6 +138,71 @@ async function connect(port) {
   };
 }
 
+/**
+ * The retry loop that reads `wanted` through the app's own paste flow — the
+ * textarea, Read, and (when the shape offer appears) "Read as plain JSON" —
+ * rather than reaching into the app's internals, so this exercises what a
+ * person does. Returns the expression string for `page.evaluate`; the result
+ * is `''` on success or an error message on rejection.
+ *
+ * Retried, because the paste view is static markup in index.html: the button
+ * exists long before the module that listens to it has booted, so a single
+ * click can land on nothing and look exactly like a slow render. Clicking
+ * again once it has rendered is harmless, so a loop is the simplest way to be
+ * sure the click took.
+ *
+ * The "rendered" check is `#overview`, not `.res` — `render-document.ts`
+ * gives both `renderOverview` (JSON:API) and `renderJsonOverview` (plain
+ * JSON) the same id, which is what makes this one check work for either
+ * shape. Before this, the loop only ever recognised a `.res` section, so a
+ * plain-JSON document — which never has one — timed out as "the app
+ * rejected it" no matter how correctly it read: this suite could not load
+ * the path T1 added at all, offer included.
+ */
+function readFlow(wanted) {
+  return `(async () => {
+    const wanted = ${JSON.stringify(wanted)};
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const overview = document.getElementById('overview');
+      const doc = document.getElementById('doc');
+      if (overview && doc && !doc.hidden) return '';
+
+      const error = document.getElementById('error');
+      if (error && !error.hidden) {
+        return [
+          document.getElementById('error-headline')?.textContent,
+          document.getElementById('error-hint')?.textContent,
+          document.getElementById('error-where')?.textContent,
+        ].filter(Boolean).join(' — ');
+      }
+
+      // Not JSON:API, but valid JSON — the paste view names the shape and
+      // offers a choice instead of reading straight through. Take the
+      // plain-JSON reading, the one this suite exists to protect now that
+      // it has its own path through the app.
+      const offer = document.getElementById('shape-offer');
+      const offerPlain = document.getElementById('shape-offer-plain');
+      if (offer && !offer.hidden && offerPlain) {
+        offerPlain.click();
+        await new Promise((r) => setTimeout(r, 250));
+        continue;
+      }
+
+      const input = document.getElementById('input');
+      const parse = document.getElementById('parse');
+      if (input && parse) {
+        if (input.value !== wanted) {
+          input.value = wanted;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        parse.click();
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return '';
+  })()`;
+}
+
 /** Poll the page until `expression` is truthy, so nothing races the render. */
 async function waitFor(page, expression, what, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
@@ -187,43 +252,11 @@ try {
   await waitFor(page, "!!document.getElementById('input')", "the paste view");
 
   // Feed the document in through the app's own paste flow rather than reaching
-  // into its internals, so the test exercises what a person does.
-  //
-  // Retried, because the paste view is static markup in index.html: the button
-  // exists long before the module that listens to it has booted, so a single
-  // click can land on nothing and look exactly like a slow render. Clicking
-  // again once it has rendered is harmless, so a loop is the simplest way to be
-  // sure the click took.
+  // into its internals, so the test exercises what a person does. `amtrak.json`
+  // is JSON:API, so this always takes `readFlow`'s straight-through path — the
+  // shape-offer branch exists for the plain-JSON check near the end of this file.
   const text = await readFile(DOC, "utf8");
-  const rejected = await page.evaluate(`(async () => {
-    const wanted = ${JSON.stringify(text)};
-    for (let attempt = 0; attempt < 40; attempt++) {
-      const doc = document.getElementById('doc');
-      const rendered = document.querySelectorAll('.res').length > 0 && doc && !doc.hidden;
-      if (rendered) return '';
-
-      const error = document.getElementById('error');
-      if (error && !error.hidden) {
-        return [
-          document.getElementById('error-headline')?.textContent,
-          document.getElementById('error-hint')?.textContent,
-          document.getElementById('error-where')?.textContent,
-        ].filter(Boolean).join(' \u2014 ');
-      }
-
-      const input = document.getElementById('input');
-      const parse = document.getElementById('parse');
-      if (input && parse) {
-        if (input.value !== wanted) {
-          input.value = wanted;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-        parse.click();
-      }
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    return '';
-  })()`);
+  const rejected = await page.evaluate(readFlow(text));
   if (rejected) throw new Error(`the app rejected ${DOC}: ${rejected}`);
 
   await waitFor(
@@ -351,7 +384,80 @@ try {
       `\n            top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
   );
 
-  console.log(`\n${keys.length + 1 - failed}/${keys.length + 1} passed`);
+  // Plain JSON: a reference nested deeper than `AUTO_OPEN_DEPTH` must still be
+  // *visibly* open after a reload, not merely present in the DOM. This is the
+  // one check in this suite that can see that class of regression at all —
+  // `nav-harness.js`'s `NAV` and every `SCEN.*` scenario above are built
+  // entirely around `.res`/`.res__d`, and `amtrak.json` is JSON:API, so none
+  // of them ever take the branch this exercises. Run last, after the
+  // JSON:API reload probe above, for the same reason that one runs last: it
+  // replaces the loaded document and reloads the page, which nothing here
+  // needs to survive afterward.
+  await page.navigate(`${ORIGIN}/`);
+  await waitFor(page, "!!document.getElementById('input')", "the paste view, for the plain-JSON check");
+  // Let `boot()`'s own IndexedDB read (of whichever document `amtrak.json`'s
+  // run above persisted) settle before submitting a fresh paste — otherwise
+  // this check would also be exercising the boot()/pendingOffer race, which
+  // is a different, already-covered bug, not the one this block exists for.
+  await sleep(500);
+
+  const plainJsonDoc = '{ "a": { "b": { "c": { "id": 4 } } }, "c_id": 4 }';
+  const plainRejected = await page.evaluate(readFlow(plainJsonDoc));
+  if (plainRejected) {
+    throw new Error(`the app rejected the plain-JSON reload fixture: ${plainRejected}`);
+  }
+
+  // The offer button's click handler fires `load(..., { persist: true })`
+  // without awaiting it, so the IndexedDB write can still be in flight the
+  // instant `readFlow` sees `#overview` appear — reloading immediately after
+  // can lose the document entirely. Margin here, not a flaky check.
+  await sleep(800);
+
+  const before = JSON.parse(
+    await page.evaluate(`(async () => {
+      const link = document.querySelector('a.v--ref');
+      if (!link) return JSON.stringify({ error: 'no resolved reference link rendered' });
+      link.click();
+      await new Promise((r) => setTimeout(r, 300));
+      const id = location.hash.slice(1);
+      const el = document.getElementById(id);
+      if (!el) return JSON.stringify({ error: 'link target ' + id + ' missing from the DOM' });
+      const chain = [];
+      for (let n = el; n; n = n.parentElement) if (n.tagName === 'DETAILS') chain.push(n.open);
+      return JSON.stringify({ id, chain, height: Math.round(el.getBoundingClientRect().height) });
+    })()`),
+  );
+  if (before.error) throw new Error(`plain-JSON reload check: ${before.error}`);
+
+  await page.evaluate("location.reload(); undefined").catch(() => {});
+  await waitFor(
+    page,
+    `!!document.getElementById(${JSON.stringify(before.id)})`,
+    "the plain-JSON document to come back after a reload",
+  );
+  const after = JSON.parse(
+    await page.evaluate(`(async () => {
+      await new Promise((r) => setTimeout(r, 800));
+      const el = document.getElementById(${JSON.stringify(before.id)});
+      const chain = [];
+      for (let n = el; n; n = n.parentElement) if (n.tagName === 'DETAILS') chain.push(n.open);
+      return JSON.stringify({ chain, height: Math.round(el.getBoundingClientRect().height) });
+    })()`),
+  );
+
+  // Both halves matter: `clickWorked` is the precondition (the link itself
+  // still resolves and opens its target) so a broken click path fails loudly
+  // as itself, not as a confusing false pass on the reload comparison.
+  const clickWorked = before.chain.length > 0 && before.chain.every((open) => open === true);
+  const survivedReload = after.chain.length === before.chain.length && after.chain.every((open) => open === true);
+  const plainOk = clickWorked && survivedReload;
+  if (!plainOk) failed += 1;
+  console.log(
+    `${plainOk ? "pass" : "FAIL"}  ${String(after.height).padStart(6)}px  27 plain JSON: a reference 2+ levels deep survives reload` +
+      `\n            chain ${JSON.stringify(before.chain)}->${JSON.stringify(after.chain)}, height ${before.height}->${after.height}, clickWorked=${clickWorked}`,
+  );
+
+  console.log(`\n${keys.length + 2 - failed}/${keys.length + 2} passed`);
 } finally {
   page?.close();
   chrome.kill();
