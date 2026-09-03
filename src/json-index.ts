@@ -113,26 +113,49 @@ function isBareIdKey(key: string): boolean {
 }
 
 /**
- * The container name a compound `user_id`/`user-id`/`userId`/`userID` key
- * implies (plural too — `user_ids`/`userIds`/`userIDs`), or `null` if it is
- * not that shape.
+ * The container name a compound `user_id`/`user-id`/`user.id`/`user id`/
+ * `userId`/`userID` key implies (plural too — `user_ids`/`userIds`/
+ * `userIDs`), or `null` if it is not that shape.
  *
  * Tested against the key **as written**, before any normalising — a compound
- * reference needs a separator (`_`/`-`) or a case boundary (a lower-case
- * letter or digit immediately before `Id`/`ID`) right in front of the
- * suffix. Stripping `_`/`-` first, the way a bare key is matched, destroys
- * exactly the evidence this test needs: `valid`, `is_valid`, `paid` and
- * `grid` all end in the letters `id` once normalised, but none of them has a
- * separator or a case change in front of it, so none of them is a reference —
- * `valid` stays an ordinary value instead of linking into a `vals`
- * collection, and `is_valid` stays out of the dangling panel instead of
- * appearing there as a phantom scope `isval`.
+ * reference needs a separator (`_`, `-`, `.` or a space) or a case boundary
+ * (a lower-case letter or digit — from *any* script, not only ASCII —
+ * immediately before `Id`/`ID`) right in front of the suffix. Stripping
+ * separators first, the way a bare key is matched, destroys exactly the
+ * evidence this test needs: `valid`, `is_valid`, `paid` and `grid` all end in
+ * the letters `id` once normalised, but none of them has a separator or a
+ * case change in front of it, so none of them is a reference — `valid` stays
+ * an ordinary value instead of linking into a `vals` collection, and
+ * `is_valid` stays out of the dangling panel instead of appearing there as a
+ * phantom scope `isval`.
+ *
+ * `.` and a literal space join `_`/`-` as separators — round 4 review: a dot
+ * carries no ambiguity cost at all (`user.id` cannot be confused with
+ * `valid`), and it is about to become an ordinary shape once T2's
+ * dot-path parameter decoder starts handing this module flattened and
+ * bracketed-filter keys. The camel-case boundary is Unicode-aware
+ * (`\p{Ll}`/`\p{N}`, not `[a-z0-9]`) for the same reason this app ships a
+ * German and a Ukrainian catalogue: `benutzerId` always worked because every
+ * character in it is ASCII, but `користувачId` — an entirely ordinary
+ * camelCase key in a Ukrainian-authored payload — silently never matched
+ * anything, which is incoherent with a product that is localised into the
+ * language and then cannot infer identity from a key written in it.
+ *
+ * Left deliberately unmatched, and not a limitation to chase: `userid`,
+ * `USERID`, `userids` (no separator, no case change — indistinguishable from
+ * `valid` without a dictionary of real container names) and `uid` (the
+ * bare-key set has no entry for it, and after this boundary fix it is no
+ * longer read as a compound reference either, so it simply is not an
+ * identity candidate — see the module header and D2 for "a wrong link is
+ * worse than none"). `u_id`, with an explicit separator, still yields scope
+ * `u`, which is correct: the separator is real evidence, however short the
+ * stem either side of it.
  */
 function referenceContainerName(key: string): string | null {
   if (isBareIdKey(key)) return null;
-  const snake = /^(.*)[_-]ids?$/i.exec(key);
+  const snake = /^(.*)[-_. ]ids?$/i.exec(key);
   if (snake && snake[1]!.length > 0) return normalizeKey(snake[1]!);
-  const camel = /^(.*[a-z0-9])(?:Id|ID)s?$/.exec(key);
+  const camel = /^(.*[\p{Ll}\p{N}])(?:Id|ID)s?$/u.exec(key);
   if (camel && camel[1]!.length > 0) return normalizeKey(camel[1]!);
   return null;
 }
