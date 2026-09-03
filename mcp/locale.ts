@@ -20,37 +20,55 @@
  * The mechanism is `stored()` in `src/i18n/index.ts`, which is checked before
  * `navigator` and takes priority the moment it returns a locale. It reads
  * `localStorage.getItem`, so this module's job is to make that call return
- * `"en"` — regardless of whether `localStorage` already exists.
+ * `"en"` — regardless of whether `localStorage` already exists, regardless of
+ * what it already holds, and regardless of whether writing to it actually
+ * works.
  *
- * That "regardless" used to be a gap: an earlier version of this file only
- * installed a stand-in when `globalThis.localStorage` was `undefined`, on the
- * assumption that plain Node never defines it. That assumption breaks under
- * `--experimental-webstorage` (real Web Storage, unflagged in a future Node)
- * or any MCP host that adds its own polyfill before this module runs — the
- * guard would then skip installing anything, `stored()` would ask the *real*
- * `localStorage` for a key nobody ever wrote, get `null`, and fall through to
- * `navigator` exactly as if this module did not exist. So the fix is not to
- * guard more carefully; it is to stop treating "does a storage already exist"
- * and "is our key set in it" as the same question. A stand-in is installed
- * only when there is truly nothing there, but the write — `setItem` with our
- * own key — always happens, into whatever `localStorage` turns out to be.
+ * Two gaps, both closed by the same read-back-and-verify shape rather than by
+ * reasoning about which failure a given host's `localStorage` might have:
+ *
+ *   - An earlier version only installed a stand-in when `globalThis
+ *     .localStorage` was `undefined`, on the assumption that plain Node never
+ *     defines it. That assumption breaks under `--experimental-webstorage`
+ *     (real Web Storage, unflagged in a future Node) or any MCP host that
+ *     adds its own polyfill before this module runs — the guard skipped
+ *     installing anything, and a real `localStorage` already holding, say,
+ *     `"de"` from an earlier choice answered `stored()` before this module
+ *     ever got a turn.
+ *   - Even after making the write unconditional, a `localStorage` whose
+ *     `setItem` throws (a quota, a read-only host implementation) or —
+ *     harder to notice — silently accepts the call and changes nothing,
+ *     both leave the pin unset without this module's own code necessarily
+ *     seeing an exception to catch.
+ *
+ * So this does not attempt to enumerate every way a host's `localStorage`
+ * could fail to hold a value. It writes, reads the same key back, and if the
+ * two disagree — for any reason, including one no test here anticipated —
+ * replaces `globalThis.localStorage` outright with an in-memory
+ * implementation this module fully controls, which cannot fail in any of
+ * these ways. The property verified is "the pin took effect", not "the write
+ * call did not throw".
  *
  * Must be imported before anything that might call `t()` — i.e. first, at the
  * top of `server.ts`, of `build-server.ts` (in case something builds a server
  * without going through `server.ts` — a test does exactly this), and of every
  * test that exercises `src/crypto.ts`'s error text. `locale()` memoises on
  * its first call, so importing this late — after some other path has already
- * resolved a locale — would have no effect.
+ * resolved a locale — would have no effect; that precondition is inherent to
+ * memoisation, not a gap in this module, and is not worth defending against.
  */
+
+const LOCALE_KEY = "jsonapi-lens:locale";
 
 // `globalThis.localStorage` is already declared (as `Storage`) by the "DOM"
 // lib `mcp/tsconfig.json` includes — see that file for why a Node-only
-// program still carries it. So a stand-in, when one is needed, fills in a
-// real `Storage` rather than declaring a narrower type of its own, which
-// TypeScript would reject as a conflicting redeclaration of the same global.
-if (typeof globalThis.localStorage === "undefined") {
+// program still carries it. So a stand-in, wherever one is installed below,
+// fills in a real `Storage` rather than declaring a narrower type of its
+// own, which TypeScript would reject as a conflicting redeclaration of the
+// same global.
+function createInMemoryStorage(): Storage {
   const values = new Map<string, string>();
-  const storage: Storage = {
+  return {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => {
       values.set(key, value);
@@ -66,18 +84,36 @@ if (typeof globalThis.localStorage === "undefined") {
       return values.size;
     },
   };
-  globalThis.localStorage = storage;
 }
 
-// Unconditional — this is the fix for the gap the header comment describes.
-// Wrapped in a try/catch for the same reason `src/i18n/index.ts`'s own
-// `stored()` wraps its read: a `localStorage` that exists but throws on
-// write (a quota, a read-only host implementation) is a real possibility
-// this module cannot control, and `stored()` already tolerates that by
-// falling through to `navigator`/English — the same fallback this module
-// exists to preempt, so there is nothing further to do here if it happens.
+if (typeof globalThis.localStorage === "undefined") {
+  globalThis.localStorage = createInMemoryStorage();
+}
+
+/** Does `localStorage.getItem(LOCALE_KEY)` actually answer `"en"` right now?
+ * Wrapped for the same reason the write below is: a `getItem` that throws is
+ * no better a host than a `setItem` that does, and both mean "not pinned". */
+function isPinned(): boolean {
+  try {
+    return globalThis.localStorage.getItem(LOCALE_KEY) === "en";
+  } catch {
+    return false;
+  }
+}
+
 try {
-  globalThis.localStorage.setItem("jsonapi-lens:locale", "en");
+  globalThis.localStorage.setItem(LOCALE_KEY, "en");
 } catch {
-  /* see comment above */
+  /* handled by the read-back check below, uniformly with a silent no-op */
+}
+
+if (!isPinned()) {
+  // Whatever is wrong with the host's localStorage — throws, no-ops, or a
+  // failure mode nobody has seen yet — an implementation this module built
+  // itself cannot have the same problem. Reassigning `globalThis
+  // .localStorage` here, rather than trying to repair the existing one, is
+  // deliberate: there is no way to distinguish these failure shapes from the
+  // outside, and no need to.
+  globalThis.localStorage = createInMemoryStorage();
+  globalThis.localStorage.setItem(LOCALE_KEY, "en");
 }
