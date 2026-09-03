@@ -539,6 +539,30 @@ else
   fail=$((fail+1))
 fi
 
+# --- 25. T9 ceiling: a legitimate scrollY assertion in test/browser/ is ----
+#         NOT code-invariant-flagged (S5) --------------------------------
+#
+# Deleting `':!test/browser'` from both DIFF_TEST_UNIT and the gate
+# condition below it (review-preflight.sh) leaves the suite at 44/44 green
+# — no case here plants anything under test/browser/, so nothing notices
+# the gate widening back to scan it. That mutation re-introduces T1's
+# original false positive: a real `window.scrollY` read in
+# test/browser/nav-scenarios.js, which is exactly where such an assertion
+# belongs, gets flagged as if it were a vitest layout assertion. This case
+# opens the gate with a real, unrelated vitest file (so the outer condition
+# is satisfied) while planting the scrollY read only under test/browser/,
+# and asserts the check's own `ok` line — not just the absence of the
+# finding, per this suite's own rule.
+d=$(fresh_repo t9browserscrollok)
+mkdir -p "$d/test/browser"
+printf 'import { it, expect } from "vitest";\nit("adds", () => { expect(1 + 1).toBe(2); });\n' \
+  > "$d/test/real.test.ts"
+printf 'window.scrollY;\nexpect(window.scrollY).toBe(0);\n' > "$d/test/browser/nav-scenarios.js"
+git -C "$d" add -A >/dev/null
+git -C "$d" commit -qm "a real vitest test plus a legitimate browser scroll assertion"
+expect_ok "T9 ceiling: scrollY in test/browser/ is not flagged" "$d" \
+  "no layout assertion under jsdom" "jsdom has no layout engine"
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 rm -rf "$WORK"
 [ "$fail" -eq 0 ]
