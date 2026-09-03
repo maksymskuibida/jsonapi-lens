@@ -201,9 +201,15 @@ export async function renderBundleImportView(
   const importButton = el("button", {
     class: "btn btn--primary",
     type: "button",
+    "data-role": "bundle-import-selected",
     text: t().bundleUi.importSelected,
   });
-  const cancelButton = el("button", { class: "btn", type: "button", text: t().bundleUi.cancel });
+  const cancelButton = el("button", {
+    class: "btn",
+    type: "button",
+    "data-role": "bundle-cancel",
+    text: t().bundleUi.cancel,
+  });
 
   function tickedCount(): number {
     return rows.filter((row) => row.ticked).length;
@@ -292,7 +298,12 @@ export async function renderBundleImportView(
       ),
     );
 
-    const done = el("button", { class: "btn btn--primary", type: "button", text: t().bundleUi.done });
+    const done = el("button", {
+      class: "btn btn--primary",
+      type: "button",
+      "data-role": "bundle-done",
+      text: t().bundleUi.done,
+    });
     done.addEventListener("click", () => handlers.onCancel());
 
     container.replaceChildren(

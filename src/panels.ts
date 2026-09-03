@@ -225,6 +225,7 @@ export async function openLibraryModal(
       const createButton = el("button", {
         class: "btn btn--primary",
         type: "button",
+        "data-role": "library-create-link",
         text: t().share.create,
       });
 
@@ -269,7 +270,12 @@ export async function openLibraryModal(
 
       updateCreateState();
 
-      const cancelButton = el("button", { class: "btn", type: "button", text: t().bundleUi.cancel });
+      const cancelButton = el("button", {
+        class: "btn",
+        type: "button",
+        "data-role": "library-cancel",
+        text: t().bundleUi.cancel,
+      });
       cancelButton.addEventListener("click", leaveSelect);
       createButton.addEventListener("click", () => void createLinkFromSelection());
 

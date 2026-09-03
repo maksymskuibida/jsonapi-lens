@@ -357,6 +357,146 @@
       const drift = N.top(watch) - before;
       return { name: '21 jump modal navigation, Back', ok: Math.abs(drift) <= TOL, driftPx: drift, detail: `top ${before}->${N.top(watch)}` };
     },
+
+    /* 27 T6: share two library documents as a bundle, open the resulting
+       link, and confirm Back/Forward toggle correctly between the paste
+       view and the bundle import view — with the secret gone from both the
+       URL and history.state before the import view ever renders.
+       Regression coverage for a real bug caught in manual evidence-gathering:
+       Cancel and the per-row "Open" handler used to clear the in-memory
+       `bundleView` flag, so Back to that same /view entry could no longer
+       tell "a bundle was here" from "nothing was" and fell through to the
+       paste view a second time instead of restoring the import screen.
+       Runs last (highest scenario number) and restores #doc/`current`
+       itself afterward, because this harness's own post-scenario reload
+       probe (in run.mjs) needs the amtrak document showing again — this is
+       the one scenario that replaces the document view with a different one
+       entirely, so it is the one responsible for putting it back.
+       No real `/api/shares` exists under a plain `vite dev` origin (see
+       test/browser/README.md), so this patches `window.fetch` for exactly
+       that path, in-page, for the scenario's own lifetime only. */
+    async s27(N) {
+      const name = '27 share a bundle, open it — Back/Forward restore paste and import';
+
+      const seedLibrary = (entries) =>
+        new Promise((resolve, reject) => {
+          const req = indexedDB.open('jsonapi-lens', 3);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains('documents')) db.createObjectStore('documents');
+            if (!db.objectStoreNames.contains('library')) {
+              const s = db.createObjectStore('library', { keyPath: 'id', autoIncrement: true });
+              s.createIndex('savedAt', 'savedAt');
+            }
+          };
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('library', 'readwrite');
+            for (const e of entries) tx.objectStore('library').add(e);
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => reject(tx.error);
+          };
+          req.onerror = () => reject(req.error);
+        });
+
+      await seedLibrary([
+        { label: 's27-one.json', text: '{"a":1}', savedAt: Date.now(), bytes: 7 },
+        { label: 's27-two.json', text: '{"b":2}', savedAt: Date.now(), bytes: 7 },
+      ]);
+
+      const blobs = new Map();
+      let nextId = 100001; // clear of anything a real deployment could ever assign
+      const realFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.startsWith('/api/shares') && init && init.method === 'POST') {
+          const id = nextId++;
+          const body = init.body;
+          const bytes = body instanceof Uint8Array ? body : new Uint8Array(await new Response(body).arrayBuffer());
+          blobs.set(id, bytes);
+          return new Response(JSON.stringify({ id, expiresAt: null }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        const m = url.match(/^\/api\/shares\/(\d+)$/);
+        if (m) {
+          const bytes = blobs.get(Number(m[1]));
+          return bytes ? new Response(bytes, { status: 200 }) : new Response('not found', { status: 404 });
+        }
+        return realFetch(input, init);
+      };
+
+      const importShowing = () => {
+        const el = document.querySelector('.bundle-import');
+        return !!el && el.closest('[hidden]') === null;
+      };
+
+      const seen = {};
+      let disturbed = false;
+
+      try {
+        document.getElementById('open-library').click();
+        await N.settle(200);
+        const shareBtn = document.querySelector('[data-role="library-share"]');
+        if (!shareBtn) return { name, ok: false, driftPx: 0, detail: 'no Share button — library seed failed?' };
+        shareBtn.click();
+        await N.settle(150);
+
+        const boxes = [...document.querySelectorAll('.library__checkbox')].filter((b) =>
+          b.closest('.library__row')?.querySelector('.library__name')?.textContent?.startsWith('s27-'),
+        );
+        if (boxes.length < 2) {
+          return { name, ok: false, driftPx: 0, detail: `expected 2 seeded rows, found ${boxes.length}` };
+        }
+        boxes.forEach((b) => b.click());
+        document.querySelector('[data-role="library-create-link"]').click();
+        await N.settle(250);
+
+        disturbed = true; // from here on, #doc/current may get replaced
+
+        document.querySelector('.share__actions button')?.click();
+        await N.settle(1600); // PBKDF2 at 1,000,000 iterations, plus the (stubbed) upload
+
+        const url = document.querySelector('.share__url')?.value;
+        if (!url) return { name, ok: false, driftPx: 0, detail: 'no link produced' };
+        const path = new URL(url).pathname; // "/d/<id>:<secret>"
+        const secret = path.split(':')[1] || ' ';
+
+        document.querySelector('.modal__close')?.click();
+
+        history.pushState(null, '', path);
+        window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+        await N.settle(1600); // fetch (stubbed) + PBKDF2 + gunzip
+
+        seen.loadedImportView = importShowing();
+        seen.secretGoneFromUrl = !location.href.includes(secret);
+        seen.secretGoneFromState = !JSON.stringify(history.state || null).includes(secret);
+
+        document.querySelector('[data-role="bundle-cancel"]')?.click();
+        await N.settle(300);
+        seen.cancelShowsPaste = location.pathname === '/' && !document.getElementById('paste').hidden;
+
+        await N.back();
+        seen.backShowsImportView = importShowing();
+
+        await N.forward();
+        seen.forwardShowsPaste = location.pathname === '/' && !document.getElementById('paste').hidden;
+
+        await N.back();
+        seen.secondBackShowsImportView = importShowing();
+
+        const ok = Object.values(seen).every(Boolean);
+        return { name, ok, driftPx: 0, detail: JSON.stringify(seen) };
+      } finally {
+        window.fetch = realFetch;
+        // Put the amtrak document back: run.mjs's own post-scenario reload
+        // probe needs #doc showing and `current` set, and this is the one
+        // scenario that replaced them with a different view entirely.
+        if (disturbed) {
+          history.replaceState(null, '', '/view');
+          document.getElementById('parse')?.click();
+          await N.settle(700);
+        }
+      }
+    },
   };
 
   window.SCEN = SCEN;
