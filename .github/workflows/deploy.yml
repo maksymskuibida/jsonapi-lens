@@ -3,6 +3,21 @@ name: Deploy
 on:
   push:
     branches: [main]
+  # A pull request runs `check` and nothing else, regardless of what branch it
+  # targets: the `deploy` job is guarded on `github.event_name != 'pull_request'`
+  # below, not on this trigger's branch filter, so a branch is verified without
+  # being released no matter what it is stacked on.
+  #
+  # This used to carry `branches: [main]`, which filters on the PR's BASE
+  # branch — so a pull request stacked on another feature branch (rather than
+  # opened directly against `main`) got zero checks at all, silently (T9,
+  # 2026-09; found while several implementer branches were stacked this way).
+  # Before the trigger existed at all, the workflow fired only on push to
+  # `main`, which meant EVERY pull request got no checks, and "CI runs on a
+  # pull request" (PROCESS.md §8) was describing something that had never
+  # been true for any of them. Leaving the base-branch filter in place would
+  # have made the same row false again for a narrower, quieter set of PRs.
+  pull_request:
   # Lets a failed deploy be retried without an empty commit.
   workflow_dispatch:
 
@@ -10,8 +25,11 @@ on:
 # mid-flight — cancelling between the D1 migration and the Worker upload would
 # leave the two out of step.
 concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+  # Pull-request runs get their own group per ref, and supersede themselves —
+  # pushing twice to a branch should not leave two check runs racing. Production
+  # keeps the single serialised group it had, never cancelled mid-flight.
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'deploy-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -45,9 +63,21 @@ jobs:
       - name: Build
         run: npx vite build
 
+      # The review preflight is a gate, and a gate nobody exercises reports
+      # success either way. This suite plants the defect each of its checks was
+      # written for and confirms that check catches *that* one, so a later edit
+      # that quietly makes the gate decorative turns the build red instead of
+      # passing silently.
+      - name: Attack the review preflight
+        run: scripts/attack-preflight.sh
+
   deploy:
     name: Deploy to Cloudflare
+    # `needs: check` is what makes "CI must pass before deploy" true, including
+    # via workflow_dispatch, which enters the same job graph rather than
+    # bypassing it. The `if` keeps a pull request from deploying anything.
     needs: check
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
     steps:
