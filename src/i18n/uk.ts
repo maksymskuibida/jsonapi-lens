@@ -234,6 +234,76 @@ export const uk: Messages = {
 
   num: (value) => f.n(value),
 
+  shape: {
+    name: (value) => {
+      switch (value) {
+        case "jsonapi":
+          return "JSON:API";
+        case "hal":
+          return "HAL";
+        case "odata":
+          return "OData";
+        case "jsonrpc":
+          return "JSON-RPC";
+        case "envelope":
+          return "Конверт";
+        case "collection":
+          return "Колекція";
+        case "ndjson":
+          return "JSON Lines";
+        case "plain":
+          return "Звичайний JSON";
+      }
+    },
+    evidence: (value) => {
+      switch (value.kind) {
+        case "jsonapi-member":
+          return "Цей документ має член верхнього рівня `data`, `errors` або `meta`.";
+        case "hal-links":
+          return "Визначено як HAL: документ має член верхнього рівня `_links`.";
+        case "hal-embedded":
+          return "Визначено як HAL: документ має член верхнього рівня `_embedded`.";
+        case "odata-context":
+          return "Визначено як OData: документ має член `@odata.context`.";
+        case "jsonrpc-member":
+          return "Визначено як JSON-RPC: документ має член `jsonrpc`.";
+        case "envelope-shape":
+          return "Цей документ має член `data`, але його значення не має форми ресурсних даних JSON:API.";
+        case "envelope-conflict":
+          return "Цей документ має водночас `data` і `errors`, а JSON:API забороняє поєднувати їх.";
+        case "collection-array":
+          return `Документ — це голий масив, ${f.n(value.length)} ${f.plural(value.length, { one: "елемент", few: "елементи", many: "елементів", other: "елемента" })}.`;
+        case "ndjson-lines":
+          return value.malformedLine === null
+            ? `Прочитано як ${f.n(value.records)} ${f.plural(value.records, { one: "запис", few: "записи", many: "записів", other: "запису" })} JSON Lines.`
+            : `Прочитано як ${f.n(value.records)} ${f.plural(value.records, { one: "запис", few: "записи", many: "записів", other: "запису" })} JSON Lines; рядок ${f.n(value.malformedLine)} не розібрався і був пропущений.`;
+        case "plain-empty-object":
+          return "Документ — це порожній об’єкт.";
+        case "plain-scalar":
+          return "Документ — це одне значення, не об’єкт і не масив.";
+        case "plain-object":
+          return "Документ — це звичайний об’єкт JSON без розпізнаної форми.";
+        case "plain-unparseable":
+          return "Текст не вдалося прочитати ні як JSON, ні як JSON Lines.";
+      }
+    },
+    offerHeadline: (shapeName) => `Це схоже на ${shapeName}, а не на JSON:API.`,
+    readAsPlain: "Прочитати як звичайний JSON",
+    readAsJsonApi: "Усе одно прочитати як JSON:API",
+    stats: (items, collections, size) =>
+      `${f.n(items)} ${f.plural(items, { one: "елемент", few: "елементи", many: "елементів", other: "елемента" })} · ${f.n(collections)} ${f.plural(collections, { one: "колекція", few: "колекції", many: "колекцій", other: "колекції" })} · ${size}`,
+    itemsStat: "Елементи",
+    collectionsStat: "Колекції",
+    ambiguousStat: "Неоднозначні ідентичності",
+    emptyNote: "Цей документ не містить колекцій або ідентичностей. Нижче показано лише його структуру.",
+    identitySkippedNote:
+      "Цей документ достатньо великий, тому визначення ідентичностей було пропущено — значення показано, але повторювані ідентифікатори не перетворено на посилання.",
+    rootCollectionLabel: "елементи",
+    tooManyMembers: (n) =>
+      `${f.n(n)} ще ${f.plural(n, { one: "елемент", few: "елементи", many: "елементів", other: "елемента" })} не показано`,
+    topLevelMembers: { title: "Інші члени верхнього рівня", empty: "Немає інших членів верхнього рівня." },
+  },
+
   rail: {
     ariaLabel: "Зміст документа",
     narrow: "Звузити список",
@@ -329,6 +399,17 @@ export const uk: Messages = {
     copyValueTitle: "Скопіювати це значення",
     copyValueLabel: "значення",
     pointerTitle: "JSON Pointer на цей блок",
+  },
+
+  identity: {
+    seeCollection: (label, count) =>
+      `${f.n(count)} ${f.plural(count, { one: "елемент", few: "елементи", many: "елементів", other: "елемента" })} у розділі «${label}»`,
+    ambiguousTitle: (count) =>
+      `${f.n(count)} можливих ${f.plural(count, { one: "визначення", few: "визначення", many: "визначень", other: "визначення" })} для цього значення — не пов’язано посиланням, бо незрозуміло, яке саме малося на увазі`,
+    danglingTitle: "Для цього значення не знайдено визначення в документі",
+    unrenderedTitle:
+      "Для цього значення є визначення в документі, але колекція занадто велика, щоб показати його тут",
+    global: "ідентифікатор",
   },
 
   block: {
@@ -571,6 +652,37 @@ export const uk: Messages = {
     corruptPayload: {
       headline: "Цей спільний документ пошкоджено.",
       hint: "Його вдалося розшифрувати, але документа він не містить.",
+    },
+  },
+
+  bundle: {
+    errors: {
+      secretLength: {
+        headline: "Цей ключ має непридатну довжину.",
+        hint: (length, min, max) =>
+          `У ньому ${f.n(length)} ${f.plural(length, { one: "символ", few: "символи", many: "символів", other: "символу" })}. Ключ для спільного доступу має бути завдовжки від ${f.n(min)} до ${f.n(max)} символів.`,
+      },
+      empty: {
+        headline: "Пакету потрібен щонайменше один документ.",
+        hint: "Виберіть щонайменше один документ, щоб ним поділитися.",
+      },
+      emptyDocument: {
+        headline: "Порожнім документом не можна поділитися.",
+        hint: (label) => `«${label}» не має вмісту.`,
+      },
+      tooLarge: {
+        headline: "Цей пакет надто великий, щоб ним поділитися.",
+        hint: (limit, overBy, offenders) =>
+          `У зашифрованому вигляді він перевищує ліміт ${limit} на ${overBy}. Найбільші: ${offenders}. Приберіть один і спробуйте ще раз.`,
+      },
+      corrupt: {
+        headline: "Цей спільний пакет пошкоджено.",
+        hint: "Його вдалося розшифрувати, але пакета він не містить.",
+      },
+      unavailable: {
+        headline: "Це посилання містить кілька документів.",
+        hint: "Ця версія jsonapi-lens ще не має перегляду пакетів, тож не може його показати. Попросіть посилання лише на один документ або спробуйте пізніше.",
+      },
     },
   },
 

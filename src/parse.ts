@@ -1,9 +1,12 @@
 import { domId, resourceKey, typeHue, typeSigil } from "./ident.js";
+import { buildJsonIndex } from "./json-index.js";
 import { join as pointerJoin } from "./pointer.js";
+import { detectShape } from "./shape.js";
 import { t } from "./i18n/index.js";
 import type {
   DocumentIndex,
   JsonApiError,
+  Lens,
   Reference,
   JsonObject,
   JsonValue,
@@ -400,4 +403,37 @@ export function referencesTo(
 /** Text in, validated index out. Throws `DocumentError` with something readable. */
 export function readDocument(text: string): DocumentIndex {
   return buildIndex(assertJsonApi(parseJson(text)));
+}
+
+/**
+ * Text in, a `Lens` out — the entry point that replaces `assertJsonApi`'s hard
+ * refusal with a branch. `detectShape` decides what the text is and hands
+ * back the value it parsed; a `jsonapi` shape goes through the exact same
+ * `buildIndex` a valid document always has, so "reads exactly as it does
+ * today" holds by construction rather than by two code paths agreeing.
+ *
+ * Throws `DocumentError` only when nothing could be read at all — not valid
+ * JSON, not valid JSON Lines — by re-running `parseJson` for its message.
+ * `detectShape` itself never throws, so this is the one place that message is
+ * needed, and it is needed rarely: every other input, however strange,
+ * becomes a `Lens`.
+ */
+export function readAny(text: string): Lens {
+  const detection = detectShape(text);
+
+  if (detection.value === undefined) {
+    // `detectShape` already tried both an ordinary parse and a JSON Lines
+    // parse and neither produced anything — `parseJson` will throw with its
+    // usual, more specific message (Python dict, log prefix, syntax error…).
+    parseJson(text);
+    // Unreachable: `parseJson` throwing is exactly what the branch above is
+    // for. Kept so the function's return type does not have to lie about it.
+    throw new DocumentError(t().parseErrors.unknown.headline, "");
+  }
+
+  if (detection.shape === "jsonapi") {
+    return { kind: "jsonapi", index: buildIndex(detection.value as JsonObject) };
+  }
+
+  return { kind: "json", index: buildJsonIndex(detection.value, detection.shape, detection.evidence) };
 }

@@ -2,7 +2,14 @@ import { copyText } from "./clipboard.js";
 import { el } from "./dom.js";
 import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
-import { generateSecret, open as openSealed, seal, ShareError, shareSupported } from "./crypto.js";
+import {
+  generateSecret,
+  isBundlePayload,
+  open as openSealed,
+  seal,
+  ShareError,
+  shareSupported,
+} from "./crypto.js";
 import type { SharePayload } from "./crypto.js";
 import { shareUrl } from "./router.js";
 import { openModal, toast } from "./ui.js";
@@ -67,7 +74,19 @@ async function upload(blob: Uint8Array, lifetime: LifetimeKey): Promise<CreatedS
   return (await response.json()) as CreatedShare;
 }
 
-/** Fetch and decrypt a shared document. */
+/**
+ * Fetch and decrypt a single-document share.
+ *
+ * `open` (from `crypto.ts`) can return either a `SharePayload` or a
+ * `BundlePayload` — that is the whole point of a version-3 link declaring its
+ * own kind — but this task adds no view for a bundle: T6 owns the import
+ * screen a bundle needs, and until it lands the only caller of this function
+ * (`main.ts`'s share route) has nowhere to put several documents. So this
+ * keeps its existing, narrower contract and refuses cleanly rather than
+ * handing back a payload with no `text` for that caller to render blank.
+ * T6 reaches for `open`/`isBundlePayload` directly once it has a view to
+ * offer either shape to.
+ */
 export async function fetchShare(id: number, secret: string): Promise<SharePayload> {
   let response: Response;
   try {
@@ -93,7 +112,11 @@ export async function fetchShare(id: number, secret: string): Promise<SharePaylo
   }
 
   const blob = new Uint8Array(await response.arrayBuffer()) as Uint8Array<ArrayBuffer>;
-  return openSealed(blob, secret);
+  const payload = await openSealed(blob, secret);
+  if (isBundlePayload(payload)) {
+    throw new ShareError(t().bundle.errors.unavailable.headline, t().bundle.errors.unavailable.hint);
+  }
+  return payload;
 }
 
 /* ---------------------------------------------------------------- modal --- */

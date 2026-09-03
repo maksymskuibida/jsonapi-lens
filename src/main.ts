@@ -21,18 +21,24 @@ import { legal } from "./legal/index.js";
 import { domId, parseDomId, resourceKey } from "./ident.js";
 import { openJumpModal } from "./jump.js";
 import { openLibraryModal, openRawModal, openSaveModal, openShortcutsModal } from "./panels.js";
-import { DocumentError, readDocument } from "./parse.js";
+import { DocumentError, readAny, readDocument } from "./parse.js";
 import { resolve as resolvePointer } from "./pointer.js";
 import {
   EAGER_BODY_LIMIT,
   groupsHtml,
+  librarySummary,
+  railEntriesForCollections,
+  railEntriesForGroups,
   renderDangling,
   renderErrors,
+  renderJsonDangling,
+  renderJsonOverview,
   renderOverview,
   renderPrimary,
   renderRail,
   renderTopLevel,
 } from "./render-document.js";
+import { buildAnnotations, renderJsonGroups, renderJsonLeftover } from "./render-json.js";
 import { buildResourceBody } from "./render-resource.js";
 import { currentRoute, navigate, parseRoute, PASTE_PATH, VIEW_PATH } from "./router.js";
 import type { LegalRoute, Route } from "./router.js";
@@ -49,7 +55,7 @@ import {
 } from "./store.js";
 import type { LibraryEntry } from "./store.js";
 import { closeModal, modalIsOpen, toast } from "./ui.js";
-import type { DocumentIndex, JsonValue, Resource } from "./types.js";
+import type { DocumentIndex, JsonIndex, JsonValue, Lens, Resource } from "./types.js";
 
 import sampleArticles from "./samples/articles.json?raw";
 import sampleSingle from "./samples/single.json?raw";
@@ -95,6 +101,11 @@ const errorEl = need("error");
 const errorHeadlineEl = need("error-headline");
 const errorHintEl = need("error-hint");
 const errorWhereEl = need("error-where");
+const shapeOfferEl = need("shape-offer");
+const shapeOfferHeadlineEl = need("shape-offer-headline");
+const shapeOfferHintEl = need("shape-offer-hint");
+const shapeOfferPlainEl = need<HTMLButtonElement>("shape-offer-plain");
+const shapeOfferJsonApiEl = need<HTMLButtonElement>("shape-offer-jsonapi");
 const resumeEl = need("resume");
 const newDocEl = need<HTMLButtonElement>("new-doc");
 const topbarDocEl = need("topbar-doc");
@@ -163,7 +174,7 @@ window.addEventListener("resize", labelLanguageOptions, { passive: true });
 /* ---------------------------------------------------------------- state --- */
 
 interface Loaded {
-  index: DocumentIndex;
+  lens: Lens;
   label: string;
   bytes: number;
   text: string;
@@ -236,6 +247,12 @@ function showView(which: "boot" | "paste" | "doc" | "legal", bootMessage?: strin
   newDocEl.hidden = which !== "doc";
   topbarDocEl.hidden = which !== "doc";
   if (which === "boot") bootMessageEl.textContent = bootMessage ?? t().boot.reading;
+  // A pending shape offer belongs to one specific, still-unresolved paste —
+  // every route through this function (arriving fresh at the paste view via
+  // Back/"New"/boot, or leaving it for a document) means that paste is no
+  // longer the thing on screen, so any offer still standing is stale. Only
+  // `showShapeOffer` itself, called without going through here, may show one.
+  hideShapeOffer();
 }
 
 function showError(error: unknown): void {
@@ -263,6 +280,36 @@ function showError(error: unknown): void {
 
 function hideError(): void {
   errorEl.hidden = true;
+}
+
+/* ------------------------------------------------------------ shape offer --- */
+
+/**
+ * A document that is not JSON:API but did parse — held here between "the text
+ * was classified" and "the person picked a reading", since both buttons below
+ * need the exact text and label the classification was made from rather than
+ * re-reading the textarea, which may have changed by the time a button is
+ * clicked.
+ */
+let pendingOffer: { text: string; label: string } | null = null;
+
+function hideShapeOffer(): void {
+  pendingOffer = null;
+  shapeOfferEl.hidden = true;
+}
+
+/**
+ * Name the shape found and offer both readings — "a document that is JSON:API
+ * still goes straight through with no extra click" is what makes this the
+ * branch taken only for everything else.
+ */
+function showShapeOffer(text: string, label: string, index: JsonIndex): void {
+  pendingOffer = { text, label };
+  const shape = t().shape;
+  shapeOfferHeadlineEl.textContent = shape.offerHeadline(shape.name(index.shape));
+  shapeOfferHintEl.textContent = shape.evidence(index.shapeEvidence);
+  shapeOfferEl.hidden = false;
+  shapeOfferEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 /* ------------------------------------------------------------ filtering --- */
@@ -296,6 +343,28 @@ function setSolo(type: string | null): void {
 function openSection(section: Element): void {
   const details = section.querySelector<HTMLDetailsElement>(".res__d");
   if (details && !details.open) details.open = true;
+}
+
+/**
+ * Open every ancestor `<details>` of a plain-JSON anchor, and the anchor
+ * itself when it is one.
+ *
+ * A plain-JSON document has no `.res`-section model — `render-value.ts`'s
+ * generic tree nests a `<details>` inside a `<details>` however deep the
+ * value goes, and only the first level (`AUTO_OPEN_DEPTH`) starts open. A
+ * resolved reference two or more levels deep therefore lands on a real
+ * element that exists but sits inside a *closed* ancestor, which has no
+ * rendered box at all — `openSection`'s single `.res__d` lookup has nothing
+ * analogous to open there, so the target stays invisible even though the
+ * link itself worked. Walking every ancestor and opening each one fixes that
+ * regardless of depth, with no dependence on this document's particular
+ * nesting shape.
+ */
+function openAncestorDetails(target: Element): void {
+  if (target instanceof HTMLDetailsElement) target.open = true;
+  for (let node = target.parentElement; node; node = node.parentElement) {
+    if (node instanceof HTMLDetailsElement) node.open = true;
+  }
 }
 
 /**
@@ -364,7 +433,13 @@ function resolveHash(restore: EntryState | null = null): void {
 
   // Open before scrolling, so the scroll lands against final layout — but never
   // on top of a restored shape, which already says whether this row was open.
-  if (target.classList.contains("res") && !shape) openSection(target);
+  // `shape` only ever describes the JSON:API `.res` model (see `applyOpenRows`),
+  // so a plain-JSON target — which never sets one — always takes the ancestor
+  // branch, and correctly so: there is no restored shape for it to defer to.
+  if (!shape) {
+    if (target.classList.contains("res")) openSection(target);
+    else openAncestorDetails(target);
+  }
 
   if (position) restorePosition(position);
   else target.scrollIntoView({ block: "start" });
@@ -820,13 +895,19 @@ function fillBody(details: HTMLDetailsElement, index: DocumentIndex): void {
   body.append(buildResourceBody(resource, index));
 }
 
-/** The resource a DOM node belongs to, via its section's encoded id. */
+/**
+ * The resource a DOM node belongs to, via its section's encoded id.
+ *
+ * `null` for a plain-JSON document by construction, not by accident: that
+ * mode never renders a `.res` section, so `parseDomId` — which only ever
+ * recognises the `resource` scope — correctly finds nothing to parse.
+ */
 function resourceOf(node: Element): Resource | null {
-  if (!current) return null;
+  if (!current || current.lens.kind !== "jsonapi") return null;
   const section = node.closest<HTMLElement>(".res");
   const identity = section ? parseDomId(section.id) : null;
   if (!identity) return null;
-  return current.index.byKey.get(resourceKey(identity.type, identity.id)) ?? null;
+  return current.lens.index.byKey.get(resourceKey(identity.type, identity.id)) ?? null;
 }
 
 /** Actions that operate on the whole document, shown in the overview card. */
@@ -857,7 +938,20 @@ function documentActions(): HTMLElement {
   );
 }
 
-function renderDocumentView(loaded: Loaded, parseMs: number): void {
+interface LoadedView<T> {
+  index: T;
+  label: string;
+  bytes: number;
+  text: string;
+}
+
+/**
+ * The JSON:API document view — unchanged from before `Lens` existed, aside
+ * from taking `{index: DocumentIndex, …}` explicitly rather than through the
+ * old `Loaded`. "Same resources, same anchors, same overview, same rail" is
+ * this function, byte for byte.
+ */
+function renderDocumentView(loaded: LoadedView<DocumentIndex>, parseMs: number): void {
   const { index } = loaded;
   const started = performance.now();
 
@@ -889,7 +983,7 @@ function renderDocumentView(loaded: Loaded, parseMs: number): void {
   // rail would be an empty column headed "Types 0".
   if (index.groups.length > 0) {
     docEl.classList.remove("doc--no-rail");
-    docEl.replaceChildren(renderRail(index), main);
+    docEl.replaceChildren(renderRail(railEntriesForGroups(index)), main);
   } else {
     docEl.classList.add("doc--no-rail");
     docEl.replaceChildren(main);
@@ -934,6 +1028,68 @@ function renderDocumentView(loaded: Loaded, parseMs: number): void {
   applyPageMeta(documentMeta(loaded.label));
 }
 
+/**
+ * The plain-JSON document view. Mirrors `renderDocumentView`'s shape —
+ * overview, dangling panel, the groups a rail can jump between, then
+ * whatever else the document carries — built from `render-document.ts`'s
+ * and `render-json.ts`'s pieces rather than a render path of its own.
+ */
+function renderJsonView(loaded: LoadedView<JsonIndex>, parseMs: number): void {
+  const { index } = loaded;
+  const started = performance.now();
+
+  const main = el("div", { class: "main" });
+
+  const overview = renderJsonOverview(index, { bytes: loaded.bytes, parseMs });
+  overview.append(documentActions());
+  main.append(overview);
+
+  const dangling = renderJsonDangling(index);
+  if (dangling) main.append(dangling);
+
+  const annotations = buildAnnotations(index);
+  main.append(renderJsonGroups(index, annotations));
+
+  const leftover = renderJsonLeftover(index, annotations);
+  if (leftover) main.append(leftover);
+
+  const railEntries = railEntriesForCollections(index);
+  if (railEntries.length > 0) {
+    docEl.classList.remove("doc--no-rail");
+    docEl.replaceChildren(renderRail(railEntries), main);
+  } else {
+    docEl.classList.add("doc--no-rail");
+    docEl.replaceChildren(main);
+  }
+
+  const renderMs = performance.now() - started;
+
+  showView("doc");
+  soloType = null;
+  applyFilter();
+
+  topbarLabelEl.textContent = loaded.label;
+  topbarStatsEl.textContent = t().shape.stats(index.counts.total, railEntries.length, formatBytes(loaded.bytes));
+
+  console.info("[jsonapi-lens] timings", {
+    shape: index.shape,
+    items: index.counts.total,
+    collections: railEntries.length,
+    bytes: loaded.bytes,
+    parseAndIndex: formatDuration(parseMs),
+    render: formatDuration(renderMs),
+  });
+
+  applyPageMeta(documentMeta(loaded.label));
+}
+
+/** Dispatches on which half of `Lens` was read, so every other call site just calls this. */
+function renderLoadedView(loaded: Loaded, parseMs: number): void {
+  const view = { label: loaded.label, bytes: loaded.bytes, text: loaded.text };
+  if (loaded.lens.kind === "jsonapi") renderDocumentView({ index: loaded.lens.index, ...view }, parseMs);
+  else renderJsonView({ index: loaded.lens.index, ...view }, parseMs);
+}
+
 /* Lazy bodies. `toggle` does not bubble, so this listens in the capture phase,
    which non-bubbling events still traverse. Using `toggle` rather than `click`
    also catches the browser expanding a row itself during find-in-page. */
@@ -943,7 +1099,7 @@ docEl.addEventListener(
     const details = event.target;
     if (!(details instanceof HTMLDetailsElement) || !details.open) return;
     if (!details.classList.contains("res__d")) return;
-    if (current) fillBody(details, current.index);
+    if (current && current.lens.kind === "jsonapi") fillBody(details, current.lens.index);
   },
   true,
 );
@@ -968,7 +1124,7 @@ function handleValueCopy(button: HTMLElement): void {
     return;
   }
 
-  const value = resolvePointer(current.index.root, pointer);
+  const value = resolvePointer(current.lens.index.root, pointer);
   if (value === undefined) {
     toast(t().toast.pointerGone(pointer), "error");
     return;
@@ -1086,7 +1242,7 @@ function rawDocument(): void {
   openRawModal({
     title: current.label,
     subtitle: t().raw.wholeDocument,
-    value: current.index.root,
+    value: current.lens.index.root,
     filename: safeFilename(current.label),
   });
 }
@@ -1095,6 +1251,15 @@ function shareDocument(): void {
   if (!current) return;
   openShareModal(current.text, current.label);
 }
+
+// `librarySummary` — the three summary fields a `LibraryEntry` row shows —
+// lives in `render-document.ts` now, not here: it is a pure function of
+// whichever `Lens` is open, and moving it next to `railEntriesForGroups`/
+// `railEntriesForCollections` (the same "one Lens-shaped projection, no rail
+// code of its own" pattern) is what lets it be unit-tested directly instead
+// of only through `parse.ts#readAny`'s determinism test as a proxy. It still
+// never touches `store.ts` — see `docs/STATUS.md` §1a for why that split
+// matters this wave.
 
 function saveCurrent(): void {
   if (!current) return;
@@ -1105,15 +1270,7 @@ function saveCurrent(): void {
       text: loaded.text,
       savedAt: Date.now(),
       bytes: loaded.bytes,
-      resources: loaded.index.counts.total,
-      types: loaded.index.groups.length,
-      shape: loaded.index.primaryIsNull
-        ? "data: null"
-        : loaded.index.errors.length
-          ? `errors[${loaded.index.errors.length}]`
-          : loaded.index.primary.length === 1
-            ? "data{1}"
-            : `data[${loaded.index.primary.length}]`,
+      ...librarySummary(loaded.lens),
     };
     const id = await saveToLibrary(entry);
     if (id === null) {
@@ -1182,17 +1339,31 @@ interface LoadOptions {
   persist: boolean;
   /** Push `/view` onto history rather than replacing the current entry. */
   push?: boolean;
+  /**
+   * Read strictly as JSON:API — `readDocument`, unchanged — rather than
+   * through `readAny`. This is "Read as JSON:API anyway": the escape hatch
+   * for a near-miss document that `detectShape` would not read as `jsonapi`
+   * on its own, so it can still throw `assertJsonApi`'s own rejection.
+   */
+  forceJsonApi?: boolean;
+  /**
+   * A `Lens` already computed for this exact `text` — the shape-offer flow's
+   * two buttons pass the one `submitPastedText` already built, so accepting
+   * the offer never means classifying the document a second time.
+   */
+  lens?: Lens;
 }
 
 async function load(text: string, label: string, options: LoadOptions): Promise<boolean> {
   hideError();
+  hideShapeOffer();
 
   const bytes = new TextEncoder().encode(text).byteLength;
   const started = performance.now();
 
-  let index: DocumentIndex;
+  let lens: Lens;
   try {
-    index = readDocument(text);
+    lens = options.lens ?? (options.forceJsonApi ? { kind: "jsonapi", index: readDocument(text) } : readAny(text));
   } catch (error) {
     showView("paste");
     showError(error);
@@ -1200,7 +1371,7 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   }
 
   const parseMs = performance.now() - started;
-  current = { index, label, bytes, text };
+  current = { lens, label, bytes, text };
 
   if (options.persist) {
     // A fresh document invalidates any fragment from the previous one, and the
@@ -1213,7 +1384,7 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   // its remembered rows and its anchor belong to the document being replaced.
   dropPendingRestore();
 
-  renderDocumentView(current, parseMs);
+  renderLoadedView(current, parseMs);
 
   if (options.persist) {
     window.scrollTo(0, 0);
@@ -1224,6 +1395,35 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   return true;
 }
 
+/**
+ * The one place text arrives as a fresh submission — the textarea, a dropped
+ * or opened file — rather than a document already known to be resolved
+ * (a saved entry, the last session's document, a share link). Classifies
+ * once and either reads straight through (`jsonapi`, or nothing to ask about)
+ * or hands the classification to the shape-offer banner, so the two buttons
+ * there act on the exact `Lens` this found rather than reclassifying.
+ */
+function submitPastedText(text: string, label: string): void {
+  hideError();
+  hideShapeOffer();
+
+  let lens: Lens;
+  try {
+    lens = readAny(text);
+  } catch (error) {
+    showView("paste");
+    showError(error);
+    return;
+  }
+
+  if (lens.kind === "jsonapi") {
+    void load(text, label, { persist: true, push: true, lens });
+    return;
+  }
+
+  showShapeOffer(text, label, lens.index);
+}
+
 function loadFromInput(): void {
   const text = inputEl.value;
   if (!text.trim()) {
@@ -1232,7 +1432,7 @@ function loadFromInput(): void {
     );
     return;
   }
-  void load(text, t().labels.pastedDocument, { persist: true, push: true });
+  submitPastedText(text, t().labels.pastedDocument);
 }
 
 /* ----------------------------------------------------------- paste view --- */
@@ -1245,6 +1445,7 @@ function updateDropMeta(): void {
 inputEl.addEventListener("input", () => {
   updateDropMeta();
   hideError();
+  hideShapeOffer();
 });
 
 need("parse").addEventListener("click", loadFromInput);
@@ -1260,6 +1461,18 @@ need("open-file").addEventListener("click", () => fileEl.click());
 need("open-library").addEventListener("click", openLibrary);
 need("shortcuts").addEventListener("click", openShortcutsModal);
 
+shapeOfferPlainEl.addEventListener("click", () => {
+  if (!pendingOffer) return;
+  const { text, label } = pendingOffer;
+  void load(text, label, { persist: true, push: true });
+});
+
+shapeOfferJsonApiEl.addEventListener("click", () => {
+  if (!pendingOffer) return;
+  const { text, label } = pendingOffer;
+  void load(text, label, { persist: true, push: true, forceJsonApi: true });
+});
+
 fileEl.addEventListener("change", () => {
   const file = fileEl.files?.[0];
   if (file) void readFile(file);
@@ -1271,7 +1484,7 @@ async function readFile(file: File): Promise<void> {
     const text = await file.text();
     inputEl.value = text;
     updateDropMeta();
-    await load(text, file.name, { persist: true, push: true });
+    submitPastedText(text, file.name);
   } catch {
     showError(
       new DocumentError(
@@ -1340,7 +1553,7 @@ newDocEl.addEventListener("click", () => {
   resumeEl.hidden = true;
   navigate(PASTE_PATH);
   applyRouteMeta({ kind: "paste" });
-  showView("paste");
+  showView("paste"); // also clears any stale shape offer — see showView's own comment
   inputEl.focus();
 });
 
@@ -1409,9 +1622,13 @@ document.addEventListener("keydown", (event) => {
     // resource finder, which always exists and is the search you actually want.
     case "/":
     case "g":
-      if (current) {
+      // The resource finder is a `{type, id}` search — jump.ts is out of
+      // T1's scope to extend, and a plain-JSON document has no `type` to
+      // search by, so the shortcut is quietly a no-op there rather than
+      // opening a dialog that could never match anything.
+      if (current && current.lens.kind === "jsonapi") {
         event.preventDefault();
-        openJumpModal(current.index);
+        openJumpModal(current.lens.index);
       }
       break;
     case "s":
@@ -1551,10 +1768,14 @@ async function boot(): Promise<void> {
 
   // Reading IndexedDB takes long enough that a document can be pasted before it
   // finishes — most easily on a cold profile, where opening the database is
-  // slowest. That document is rendered and showing by now, so boot has nothing
-  // left to do: falling through would replace it with the paste view and look
-  // exactly like the paste having been ignored.
-  if (current) return;
+  // slowest. Either outcome of that race already has something on screen that
+  // boot must not disturb: a `jsonapi` paste has rendered and set `current`,
+  // and anything else has shown the shape-offer banner and set `pendingOffer`
+  // instead — `showView("paste")` below unconditionally clears a pending offer
+  // (see `showView`'s own comment), so missing this second case would silently
+  // wipe a banner the user is looking at, with no document and no error to
+  // explain why it vanished.
+  if (current || pendingOffer) return;
 
   showView("paste");
 
@@ -1566,15 +1787,36 @@ async function boot(): Promise<void> {
   inputEl.value = stored.text;
   updateDropMeta();
 
-  // Parse it so "Back to document" is instant, but stay on the paste view.
+  // Parse *and render* it so "Back to document" is instant, but stay on the
+  // paste view. Pre-existing bug, reproduced on the unmodified base commit
+  // and fixed here because this is the function that already needed
+  // rewriting for `readAny`: this branch used to set `current` and call
+  // `offerResume()` without ever rendering into `docEl`, so a document
+  // stored from an earlier session, reloaded fresh on `/`, showed a
+  // completely blank document view the moment "Back to document" was
+  // clicked — `showView("doc")` reveals `docEl`, and nothing had ever put
+  // anything there. Rendering now and folding back to the paste view with a
+  // second `showView`/`applyRouteMeta` call keeps the visible screen and the
+  // page's own metadata matching what is actually on it, while leaving
+  // `docEl` already populated for whenever "Back to document" is clicked.
+  //
+  // `readAny` rather than `readDocument`: a stored document is one that was
+  // already read successfully once — including a plain-JSON one — and this
+  // is a restore, not a fresh submission, so there is no shape offer to show
+  // here even if the shape is not `jsonapi`.
   try {
-    const index = readDocument(stored.text);
+    const started = performance.now();
+    const lens = readAny(stored.text);
+    const parseMs = performance.now() - started;
     current = {
-      index,
+      lens,
       label: stored.label ?? t().labels.storedDocument,
       bytes: new TextEncoder().encode(stored.text).byteLength,
       text: stored.text,
     };
+    renderLoadedView(current, parseMs);
+    showView("paste");
+    applyRouteMeta({ kind: "paste" });
     offerResume();
   } catch {
     // A stored document that no longer parses is not worth blocking the paste

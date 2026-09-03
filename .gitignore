@@ -1,6 +1,9 @@
 node_modules/
 dist/
-fixtures/
+# Anchored: this is the generated 25 MB `npm run fixtures` output at the repo
+# root. Unanchored, it also matched test/fixtures/, so committed test data was
+# silently left out of every commit.
+/fixtures/
 .wrangler/
 .DS_Store
 *.log

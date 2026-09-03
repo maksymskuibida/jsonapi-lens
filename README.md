@@ -460,9 +460,14 @@ src/
   parse.ts            validation with specific errors, one-pass index, reverse index
   types.ts            structural types for the parts of JSON:API this reads
   format.ts           value classification and typed formatting
-  crypto.ts           gzip + AES-GCM + PBKDF2 for share links
+  crypto.ts           gzip + AES-GCM + PBKDF2 for the share envelope — one document or a bundle
   share.ts            share API client and its modal
   store.ts            IndexedDB: current document and saved library
+  exchange.ts         the Exchange model (request/response/body) and mergeExchange
+  params.ts           one query-string/form decoder, every encoding named, ambiguity kept
+  headers.ts          case-insensitive header lookup with duplicates preserved in order
+  cookies.ts          Cookie and Set-Cookie parsing into name/value/attributes
+  secrets.ts          secret-header/credential-shape detection, JWT decoding, redaction
   clipboard.ts        copy and download
   ui.ts               toast and modal
   panels.ts           raw view, saved documents, save, shortcuts

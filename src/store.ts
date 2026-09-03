@@ -9,10 +9,40 @@
  * pasted.
  *
  * All of this is local to the browser. Nothing here talks to a network.
+ *
+ * ## `DB_VERSION` 2 → 3, and why nothing is migrated
+ *
+ * Version 3 adds exactly one thing to each record shape: an optional
+ * `exchange`. `onupgradeneeded` already creates a store only if it is missing,
+ * so this upgrade is a no-op there — there is no new store, no new index, and
+ * therefore nothing to write. That is deliberate, not an oversight: IndexedDB
+ * does not enforce a record shape beyond its keyPath, so a record written by
+ * the previous build, with no `exchange` property at all, is already a valid
+ * record under this one. **A v2 record is a v3 record with no exchange**, by
+ * construction rather than by conversion, which is what lets every document
+ * already saved, and every library entry already listed, keep opening after
+ * this ships with nothing rewritten and nothing logged.
+ *
+ * The version number still moves, purely as a marker for whoever reads this
+ * file's history next: it says a record's shape gained a field on this date,
+ * even though IndexedDB itself never asked for the bump. Only this module
+ * touches `DB_VERSION` — see `docs/STATUS.md` §1a for why that is a rule and
+ * not just current practice.
+ *
+ * `resources`, `types` and `shape` on `LibraryEntry` are optional for a
+ * related but separate reason: they are a **display summary for a library
+ * row that no code branches on**, computed by whichever lens read the
+ * document. A JSON:API reading can always produce all three; a plain-JSON
+ * reading (T1) may have no resource or type concept at all, and a v2 entry
+ * from before this change has them as plain numbers/strings already, which
+ * satisfies "optional" trivially. Nothing here validates or reconstructs
+ * them — a caller that has nothing to report simply omits them.
  */
 
+import type { Exchange } from "./exchange.js";
+
 const DB_NAME = "jsonapi-lens";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const CURRENT_STORE = "documents";
 const LIBRARY_STORE = "library";
 const CURRENT_KEY = "current";
@@ -24,6 +54,8 @@ export interface StoredDocument {
   savedAt: number;
   /** A filename, when the document arrived by drag-and-drop, or a chosen name. */
   label?: string;
+  /** Captured request/response context, when the document came with one. */
+  exchange?: Exchange;
 }
 
 /** A document the user explicitly kept, plus enough summary to list it. */
@@ -33,10 +65,14 @@ export interface LibraryEntry {
   text: string;
   savedAt: number;
   bytes: number;
-  resources: number;
-  types: number;
-  /** Short description of the document shape, e.g. `data[2]`. */
-  shape: string;
+  /** Resource count, when the lens that read this document has one. */
+  resources?: number;
+  /** Distinct type count, when the lens that read this document has one. */
+  types?: number;
+  /** Short description of the document shape, e.g. `data[2]` — whatever the reading of this document can report. */
+  shape?: string;
+  /** Captured request/response context, when the document came with one. */
+  exchange?: Exchange;
 }
 
 function open(): Promise<IDBDatabase> {

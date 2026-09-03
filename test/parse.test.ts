@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertJsonApi, buildIndex, DocumentError, parseJson, readDocument } from "../src/parse.js";
+import { assertJsonApi, buildIndex, DocumentError, parseJson, readAny, readDocument } from "../src/parse.js";
 import { resourceKey } from "../src/ident.js";
 import type { JsonObject } from "../src/types.js";
 
@@ -299,5 +299,85 @@ describe("readDocument", () => {
   it("surfaces a DocumentError for bad input", () => {
     expect(() => readDocument("{ nope }")).toThrow(DocumentError);
     expect(() => readDocument('{"results":[]}')).toThrow(DocumentError);
+  });
+});
+
+describe("readAny — the branch out of assertJsonApi", () => {
+  it("reads a valid JSON:API document exactly as readDocument would — same index, no regression", () => {
+    const text = '{"data":{"type":"articles","id":"1"},"included":[{"type":"people","id":"9"}]}';
+    const lens = readAny(text);
+    expect(lens.kind).toBe("jsonapi");
+    if (lens.kind !== "jsonapi") throw new Error("unreachable");
+    expect(lens.index).toEqual(readDocument(text));
+  });
+
+  it("reads {\"data\": 1} as plain JSON rather than a mostly-empty JSON:API document", () => {
+    const lens = readAny('{"data": 1}');
+    expect(lens.kind).toBe("json");
+    if (lens.kind !== "json") throw new Error("unreachable");
+    expect(lens.index.shape).toBe("envelope");
+    // `root` is the whole document, not just its `data` member — same as
+    // `DocumentIndex.root` for the JSON:API path.
+    expect(lens.index.root).toEqual({ data: 1 });
+  });
+
+  it("reads a bare array as plain JSON rather than throwing", () => {
+    const lens = readAny('[{"type":"a"},{"type":"b"}]');
+    expect(lens.kind).toBe("json");
+    if (lens.kind !== "json") throw new Error("unreachable");
+    expect(lens.index.shape).toBe("collection");
+  });
+
+  it("reads an NDJSON stream as plain JSON rather than throwing", () => {
+    const lens = readAny('{"a":1}\n{"a":2}\n{"a":3}\n');
+    expect(lens.kind).toBe("json");
+    if (lens.kind !== "json") throw new Error("unreachable");
+    expect(lens.index.shape).toBe("ndjson");
+    expect(lens.index.root).toEqual([{ a: 1 }, { a: 2 }, { a: 3 }]);
+  });
+
+  it("still refuses data and errors together as jsonapi, but reads it as plain JSON", () => {
+    const lens = readAny('{"data": {"type":"a","id":"1"}, "errors": []}');
+    expect(lens.kind).toBe("json");
+    if (lens.kind !== "json") throw new Error("unreachable");
+    expect(lens.index.shape).toBe("envelope");
+    // The strict path still rejects it exactly as before — the escape hatch
+    // ("Read as JSON:API anyway") reproduces that rejection rather than
+    // silently accepting it.
+    expect(() => readDocument('{"data": {"type":"a","id":"1"}, "errors": []}')).toThrow(
+      /both `data` and `errors`/,
+    );
+  });
+
+  it("surfaces the same DocumentError as parseJson for genuinely unparseable text", () => {
+    expect(() => readAny("{ nope }")).toThrow(DocumentError);
+    expect(() => readAny("not json at all {{{")).toThrow(DocumentError);
+  });
+
+  it("reads a bare scalar or null without throwing", () => {
+    expect(readAny("42").kind).toBe("json");
+    expect(readAny("null").kind).toBe("json");
+    const nullLens = readAny("null");
+    if (nullLens.kind !== "json") throw new Error("unreachable");
+    expect(nullLens.index.root).toBeNull();
+  });
+
+  it("is deterministic — the same text produces an equivalent index every time", () => {
+    // This is the property the "saved and reopened" round trip actually
+    // depends on: store.ts persists the raw text and reindexes on load (see
+    // its own header comment), so a plain-JSON document surviving a reload is
+    // exactly this, re-run.
+    const text = '{"users":[{"id":1,"name":"Ada"},{"id":2,"name":"Grace"}],"posts":[{"id":10,"user_id":2}]}';
+    const first = readAny(text);
+    const second = readAny(text);
+    expect(first.kind).toBe("json");
+    expect(second.kind).toBe("json");
+    if (first.kind !== "json" || second.kind !== "json") throw new Error("unreachable");
+    expect(second.index.shape).toBe(first.index.shape);
+    expect(second.index.counts).toEqual(first.index.counts);
+    expect(second.index.collections.map((c) => c.pointer)).toEqual(
+      first.index.collections.map((c) => c.pointer),
+    );
+    expect([...second.index.referenceAt.entries()]).toEqual([...first.index.referenceAt.entries()]);
   });
 });
