@@ -3,8 +3,8 @@
 # Review preflight — answers the mechanical half of a review deterministically,
 # so the reviewer spends its budget on judgement instead of re-deriving facts.
 #
-# Usage:  scripts/review-preflight.sh <pr-number>
-#         scripts/review-preflight.sh            # the current branch vs origin/main
+# Usage:  scripts/review-preflight.sh <pr-number>   # diffs against that PR's own base branch
+#         scripts/review-preflight.sh               # this branch's upstream, else origin/main
 #
 # Exit codes:  0 clean · 1 findings · 2 could not determine (fails closed)
 #
@@ -31,7 +31,6 @@
 set -uo pipefail
 
 PR="${1:-}"
-BASE_REF="origin/main"
 findings=0
 notes=0
 
@@ -52,11 +51,66 @@ ok()   { printf '  ok      %s\n' "$1"; }
 find_() { printf '  FINDING %s\n' "$1"; findings=$((findings + 1)); }
 note() { printf '  note    %s\n' "$1"; notes=$((notes + 1)); }
 
-git fetch --quiet origin main 2>/dev/null || note "could not fetch origin/main; comparing against the local ref"
+# ------------------------------------------------------------ resolve the base ---
+#
+# BASE_REF used to be the literal constant `origin/main`. That is wrong for a
+# reason deeper than style: implementer branches in this repository fork from
+# a shared integration branch, not from `main` directly, so `main` does not
+# yet contain that branch's own commits — including, while it is unmerged,
+# this very script and its attack suite. A hardcoded `origin/main` always
+# diffs against a stale ancestor, and every commit the integration branch
+# carries that `main` does not reads as part of THIS diff. That is a second,
+# deeper source of the same class of false finding T9 exists to fix by
+# scoping WHAT each invariant reads (see ADDED_SRC below): this is about
+# WHERE the diff starts.
+#
+# Resolved in order of trust, each candidate verified before it is used:
+#   1. The pull request's own base branch, when a PR number is given — ground
+#      truth for what the diff will actually be evaluated against on merge.
+#   2. The branch this one tracks (`@{u}`), when one is configured.
+#   3. `origin/main`, the repository's actual default branch.
+# A candidate that does not resolve is skipped, not fatal — only exhausting
+# all three is. Fails closed on purpose: reporting a pass because the base
+# could not be determined turns every misconfiguration (network, `gh`
+# unavailable or unauthenticated, a renamed default branch) into a silent
+# green, which is worse than refusing to answer.
+BASE_REF=""
+BASE_SOURCE=""
+
+if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then
+  pr_base="$(gh pr view "$PR" --json baseRefName --jq .baseRefName 2>/dev/null)" || pr_base=""
+  if [ -n "$pr_base" ]; then
+    git fetch --quiet origin "$pr_base" 2>/dev/null \
+      || note "could not fetch origin/$pr_base; trying the local ref"
+    if git rev-parse --verify --quiet "origin/$pr_base" >/dev/null 2>&1; then
+      BASE_REF="origin/$pr_base"
+      BASE_SOURCE="the base branch of PR #$PR ($BASE_REF)"
+    fi
+  fi
+fi
+
+if [ -z "$BASE_REF" ]; then
+  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" || upstream=""
+  if [ -n "$upstream" ]; then
+    git fetch --quiet 2>/dev/null || true
+    if git rev-parse --verify --quiet "$upstream" >/dev/null 2>&1; then
+      BASE_REF="$upstream"
+      BASE_SOURCE="this branch's upstream ($BASE_REF)"
+    fi
+  fi
+fi
+
+if [ -z "$BASE_REF" ]; then
+  git fetch --quiet origin main 2>/dev/null || note "could not fetch origin/main; comparing against the local ref"
+  BASE_REF="origin/main"
+  BASE_SOURCE="origin/main (default — no PR base or upstream resolved)"
+fi
+
 git rev-parse --verify --quiet "$BASE_REF" >/dev/null || {
   echo "FATAL: cannot resolve $BASE_REF — refusing to report a pass" >&2
   exit 2
 }
+note "comparing against $BASE_SOURCE"
 
 MERGE_BASE="$(git merge-base "$BASE_REF" HEAD 2>/dev/null)" || {
   echo "FATAL: no merge base with $BASE_REF — refusing to report a pass" >&2
@@ -67,15 +121,16 @@ CHANGED="$(git diff --name-only "$MERGE_BASE"..HEAD)"
 DIFF="$(git diff "$MERGE_BASE"..HEAD)"
 ADDED="$(printf '%s\n' "$DIFF" | grep '^+' | grep -v '^+++' || true)"
 
-# T9: scripts/attack-preflight.sh plants the exact patterns several checks
-# below look for — literal `<<<<<<<`, `.only(`, `innerHTML`, `href:` and
-# `scrollY` — because planting them is how it proves each check fires. Any
-# diff that touches that file (every branch's diff until T0 merges, and every
-# future edit to the suite after that) used to read as unrelated violations
-# in application code that do not exist, because the checks below scanned
-# `$ADDED` — every added line in the whole diff — rather than the lines the
-# invariant is actually about. Two different fixes for two different kinds of
-# check (docs/task-specs/T9.md):
+# T9: scripts/attack-preflight.sh plants, as its own fixtures, one example of
+# every pattern several checks below search for — a conflict-marker sequence,
+# a focused-test call, an innerHTML assignment, an href construction, a
+# scroll-position read — because planting one of each is how it proves every
+# check fires. Any diff that touches that file (every branch's diff until T0
+# merges, and every future edit to the suite after that) used to read as
+# unrelated violations in application code that do not exist, because the
+# checks below scanned `$ADDED` — every added line in the whole diff —
+# rather than the lines the invariant is actually about. Two different fixes
+# for two different kinds of check (docs/task-specs/T9.md):
 #
 #   - The CODE INVARIANTS (the innerHTML/insertAdjacentHTML scan and the href
 #     note; the network-call, DOM-id and hardcoded-copy scans already read
@@ -84,13 +139,23 @@ ADDED="$(printf '%s\n' "$DIFF" | grep '^+' | grep -v '^+++' || true)"
 #     so they read ADDED_SRC / ADDED_TEST_UNIT below. Both are built with a
 #     git pathspec that names what to INCLUDE, not what to exclude — so
 #     scoping them can never be widened by accident to cover a file it
-#     shouldn't, in scripts/ or anywhere else.
+#     shouldn't, in scripts/ or anywhere else. This also settles a longer-
+#     lived version of the same bug: PROCESS.md and the agent briefs discuss
+#     these very invariants in prose (an innerHTML assignment, a scheme
+#     allowlist, and so on), and would otherwise trip their own checks on
+#     every future pull request that so much as edits that paragraph — not
+#     just until T0 merges, but forever. Reading only src/ (and, below, only
+#     test/) means a check never sees prose about it in the first place,
+#     regardless of which file the prose lives in.
 #   - Conflict markers and focused/skipped tests are genuinely about any
-#     file — a real conflict marker or a real `.only(` in scripts/ is a real
-#     problem — so those two read ADDED_EXCEPT_ATTACK_SUITE, which excludes
-#     exactly one path, by its exact name, and nothing else. A glob such as
-#     `scripts/attack-*.sh` would risk exempting some future attack-*.sh that
-#     is not this suite; excluding the literal path cannot.
+#     file — a real one committed to scripts/ is a real problem — so those
+#     two read ADDED_EXCEPT_ATTACK_SUITE, which excludes exactly one path, by
+#     its exact name, and nothing else. A glob such as `scripts/attack-*.sh`
+#     would risk exempting some future attack-*.sh that is not this suite;
+#     excluding the literal path cannot. This pair keeps the narrower,
+#     file-based exemption rather than a path-inclusion one, precisely
+#     because they are supposed to fire on any file — the two are asymmetric
+#     on purpose, not an oversight.
 #
 # Nothing about which patterns are searched changes here, only which lines
 # are offered to them.
@@ -171,8 +236,8 @@ fi
 say "Hygiene"
 # Both checks below read ADDED_EXCEPT_ATTACK_SUITE, not ADDED: they are
 # genuinely about any file, so a real hit anywhere else must still fire — but
-# scripts/attack-preflight.sh plants a literal conflict marker and a literal
-# `it.only(` as its own fixtures, so it alone is exempt. See the T9 note above
+# scripts/attack-preflight.sh plants a conflict-marker sequence and a focused-
+# test call as its own fixtures, so it alone is exempt. See the T9 note above
 # ADDED_SRC.
 if grep -qE '^\+.*(<<<<<<<|>>>>>>>|^\+=======$)' <<<"$ADDED_EXCEPT_ATTACK_SUITE"; then
   find_ "conflict markers in the diff"

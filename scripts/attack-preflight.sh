@@ -366,6 +366,93 @@ git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "conflict marker in a simi
 expect "T9 ceiling: a similarly named script is not exempt" "$d" 1 \
   "conflict markers in the diff"
 
+# --- 18. T9: innerHTML mentioned as prose in a doc file must not fire ---
+#
+# The bug outlives the attack suite. PROCESS.md and the agent briefs discuss
+# these very invariants in prose (an innerHTML assignment, for instance), so
+# scoping the code invariants to application code has to keep them quiet on
+# a doc-only diff too — otherwise every future edit to that paragraph would
+# misreport a real violation, forever, long after T0 merges. No attack-suite
+# fixture is involved here at all; this is the plain fresh_repo.
+d=$(fresh_repo t9docprose)
+mkdir -p "$d/docs"
+cat > "$d/docs/PROCESS.md" <<'DOC'
+# Process
+
+Every interpolation on an innerHTML path goes through escapeHtml.
+DOC
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "document the innerHTML rule in prose"
+expect_ok "T9: innerHTML mentioned in a doc file — invariant silent" "$d" \
+  "no raw HTML assignment added" "innerHTML/insertAdjacentHTML path is in the diff"
+
+# --- 19. T9: the PR's own base wins over a stale origin/main ------------
+#
+# This repository's real implementer branches fork from a shared integration
+# branch rather than from main directly, so main can lag behind by an entire
+# unmerged commit's worth of unrelated changes — this is the deeper cause
+# behind why the attack suite's fixtures reach every branch's diff in the
+# first place. Simulated here: an "integration" commit lands on top of the
+# shared base and adds a real (if contrived) innerHTML hit that origin/main
+# does not have; feat/x is then rebuilt ON TOP of integration, the way this
+# repo's branches actually are, adding one small, unrelated change of its
+# own. If the gate fell back to stale origin/main it would report the
+# integration commit's innerHTML as part of THIS diff. Resolving the PR's
+# real base instead excludes it. `gh` is stubbed on PATH so this does not
+# depend on network access or a real PR.
+d=$(fresh_repo t9prbase)
+git -C "$d" checkout -q -b integration
+printf 'node.innerHTML = integrationNoise;\n' > "$d/src/other.ts"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "integration commit origin/main does not have yet"
+git -C "$d" update-ref refs/remotes/origin/integration integration
+git -C "$d" checkout -q -B feat/x integration
+echo "// the actual feature change" >> "$d/src/main.ts"
+git -C "$d" commit -qam "the actual feature commit"
+
+FAKEBIN="$(mktemp -d)"
+cat > "$FAKEBIN/gh" <<'FAKEGH'
+#!/usr/bin/env bash
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  echo "integration"
+  exit 0
+fi
+exit 1
+FAKEGH
+chmod +x "$FAKEBIN/gh"
+out="$(cd "$d" && PATH="$FAKEBIN:$PATH" ./scripts/review-preflight.sh 42 2>&1)"
+rm -rf "$FAKEBIN"
+
+if printf '%s' "$out" | grep -qE 'comparing against the base branch of PR #42 \(origin/integration\)' \
+   && printf '%s' "$out" | grep -qE '^  ok .*no raw HTML assignment added' \
+   && ! printf '%s' "$out" | grep -qE 'innerHTML/insertAdjacentHTML path is in the diff'; then
+  printf 'pass  %-42s used the PR base, not stale origin/main\n' "T9: PR base-ref wins over stale origin/main"
+  pass=$((pass+1))
+else
+  printf 'FAIL  %-42s did not resolve or use the PR base correctly\n' "T9: PR base-ref wins over stale origin/main"
+  printf '%s\n' "$out"
+  fail=$((fail+1))
+fi
+
+# --- 20. T9: exhausting every base-ref candidate still fails closed -----
+d=$(fresh_repo t9baseexhausted)
+git -C "$d" update-ref -d refs/remotes/origin/main
+echo "y" >> "$d/src/main.ts"; git -C "$d" commit -qam x
+# A PR number is given, but this throwaway repo has no real GitHub remote,
+# so even the most-trusted source resolves to nothing — real gh fails fast
+# and cleanly against a repo like this (verified by hand: "no git remotes
+# found", exit 1, no network round trip, no prompt — and if gh is not
+# installed at all, the resolver skips straight past it). The chain must
+# still fall through the unconfigured upstream to origin/main, find that
+# missing too, and fail closed rather than silently reporting a pass.
+out="$(cd "$d" && ./scripts/review-preflight.sh 999999 2>&1)"; code=$?
+if [ "$code" = 2 ] && printf '%s' "$out" | grep -qE "cannot resolve origin/main"; then
+  printf 'pass  %-42s exhausted chain still fails closed\n' "T9: base-ref chain exhausted, even with a PR"
+  pass=$((pass+1))
+else
+  printf 'FAIL  %-42s exit %s — wanted 2 with cannot resolve origin/main\n' \
+    "T9: base-ref chain exhausted, even with a PR" "$code"
+  fail=$((fail+1))
+fi
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 rm -rf "$WORK"
 [ "$fail" -eq 0 ]
