@@ -141,6 +141,39 @@ Fixed order, and the deploy is gated on the whole of step 3 passing:
 6. **Fix forward and re-verify.** There is no staging to roll back to; a re-run of the workflow at an
    earlier commit is the rollback, and it is the last resort rather than the first.
 
+## The deploy needs a human, and that is not negotiable by an agent
+
+**A merge to `main` deploys to production, and the harness requires the maintainer's explicit
+approval for it.** An agent cannot perform that merge, and must not look for another route to the
+same effect — not the API directly, not the web UI, not a push. The block is correct: a deploy is
+outward-facing and irreversible in the sense that matters, and "the maintainer told me to ship it
+eventually" is not the same as approval of *this* action *now*.
+
+So an unattended run cannot deploy. What it can do — and what it should aim at — is leave the
+release **one approval away**:
+
+1. every task built, reviewed and its blockers closed;
+2. everything merged into an **integration branch**, which deploys nothing;
+3. the full local pass — regression checklist plus every new feature — run **on that branch**;
+4. a single merge for the maintainer to approve, with the evidence to justify approving it.
+
+That is the honest version of "have it ready by morning", and it is strictly better than a run that
+stops at the first thing needing a hand.
+
+### What this costs, stated rather than hidden
+
+Because `main` cannot be updated without a deploy, **`main` does not carry the `pull_request`
+trigger fix during the release** — and a `pull_request` event reads its workflow from the merge ref,
+so no feature pull request in this release gets CI. Three things stand in for it, and none of them
+is a platform gate:
+
+- every implementer runs the full chain locally before opening a pull request;
+- every reviewer runs it again **independently, from a clean clone** — which has been catching real
+  things, including a `npm ci` that had never run in CI at all;
+- the full chain is run on the integration branch before the deploy is proposed.
+
+Record which of these actually ran for each task. A mitigation nobody can audit is not a mitigation.
+
 ## Running unattended
 
 This project is worked in long autonomous stretches while its maintainer is away, so two rules
