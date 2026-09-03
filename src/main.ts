@@ -1482,12 +1482,17 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
       bundleView = true;
       showView("bundle");
       void renderBundleImportView(bundleImportEl, payload, {
+        // Neither handler below clears `bundleView`. It is deliberately
+        // sticky once a bundle has loaded in this tab: `current` is checked
+        // first in the `view` branch of `applyRoute`, so once `onOpen` sets
+        // it the flag is already dormant, and clearing it here would only
+        // break the case that matters more — `Cancel`, then Back, which has
+        // no document to fall back on and must still find the import view
+        // rather than falling through to the paste view a second time.
         onOpen: (entry) => {
-          bundleView = false;
           void load(entry.text, entry.label, { persist: true, push: true });
         },
         onCancel: () => {
-          bundleView = false;
           navigate(PASTE_PATH);
           applyRouteMeta({ kind: "paste" });
           showView("paste");
