@@ -42,7 +42,7 @@ describe("current document", () => {
       text: '{"data":null}',
       savedAt: 1,
       label: "a.json",
-      exchange: { method: "GET", url: "https://api.example.com/widgets" },
+      exchange: { request: { method: "GET", url: "https://api.example.com/widgets" } },
     };
     expect(await saveDocument(doc)).toBe(true);
     expect(await loadDocument()).toEqual(doc);
@@ -105,7 +105,7 @@ describe("library", () => {
       text: "[1,2,3]",
       savedAt: 10,
       bytes: 9,
-      exchange: { status: 200 },
+      exchange: { response: { status: 200 } },
     };
     const id = await saveToLibrary(entry);
     expect(id).not.toBeNull();
@@ -246,7 +246,7 @@ describe("the v2 → v3 upgrade, on a real existing database", () => {
       text: "{}",
       savedAt: 300,
       bytes: 2,
-      exchange: { method: "GET" },
+      exchange: { request: { method: "GET" } },
     });
     expect(await countLibrary()).toBe(2);
 

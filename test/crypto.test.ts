@@ -155,7 +155,10 @@ describe("seal and open", () => {
     const secret = generateSecret();
     const withExchange: SharePayload = {
       ...payload,
-      exchange: { method: "POST", url: "https://api.example.com/widgets", status: 201 },
+      exchange: {
+        request: { method: "POST", url: "https://api.example.com/widgets" },
+        response: { status: 201 },
+      },
     };
     const blob = await seal(withExchange, secret);
     await expect(openSealed(blob, secret)).resolves.toEqual(withExchange);
@@ -164,7 +167,7 @@ describe("seal and open", () => {
   it("stays version 2 whether or not an exchange is attached — a single-document share never becomes a bundle", async () => {
     const secret = generateSecret();
     const bare = await seal(payload, secret);
-    const withExchange = await seal({ ...payload, exchange: { a: 1 } }, secret);
+    const withExchange = await seal({ ...payload, exchange: { request: { method: "GET" } } }, secret);
     expect(bare[0]).toBe(2);
     expect(withExchange[0]).toBe(2);
   });
@@ -214,7 +217,7 @@ describe("bundles", () => {
 
   const threeDocs: BundleEntry[] = [
     { label: "one.json", text: '{"data":{"type":"a","id":"1"}}' },
-    { label: "two.json", text: '{"data":{"type":"b","id":"2"}}', exchange: { method: "GET" } },
+    { label: "two.json", text: '{"data":{"type":"b","id":"2"}}', exchange: { request: { method: "GET" } } },
     { label: "three.json", text: '{"data":[]}', resources: 0, types: 0, shape: "data[0]" },
   ];
 
