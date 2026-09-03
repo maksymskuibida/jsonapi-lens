@@ -378,17 +378,19 @@
     async s27(N) {
       const name = '27 share a bundle, open it — Back/Forward restore paste and import';
 
+      // No version pinned, and no `onupgradeneeded` (PR #5 review, S7): the
+      // harness's own setup already pasted and saved a document through the
+      // real app before any scenario runs, so `store.ts`'s own `open()` has
+      // already created this database at whatever `DB_VERSION` currently is,
+      // with both stores in place. Opening at a hardcoded version here would
+      // `VersionError` the moment `DB_VERSION` moves past it, or — on some
+      // future fresh profile where this scenario ran first — silently create
+      // the database at *this* version without whatever a later version
+      // adds. Letting the app own its own schema and simply connecting to it
+      // is what a real Save through the UI would do too.
       const seedLibrary = (entries) =>
         new Promise((resolve, reject) => {
-          const req = indexedDB.open('jsonapi-lens', 3);
-          req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains('documents')) db.createObjectStore('documents');
-            if (!db.objectStoreNames.contains('library')) {
-              const s = db.createObjectStore('library', { keyPath: 'id', autoIncrement: true });
-              s.createIndex('savedAt', 'savedAt');
-            }
-          };
+          const req = indexedDB.open('jsonapi-lens');
           req.onsuccess = () => {
             const db = req.result;
             const tx = db.transaction('library', 'readwrite');
@@ -431,6 +433,10 @@
 
       const seen = {};
       let disturbed = false;
+      // Captured before this scenario touches anything, so the `finally`
+      // block below can restore it after the S3/B3 leak check pastes its own
+      // throwaway document over #input's value.
+      const origInputValue = document.getElementById('input')?.value;
 
       try {
         document.getElementById('open-library').click();
@@ -458,7 +464,7 @@
         const url = document.querySelector('.share__url')?.value;
         if (!url) return { name, ok: false, driftPx: 0, detail: 'no link produced' };
         const path = new URL(url).pathname; // "/d/<id>:<secret>"
-        const secret = path.split(':')[1] || ' ';
+        const secret = path.split(':')[1] || '\u0000';
 
         document.querySelector('.modal__close')?.click();
 
@@ -482,6 +488,53 @@
 
         await N.back();
         seen.secondBackShowsImportView = importShowing();
+        // The first check (right after load) only proves the replace worked
+        // once; re-checking here is what actually backs up the scenario's
+        // own name — the secret must still be absent after two round trips
+        // through history, not just on arrival.
+        seen.secretStillGoneAfterTraversals =
+          !location.href.includes(secret) && !JSON.stringify(history.state || null).includes(secret);
+
+        // PR #5 review, S3, escalated to a blocker: a *later, unrelated*
+        // navigation must not resurrect the import view. Repro as found:
+        // bundle -> Cancel -> paste -> paste a document -> New document ->
+        // Back used to show the stale import view where the document used
+        // to be, because the old code tracked "is this a bundle" as a plain
+        // sticky module flag with no notion of which history entry it was
+        // ever about. Continues from the import-view entry this scenario is
+        // already sitting on (after the second Back above).
+        document.querySelector('[data-role="bundle-cancel"]')?.click();
+        await N.settle(300);
+
+        const input = document.getElementById('input');
+        const parseBtn = document.getElementById('parse');
+        // A minimal but genuinely valid JSON:API document — this branch has
+        // no plain-JSON reading (that is T1's, on a separate, not-yet-merged
+        // branch), so anything not JSON:API-shaped would fail to parse here
+        // and never reach the doc view at all.
+        input.value = '{"data":null}';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        parseBtn.click();
+        await N.settle(500);
+        seen.leakCheckPastedDocShowing = !document.getElementById('doc').hidden;
+
+        document.getElementById('new-doc')?.click();
+        await N.settle(300);
+
+        await N.back();
+        // The entry Back lands on is the just-pasted document's, not the
+        // original bundle's, so it must never be the stale bundle view —
+        // that is the regression this whole block exists to catch. It is
+        // *not* required to be the pasted document itself: "New document"
+        // (just clicked) calls `clearDocument()`, which deletes the
+        // persisted "current document" this same entry would otherwise
+        // restore, so falling through to the paste view here is correct,
+        // pre-existing behaviour, unrelated to this fix — the same coarse
+        // "there is one current document, and only one" model the rest of
+        // this app already has for any two documents loaded in sequence.
+        seen.leakCheckBackDoesNotShowImportView = !importShowing();
+        seen.leakCheckBackShowsDocOrPaste =
+          !document.getElementById('doc').hidden || !document.getElementById('paste').hidden;
 
         const ok = Object.values(seen).every(Boolean);
         return { name, ok, driftPx: 0, detail: JSON.stringify(seen) };
@@ -489,8 +542,13 @@
         window.fetch = realFetch;
         // Put the amtrak document back: run.mjs's own post-scenario reload
         // probe needs #doc showing and `current` set, and this is the one
-        // scenario that replaced them with a different view entirely.
+        // scenario that replaced them with a different view entirely. The
+        // leak check above pastes its own throwaway document over #input's
+        // value, so restore the original text first — `origInputValue` was
+        // captured before this scenario touched anything.
         if (disturbed) {
+          const input = document.getElementById('input');
+          if (input && origInputValue !== undefined) input.value = origInputValue;
           history.replaceState(null, '', '/view');
           document.getElementById('parse')?.click();
           await N.settle(700);

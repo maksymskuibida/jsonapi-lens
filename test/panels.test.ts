@@ -69,6 +69,22 @@ describe("library selection mode", () => {
     expect(findButton(t().share.create)).toBeTruthy();
   });
 
+  it("Share moves focus onto the first checkbox, not out of the dialog (PR #5 review, B2)", async () => {
+    await saveToLibrary({ label: "a.json", text: "{}", savedAt: 1, bytes: 2 });
+    await openLibraryModal(() => {});
+
+    shareButton().click();
+
+    const boxes = checkboxes();
+    expect(document.activeElement).toBe(boxes[0]);
+    // The `Share` button `enterSelect` just clicked no longer exists (`render`
+    // replaced the whole footer), so this is not "focus stayed put" — it is
+    // confirmation the dialog explicitly claimed a new target rather than
+    // leaving `document.activeElement` to fall back to `<body>`, outside the
+    // modal, where `openModal`'s own Tab trap cannot reach it.
+    expect(document.querySelector(".modal")?.contains(document.activeElement)).toBe(true);
+  });
+
   it("Create link is disabled with nothing ticked, and enabled for one or several", async () => {
     await saveToLibrary({ label: "a.json", text: "{}", savedAt: 1, bytes: 2 });
     await saveToLibrary({ label: "b.json", text: "[]", savedAt: 2, bytes: 2 });

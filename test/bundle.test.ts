@@ -12,11 +12,18 @@ import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from "vites
 import {
   alreadySavedFlags,
   importDocuments,
+  isWellFormedBundlePayload,
   mintShareEnvelope,
   resolveSelection,
 } from "../src/bundle.js";
-import { generateSecret, isBundlePayload, open as openSealed, ShareError } from "../src/crypto.js";
-import type { BundleEntry } from "../src/crypto.js";
+import {
+  generateSecret,
+  isBundlePayload,
+  open as openSealed,
+  seal,
+  ShareError,
+} from "../src/crypto.js";
+import type { BundleEntry, BundlePayload, SharePayload } from "../src/crypto.js";
 import { listLibrary, renameInLibrary, saveToLibrary } from "../src/store.js";
 import type { LibraryEntry } from "../src/store.js";
 
@@ -131,6 +138,54 @@ describe("mintShareEnvelope", () => {
   }, 20_000);
 });
 
+describe("isWellFormedBundlePayload", () => {
+  it("accepts a genuine bundle payload", () => {
+    const documents: BundleEntry[] = [{ label: "a.json", text: "{}" }];
+    expect(isWellFormedBundlePayload({ kind: "bundle", savedAt: 1, documents })).toBe(true);
+  });
+
+  it("reproduces and rejects the exact PR #5 B1 attack: a version-2 blob whose decrypted JSON claims kind:\"bundle\" but carries no documents array", async () => {
+    // The attacker never goes through this app's own typed `seal()` — they
+    // control the plaintext directly, by hand or with any tool that can gzip
+    // and AES-GCM-encrypt bytes. The cast is what stands in for that: a
+    // version-2 `SharePayload` needs only a string `text` to pass `open`'s
+    // own validation, and `crypto.ts`'s `isBundlePayload` (by its own design
+    // — see that function's doc comment) tests only `.kind`, so this single
+    // object satisfies both at once. This is the identical blob the review
+    // used to reproduce a real blank-page crash against the running app.
+    const secret = generateSecret();
+    const hostile = {
+      text: "{}",
+      label: "l",
+      savedAt: 1,
+      kind: "bundle",
+    } as unknown as SharePayload;
+    const blob = await seal(hostile, secret);
+    expect(blob[0]).toBe(2); // still a version-2 envelope — this is not a crafted version-3 blob
+
+    const opened = await openSealed(blob, secret);
+    expect(isBundlePayload(opened)).toBe(true); // crypto.ts's own check is fooled — by design, not a bug there
+    expect(isWellFormedBundlePayload(opened as BundlePayload)).toBe(false); // this is the check that catches it
+  });
+
+  it("rejects a documents field that is missing, not an array, or holds a malformed entry", () => {
+    const base = { kind: "bundle" as const, savedAt: 1 };
+    expect(isWellFormedBundlePayload({ ...base } as unknown as BundlePayload)).toBe(false);
+    expect(
+      isWellFormedBundlePayload({ ...base, documents: "not an array" } as unknown as BundlePayload),
+    ).toBe(false);
+    expect(
+      isWellFormedBundlePayload({ ...base, documents: [{ label: "a.json" }] } as unknown as BundlePayload),
+    ).toBe(false); // no text
+    expect(
+      isWellFormedBundlePayload({
+        ...base,
+        documents: [{ label: 1, text: "x" }],
+      } as unknown as BundlePayload),
+    ).toBe(false); // label not a string
+  });
+});
+
 describe("resolveSelection", () => {
   it("drops a ticked id no longer in the library, reported by its cached label, and does not abort the rest", async () => {
     const keptId = await saveToLibrary({ label: "kept.json", text: "{}", savedAt: 1, bytes: 2 });
@@ -225,6 +280,51 @@ describe("importDocuments", () => {
       bytes: 2,
     });
     expect("resources" in outcome.saved[0]!).toBe(false);
+  });
+
+  it("drops resources/types/shape/exchange that are the wrong type, rather than persisting a stranger's arbitrary JSON (PR #5 review, S4)", async () => {
+    // `crypto.ts`'s `isBundleShape` validates only `label`/`text` per entry —
+    // "the bundle is a carrier, not a validator" is deliberate for `text`,
+    // but these four fields are never rendered as raw content, only trusted
+    // as the specific types `LibraryEntry` declares. A sender controls every
+    // byte of a bundle entry, so each is exercised with a value of the wrong
+    // shape here rather than assumed safe because TypeScript says so.
+    const hostile = {
+      label: "hostile.json",
+      text: "{}",
+      resources: "not a number" as unknown as number,
+      types: Number.POSITIVE_INFINITY,
+      shape: "A".repeat(5000),
+      exchange: "not an object" as unknown as BundleEntry["exchange"],
+    } satisfies BundleEntry;
+
+    const outcome = await importDocuments([hostile]);
+    expect(outcome.failedCount).toBe(0);
+    const saved = outcome.saved[0]!;
+    expect("resources" in saved).toBe(false);
+    expect("types" in saved).toBe(false);
+    expect("shape" in saved).toBe(false);
+    expect("exchange" in saved).toBe(false);
+    expect(saved.label).toBe("hostile.json"); // label/text still carried through — only the summary fields are guarded
+    expect(saved.text).toBe("{}");
+  });
+
+  it("accepts resources/types/shape/exchange when they are the right type, including a shape right at the length cap", async () => {
+    const documents: BundleEntry[] = [
+      {
+        label: "ok.json",
+        text: "{}",
+        resources: 3,
+        types: 1,
+        shape: "A".repeat(200),
+        exchange: { method: "GET" },
+      },
+    ];
+    const outcome = await importDocuments(documents);
+    expect(outcome.saved[0]!.resources).toBe(3);
+    expect(outcome.saved[0]!.types).toBe(1);
+    expect(outcome.saved[0]!.shape).toBe("A".repeat(200));
+    expect(outcome.saved[0]!.exchange).toEqual({ method: "GET" });
   });
 
   it("writes nothing when storage rejects every write, and reports the failure count honestly", async () => {

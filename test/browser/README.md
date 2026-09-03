@@ -91,6 +91,14 @@ page for its own lifetime, since this harness's origin does not serve that endpo
 above). It restores the amtrak document itself afterward, since it is the one scenario that replaces
 the document view with a different one entirely.
 
+**`s27` must run last, and that is a convention, not something the harness enforces.**
+`run.mjs` discovers scenarios with `Object.keys(SCEN).sort()`, so today `s27` sorts after everything
+else purely because it has the highest number — a future `s28` would inherit "the one scenario that
+replaces the document view and re-seeds the library" whether or not that is what it wants. If you add
+a scenario numbered above 27, either give it the same restore-the-document responsibility `s27` has
+in its own `finally` block, or renumber so `s27` still sorts last. Nothing here will fail loudly if
+you don't — the symptom is the *other* new scenario failing in a way that looks unrelated to it.
+
 That last one is worth its own note. Every scenario that follows a relationship also asserts the row
 it landed on is open, because a position-only assertion cannot see that failing — the landing is in
 exactly the right place whether or not the row expanded, and a regression there is unmissable in use
