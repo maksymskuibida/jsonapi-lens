@@ -124,3 +124,42 @@ needs to change unless it starts reading a specific field off it — none of T5'
 Waiting for T2 to land before starting T5 — rejected outright, since it defeats the point of running
 T1 and T5 as a wave. `docs/STATUS.md` §1a's dependency graph (`T5 → {T2, T6, T7}`) requires T5 to ship
 first, and this module is what makes that possible without T5 guessing at T2's design.
+
+---
+
+## D3 · One function decides version 2 vs version 3, and it is not UI code
+
+**Date:** 2026-09-03 · **Settles:** where the "one document seals as a plain share, several seal as a
+bundle" decision lives, for every future caller
+
+### Why this is load-bearing
+
+T6 needed this decision in exactly one place: `openLibraryModal`'s selection mode must never mint a
+bundle for a single tick (an acceptance criterion, tested on the sealed bytes' version byte, not a
+variable). T7's task spec asks for the identical decision — `share` takes a document list and seals
+"one document or a bundle" — from a caller that never touches the DOM at all.
+
+### The choice
+
+`mintShareEnvelope(documents: BundleEntry[], secret: string)`, in `src/bundle.ts`, is the one place
+that branches on count: exactly one document calls `seal` (T5's version-2 path, unchanged), anything
+else — including zero — calls `sealBundle` (which already refuses zero, correctly, at version 3's own
+layer). Nothing else in the client makes this decision; `share.ts`'s `openShareModal` and
+`openBundleShareModal` are both thin wrappers that build a `BundleEntry[]` and call this function.
+
+### What T7 should do
+
+Import `mintShareEnvelope` from `src/bundle.ts` rather than re-deriving the one-vs-many rule against
+`seal`/`sealBundle` directly. It takes no DOM, no `i18n` rendering dependency beyond `crypto.ts`'s own
+error catalogue (already required for `seal`/`sealBundle` to run at all), and no store dependency — it
+is safe to call from a module with no UI. If T7's document list needs a different shape than
+`BundleEntry`, either satisfies it structurally (as `LibraryEntry` already does, being a superset) or
+the two task's needs have diverged enough that this decision should be revisited here, not solved
+twice.
+
+### Rejected alternative
+
+Leaving the decision inline in each caller (`openShareModal` checking `if (documents.length === 1)`
+itself, `openBundleShareModal` never receiving fewer than two by convention) — rejected because
+"by convention" is exactly the kind of invariant that survives until the second caller, and T7 is
+already a known second caller before this entry was written.

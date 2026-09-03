@@ -77,19 +77,26 @@ If you write your own, two rules matter more than the rest:
 
 ## What is covered
 
-24 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
+25 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
 unwound one Back at a time, Back-then-Forward, rapid double Backs, Back/Forward hammering, returning
 to the very top and the very bottom, a type filter active, "Expand all" on a 36-row group, a position
 deep inside a tall expanded row, a reverse pointer out of "Referenced by", the jump modal, collapsing
 the row you landed on before leaving, "Expand all" reading the rows rather than its own memory, and arriving at a resource opening it by
-every route there is.
+every route there is. The last one, `s27`, is different in kind from the rest: it shares two saved
+documents as a bundle, opens the resulting link, and confirms Back/Forward toggle correctly between
+the paste view and the bundle import view with the secret gone from the URL and `history.state` — a
+state/URL-correctness check rather than a pixel one, included here anyway because it needs the same
+real `popstate` machinery jsdom cannot provide, and it patches `window.fetch` for `/api/shares` in the
+page for its own lifetime, since this harness's origin does not serve that endpoint (see the note
+above). It restores the amtrak document itself afterward, since it is the one scenario that replaces
+the document view with a different one entirely.
 
 That last one is worth its own note. Every scenario that follows a relationship also asserts the row
 it landed on is open, because a position-only assertion cannot see that failing — the landing is in
 exactly the right place whether or not the row expanded, and a regression there is unmissable in use
 and invisible in the numbers.
 
-Every one of them runs at whatever `--width` is given, so narrow layouts are the same 22 scenarios
+Every one of them runs at whatever `--width` is given, so narrow layouts are the same 23 scenarios
 rather than a separate list. 390, 768 and 1512 are the widths worth trying; fractional row heights at
 390 are what caught the rounding fault.
 

@@ -191,6 +191,12 @@ visitor.
 
 **Keeping things**
 - **Saved documents** live in IndexedDB, with rename and delete. Nothing is uploaded.
+- **Share several at once.** `Share` in the saved-documents panel turns every row into a checkbox;
+  tick one and `Create link` makes today's ordinary share link, tick several and it makes a
+  **bundle** — one link, several documents. Opening a bundle link lands on an import screen listing
+  each document (ticked by default, except anything byte-identical to something you already have,
+  which starts unticked and labelled), and `Import selected` writes the ticked ones to your saved
+  documents. See [Share links](#share-links) for the envelope this rides on.
 - The last document you opened is restored on reload; `/` offers a way back into it.
 - Back and Forward return you to the exact point you left — the same content in the same place on
   screen, not the same pixel offset, which is a different and much weaker promise on a page whose
@@ -257,6 +263,14 @@ anything else that handles the link — unlike a `#fragment`, which browsers nev
 strips the secret from the address bar as soon as a link opens, and accepts `/d/<id>#<secret>` if you
 prefer the fragment form, but links are minted in the path form.
 
+**One link can carry several documents.** The envelope's first byte is a version: `2` is today's
+single document, unchanged since before bundles existed, and `3` is a **bundle** — sealed the same
+way, through the same upload, just with several documents inside instead of one. Sharing exactly one
+document always mints version 2; only sharing several bumps the byte, and on purpose — a build that
+only knows version 2 refuses a bundle cleanly instead of misreading it. See
+[`src/crypto.ts`](src/crypto.ts) for the wire format and [`src/bundle.ts`](src/bundle.ts) for the
+selection, minting and import-side logic.
+
 ## Findability
 
 The site is one HTML file and one bundle, which means everything a crawler is told has to be told
@@ -321,8 +335,9 @@ npm run build
 npm run fixtures
 ```
 
-`npm test` runs 117 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
-the encryption round trip and the bulk-render escaping.
+`npm test` runs 259 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
+the encryption round trip (a single document or a bundle), storage (including the saved-documents
+selection flow and the bundle import view) and the bulk-render escaping.
 
 History restoration is deliberately *not* among them. What it promises — Back puts the same content
 back in the same place on screen — depends on `content-visibility` and on real layout, and jsdom has
@@ -461,12 +476,13 @@ src/
   types.ts            structural types for the parts of JSON:API this reads
   format.ts           value classification and typed formatting
   crypto.ts           gzip + AES-GCM + PBKDF2 for the share envelope — one document or a bundle
-  share.ts            share API client and its modal
+  share.ts            share API client and its modal (one document or several)
+  bundle.ts           minting a bundle, selection resolution, duplicate detection, the import view
   store.ts            IndexedDB: current document and saved library
   exchange.ts         placeholder for T2's captured-request model
   clipboard.ts        copy and download
   ui.ts               toast and modal
-  panels.ts           raw view, saved documents, save, shortcuts
+  panels.ts           raw view, saved documents (with its selection mode), save, shortcuts
   platform.ts         ⌘ vs Ctrl, and the browser's own history keys per OS
   jump.ts             go-to-resource palette
   dom.ts              element helper and the single audited HTML-escaping point
