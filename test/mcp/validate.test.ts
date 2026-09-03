@@ -223,11 +223,20 @@ describe("assertValidOrigin", () => {
   });
 
   it("names the host the upload would actually reach, in the userinfo refusal", () => {
+    // S5r: the message opens by echoing the input verbatim
+    // ("https://jsonapi.mstool.dev@evil.example.com" carries a "user@"...),
+    // which already contains the substring "evil.example.com" — so a bare
+    // `.toContain("evil.example.com")` passes even if the destination-naming
+    // clause were deleted entirely (confirmed: deleting `${parsed.origin}`
+    // from the message left an earlier version of this exact assertion
+    // green). Assert the destination as the message actually renders it —
+    // quoted and scheme-qualified — which the input echo cannot supply,
+    // because the input has no "https://" immediately before "evil.example.com".
     try {
       assertValidOrigin("https://jsonapi.mstool.dev@evil.example.com");
       expect.unreachable("expected assertValidOrigin to throw");
     } catch (error) {
-      expect((error as Error).message).toContain("evil.example.com");
+      expect((error as Error).message).toContain('"https://evil.example.com"');
     }
   });
 });

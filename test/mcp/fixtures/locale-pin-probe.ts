@@ -17,16 +17,27 @@
  * still get the pin, because `build-server.ts` now imports `locale.js`
  * itself.
  *
- * Usage: `tsx locale-pin-probe.ts [--pre-existing-storage]`. With the flag,
- * installs a working (empty) `localStorage` *before* importing anything
- * else, simulating a host that already defines Web Storage — the case the
- * pin used to skip entirely because it only ever checked whether one existed
- * at all.
+ * Usage: `tsx locale-pin-probe.ts [flag]`, at most one of:
+ *
+ *   --pre-existing-storage       a working, empty `localStorage`, installed
+ *                                before anything else is imported — a host
+ *                                that already defines Web Storage, which the
+ *                                pin used to skip entirely because it only
+ *                                ever checked whether one existed at all.
+ *   --pre-existing-de-storage    the same, but already holding `"de"` for
+ *                                the locale key — the sharper version: this
+ *                                one must be *overwritten*, not merely
+ *                                tolerated.
+ *   --throwing-storage           a `localStorage` whose `setItem` always
+ *                                throws (a quota, a read-only host).
+ *   --noop-storage               a `localStorage` whose `setItem` silently
+ *                                accepts the call and changes nothing — no
+ *                                exception for this module to catch at all.
  */
 
-if (process.argv.includes("--pre-existing-storage")) {
-  const values = new Map<string, string>();
-  const storage: Storage = {
+function workingStorage(initial?: Record<string, string>): Storage {
+  const values = new Map<string, string>(Object.entries(initial ?? {}));
+  return {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => {
       values.set(key, value);
@@ -42,7 +53,26 @@ if (process.argv.includes("--pre-existing-storage")) {
       return values.size;
     },
   };
-  globalThis.localStorage = storage;
+}
+
+if (process.argv.includes("--pre-existing-storage")) {
+  globalThis.localStorage = workingStorage();
+} else if (process.argv.includes("--pre-existing-de-storage")) {
+  globalThis.localStorage = workingStorage({ "jsonapi-lens:locale": "de" });
+} else if (process.argv.includes("--throwing-storage")) {
+  globalThis.localStorage = {
+    ...workingStorage(),
+    setItem: () => {
+      throw new Error("quota exceeded (simulated)");
+    },
+  };
+} else if (process.argv.includes("--noop-storage")) {
+  globalThis.localStorage = {
+    ...workingStorage(),
+    setItem: () => {
+      /* accepts the call, writes nothing — no exception to catch */
+    },
+  };
 }
 
 const { createMcpServer } = await import("../../../mcp/build-server.js");

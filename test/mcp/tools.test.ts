@@ -15,6 +15,7 @@ import type { StubBackend } from "./stub-backend.js";
 const ORIGIN = "https://stub.example";
 const SECRET_A = "a".repeat(64);
 const SECRET_B = "b".repeat(64);
+const SECRET_BUNDLE = "c".repeat(64);
 
 /**
  * Deterministic, high-entropy filler — copied from the same, already-proven
@@ -105,12 +106,34 @@ describe("registered tool descriptions", () => {
     expect(description).toMatch(/anyone with only the id cannot/i);
   });
 
-  it("read is also registered, with its own description", async () => {
+  it("read's description never promises a 64-hex secret, and never tells the model to generate one", async () => {
+    // B1 (round 2): read's registered description used to say "the secret is
+    // the same 64-character hex string the link was created with" — true of
+    // what share mints, false of what a real browser Share-button link
+    // carries (10 mixed-case characters). A model handed a real link would
+    // read that sentence, see the secret doesn't match, and decline to call
+    // the tool at all — the exact failure this test now guards against.
     const client = await connectedClient(createStubBackend(ORIGIN));
     const { tools } = await client.listTools();
     const read = tools.find((t) => t.name === "read");
     expect(read).toBeDefined();
-    expect((read!.description ?? "").length).toBeGreaterThan(20);
+    const description = read!.description ?? "";
+
+    expect(description.length).toBeGreaterThan(20);
+    // Never the minting-side instruction — read's caller does not choose,
+    // let alone generate, the secret. The correct description of read's
+    // actual policy never needs to say "64" or "hex" at all (it accepts any
+    // length/alphabet the link format allows), so requiring their total
+    // absence is a direct, low-false-positive guard against the exact
+    // regression this test exists for — confirmed by reverting this fix
+    // locally and watching this assertion fail on the original wording.
+    expect(description).not.toContain(GENERATE_SECRET_COMMAND);
+    expect(description.toLowerCase()).not.toContain("64");
+    expect(description.toLowerCase()).not.toContain("hex");
+    // States what read actually accepts: the secret from the link, in
+    // whatever shape it has.
+    expect(description.toLowerCase()).toMatch(/mixed-case/);
+    expect(description.toLowerCase()).toMatch(/not recoverable/);
   });
 });
 
@@ -509,6 +532,29 @@ describe("read", () => {
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({ kind: "document", text: "hello from a browser-minted link" });
   });
+
+  // N1r: nothing exercised readInputShape's `id: z.number().int().positive()`
+  // — removing it entirely left the whole suite green, because every other
+  // test already passes a real integer id.
+  it("refuses a non-integer id locally, before any network call", async () => {
+    const backend = createStubBackend(ORIGIN);
+    const client = await connectedClient(backend);
+    const result = asToolResult(
+      await client.callTool({ name: "read", arguments: { id: 1.5, secret: SECRET_A } }),
+    );
+    expect(result.isError).toBe(true);
+    expect(backend.calls).toHaveLength(0);
+  });
+
+  it("refuses a non-positive id locally, before any network call", async () => {
+    const backend = createStubBackend(ORIGIN);
+    const client = await connectedClient(backend);
+    const result = asToolResult(
+      await client.callTool({ name: "read", arguments: { id: -1, secret: SECRET_A } }),
+    );
+    expect(result.isError).toBe(true);
+    expect(backend.calls).toHaveLength(0);
+  });
 });
 
 describe("secrets never appear in a log, error, or any result field other than url", () => {
@@ -534,6 +580,27 @@ describe("secrets never appear in a log, error, or any result field other than u
       await client.callTool({ name: "read", arguments: { id, secret: SECRET_B } });
       await client.callTool({ name: "read", arguments: { id, secret: SECRET_A } });
 
+      // S2r: the single-document case above never touches the sealBundle
+      // branch of the share handler at all — a leak planted only there
+      // (e.g. `console.log("bundle secret=" + secret)` inside the `else`
+      // branch in build-server.ts) would leave this test green with only
+      // the calls above. A second share call, with two documents, closes
+      // that gap; the assertions below already cover whatever it writes.
+      const bundleShared = asToolResult(
+        await client.callTool({
+          name: "share",
+          arguments: {
+            documents: [
+              { label: "bundle-a.json", text: "1" },
+              { label: "bundle-b.json", text: "2" },
+            ],
+            secret: SECRET_BUNDLE,
+          },
+        }),
+      );
+      const bundleId = bundleShared.structuredContent!.id as number;
+      await client.callTool({ name: "read", arguments: { id: bundleId, secret: SECRET_BUNDLE } });
+
       const everyLoggedArg = [...logSpy.mock.calls, ...errorSpy.mock.calls, ...infoSpy.mock.calls, ...warnSpy.mock.calls]
         .flat()
         .map((value) => (typeof value === "string" ? value : JSON.stringify(value)))
@@ -541,6 +608,7 @@ describe("secrets never appear in a log, error, or any result field other than u
 
       expect(everyLoggedArg).not.toContain(SECRET_A);
       expect(everyLoggedArg).not.toContain(SECRET_B);
+      expect(everyLoggedArg).not.toContain(SECRET_BUNDLE);
     } finally {
       logSpy.mockRestore();
       errorSpy.mockRestore();

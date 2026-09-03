@@ -5,7 +5,7 @@
  * reflecting the host's `LANG`/`LC_ALL`) is fixed when a process starts and
  * cannot be varied per test case within one running vitest worker.
  *
- * Two review findings, both fixed:
+ * Three review findings, all fixed:
  *
  *   - S1: the pin lived only in `mcp/server.ts`, not in `mcp/build-server.ts`
  *     itself — the module `docs/test-plans/T7.md` documents building
@@ -16,7 +16,14 @@
  *     already existed (e.g. under `--experimental-webstorage`), because the
  *     old code treated "does a storage exist" and "is our key set in it" as
  *     the same question. The probe's `--pre-existing-storage` flag
- *     reproduces exactly that precondition.
+ *     reproduces exactly that precondition, and `--pre-existing-de-storage`
+ *     the sharper one — a real prior choice that must be overwritten, not
+ *     merely tolerated.
+ *   - S3 (round 2): even with the write unconditional, a `localStorage`
+ *     whose `setItem` throws, or — the one that would have stayed invisible
+ *     without a read-back check — silently accepts the call and changes
+ *     nothing, both left the pin unset. `--throwing-storage` and
+ *     `--noop-storage` reproduce each.
  */
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
@@ -104,5 +111,41 @@ describe("the locale pin holds under a hostile host environment", () => {
     const { stdout } = await runProbe({ ...process.env, LANG: "uk_UA.UTF-8", LC_ALL: "uk_UA.UTF-8" });
     const text = extractText(stdout);
     expect(text).toMatch(/too short/i);
+  });
+
+  it("overwrites a pre-existing localStorage already holding a different locale choice", async () => {
+    // Sharper than "empty pre-existing storage" (the S2 case above): this one
+    // has to be overwritten, not merely tolerated. If the pin only wrote when
+    // the key was absent, this would still read German.
+    const { stdout } = await runProbe(
+      { ...process.env, LANG: "de_DE.UTF-8", LC_ALL: "de_DE.UTF-8" },
+      ["--pre-existing-de-storage"],
+    );
+    const text = extractText(stdout);
+    expect(text).toMatch(/too short/i);
+    expect(text.toLowerCase()).not.toContain(GERMAN_CORRUPT_SHORT_FRAGMENT);
+  });
+
+  it("S3 (round 2) — still pins to English when localStorage.setItem always throws", async () => {
+    const { stdout } = await runProbe(
+      { ...process.env, LANG: "de_DE.UTF-8", LC_ALL: "de_DE.UTF-8" },
+      ["--throwing-storage"],
+    );
+    const text = extractText(stdout);
+    expect(text).toMatch(/too short/i);
+    expect(text.toLowerCase()).not.toContain(GERMAN_CORRUPT_SHORT_FRAGMENT);
+  });
+
+  it("S3 (round 2) — still pins to English when localStorage.setItem silently no-ops", async () => {
+    // The one the original read-nothing-back version could not see at all:
+    // no exception is ever thrown, so there is nothing for a try/catch to
+    // catch. Only checking the effect (read the key back) closes this.
+    const { stdout } = await runProbe(
+      { ...process.env, LANG: "de_DE.UTF-8", LC_ALL: "de_DE.UTF-8" },
+      ["--noop-storage"],
+    );
+    const text = extractText(stdout);
+    expect(text).toMatch(/too short/i);
+    expect(text.toLowerCase()).not.toContain(GERMAN_CORRUPT_SHORT_FRAGMENT);
   });
 });

@@ -265,6 +265,26 @@ describe("real subprocess, raw stdio: everything written to stdout and stderr", 
       const readResult = await session.callTool("read", { id, secret, origin: stubWorker.origin });
       expect(readResult.structuredContent).toMatchObject({ kind: "document", label: "e2e.json", text });
 
+      // S2r: everything above is the single-document path — sealBundle's
+      // own branch of the share handler is never reached, so a leak planted
+      // only there would pass this whole test. One more share call, with
+      // two documents, under its own secret, closes that gap.
+      const bundleSecret = "f".repeat(64);
+      const bundleShareResult = await session.callTool("share", {
+        documents: [
+          { label: "bundle-a.json", text: "1" },
+          { label: "bundle-b.json", text: "2" },
+        ],
+        secret: bundleSecret,
+        origin: stubWorker.origin,
+        lifetime: "15m",
+      });
+      expect(bundleShareResult.isError).not.toBe(true);
+      const bundleStructured = bundleShareResult.structuredContent!;
+      const bundleId = bundleStructured["id"] as number;
+      const bundleUrl = bundleStructured["url"] as string;
+      await session.callTool("read", { id: bundleId, secret: bundleSecret, origin: stubWorker.origin });
+
       // Shut down and wait for the child's stdio to actually close before
       // reading the captured buffers — see shutdownAndWaitForClose's own
       // comment for why this ordering is load-bearing.
@@ -275,11 +295,13 @@ describe("real subprocess, raw stdio: everything written to stdout and stderr", 
       expect(session.stderrRaw).toContain("ready on stdio");
       expect(session.stdoutRaw.length).toBeGreaterThan(100);
 
-      const stdoutWithUrlRemoved = session.stdoutRaw.split(url).join("");
-      expect(stdoutWithUrlRemoved).not.toContain(secret);
-      expect(stdoutWithUrlRemoved).not.toContain(wrongSecret);
+      const stdoutWithUrlsRemoved = session.stdoutRaw.split(url).join("").split(bundleUrl).join("");
+      expect(stdoutWithUrlsRemoved).not.toContain(secret);
+      expect(stdoutWithUrlsRemoved).not.toContain(wrongSecret);
+      expect(stdoutWithUrlsRemoved).not.toContain(bundleSecret);
       expect(session.stderrRaw).not.toContain(secret);
       expect(session.stderrRaw).not.toContain(wrongSecret);
+      expect(session.stderrRaw).not.toContain(bundleSecret);
     },
     30_000,
   );
