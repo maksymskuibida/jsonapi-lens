@@ -67,7 +67,10 @@ note() { printf '  note    %s\n' "$1"; notes=$((notes + 1)); }
 # Resolved in order of trust, each candidate verified before it is used:
 #   1. The pull request's own base branch, when a PR number is given — ground
 #      truth for what the diff will actually be evaluated against on merge.
-#   2. The branch this one tracks (`@{u}`), when one is configured.
+#   2. The branch this one tracks (`@{u}`), when one is configured AND it is
+#      not simply this same branch's own copy of itself on the remote (see
+#      below — that copy is what an ordinary `git push -u` sets up, and it
+#      is not a base).
 #   3. `origin/main`, the repository's actual default branch.
 # A candidate that does not resolve is skipped, not fatal — only exhausting
 # all three is. Fails closed on purpose: reporting a pass because the base
@@ -91,6 +94,24 @@ fi
 
 if [ -z "$BASE_REF" ]; then
   upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" || upstream=""
+  # Only trust @{u} when it tracks a DIFFERENTLY-NAMED branch. The ordinary
+  # result of `git push -u origin <branch>` — which is how every branch in
+  # this repository reaches the remote, including this one — is an upstream
+  # that is this same branch's own copy of itself on origin. Comparing
+  # against that finds "no changes" the instant everything is pushed, which
+  # breaks the one thing this fallback tier exists for: a local self-review
+  # before a PR exists. Found by running this exact check, on this exact
+  # branch, right after pushing it. A genuinely different tracked branch
+  # (deliberately pointed at an integration branch under a different name)
+  # is a real signal and is used; a same-named remote mirror of yourself is
+  # not a base, and is discarded here rather than trusted.
+  if [ -n "$upstream" ]; then
+    current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || current_branch=""
+    upstream_name="${upstream#*/}"
+    if [ -n "$current_branch" ] && [ "$upstream_name" = "$current_branch" ]; then
+      upstream=""
+    fi
+  fi
   if [ -n "$upstream" ]; then
     git fetch --quiet 2>/dev/null || true
     if git rev-parse --verify --quiet "$upstream" >/dev/null 2>&1; then

@@ -453,6 +453,35 @@ else
   fail=$((fail+1))
 fi
 
+# --- 21. T9 ceiling: a same-named upstream is not mistaken for a base ---
+#
+# `git push -u origin <branch>` is how a branch in this repository actually
+# reaches the remote — including this one — and it sets @{u} to that same
+# branch's own copy of itself, not to whatever it was forked from. Found
+# empirically: running this exact resolver, on this exact branch, right
+# after pushing it, silently reported "no changes against
+# origin/fix/T9-preflight-self-fixtures" instead of the real diff, because
+# @{u} was trusted without checking what it actually pointed at. This case
+# reproduces that shape (a real `origin` remote is needed for
+# --set-upstream-to to accept a tracking ref; fresh_repo does not configure
+# one, so it is added just for this case) and asserts the resolver falls
+# through to origin/main instead of trusting a same-named upstream.
+d=$(fresh_repo t9selfupstream)
+git -C "$d" remote add origin /nonexistent/dummy.git
+git -C "$d" update-ref refs/remotes/origin/feat/x feat/x
+git -C "$d" branch --set-upstream-to=origin/feat/x feat/x >/dev/null
+echo "// a real change" >> "$d/src/main.ts"; git -C "$d" commit -qam x
+out="$(cd "$d" && ./scripts/review-preflight.sh 2>&1)"
+if printf '%s' "$out" | grep -qE 'comparing against origin/main' \
+   && ! printf '%s' "$out" | grep -qE "comparing against this branch's upstream"; then
+  printf 'pass  %-42s same-named upstream discarded, fell through\n' "T9 ceiling: same-named upstream is not a base"
+  pass=$((pass+1))
+else
+  printf 'FAIL  %-42s trusted a same-named upstream as a base\n' "T9 ceiling: same-named upstream is not a base"
+  printf '%s\n' "$out"
+  fail=$((fail+1))
+fi
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 rm -rf "$WORK"
 [ "$fail" -eq 0 ]
