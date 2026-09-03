@@ -61,13 +61,22 @@ const READ_SECRET_PATTERN = new RegExp(`^[A-Za-z0-9_-]{${MIN_SECRET_CHARS},${MAX
 
 /**
  * What `read` will open: anything the envelope format itself accepts —
- * `crypto.ts`'s own secret range, case-sensitive, never normalised (case
- * matters to the key derivation; silently folding it would open the wrong
- * document or, more likely, nothing at all). Covers a real
+ * `crypto.ts`'s own secret length range, case-sensitive, never normalised
+ * (case matters to the key derivation; silently folding it would open the
+ * wrong document or, more likely, nothing at all). Covers a real
  * `generateSecret()` output, a hand-typed `/d/<id>#<secret>` secret, and a
- * `share`-minted 64-hex secret all at once — deliberately not covers
- * anything `seal`/`open` themselves would refuse, so this never rejects a
- * secret `crypto.ts` would have accepted.
+ * `share`-minted 64-hex secret all at once — the invariant that actually
+ * holds and is worth stating: everything `assertShareSecret` accepts,
+ * `assertReadSecret` accepts too.
+ *
+ * The reverse is *not* true, on purpose: `crypto.ts` itself checks only
+ * length (`assertSecretLength`), so `seal`/`open` would happily accept a
+ * secret containing a space or `!`, or actual Unicode — this function
+ * refuses all of those, stricter than `crypto.ts`. That is correct rather
+ * than a gap: `SHARE_PATTERN` in `router.ts` could never have parsed such a
+ * secret out of a URL in the first place, so no real link can carry one, and
+ * refusing it here is refusing something that was never a link to begin
+ * with — not a browser-minted secret this module might otherwise reject.
  */
 export function assertReadSecret(secret: string): void {
   if (READ_SECRET_PATTERN.test(secret)) return;
