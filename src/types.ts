@@ -1,4 +1,9 @@
-/** Minimal structural types for the parts of JSON:API this viewer reads. */
+/**
+ * Minimal structural types for the parts of JSON:API this viewer reads —
+ * and, since T1, for a plain-JSON document too. `Lens` is the seam: the view
+ * layer consumes one or the other, `DocumentIndex` unchanged and `JsonIndex`
+ * new. See `docs/task-specs/T1.md` and `docs/DECISIONS.md` D2.
+ */
 
 export type JsonValue =
   | string
@@ -125,3 +130,177 @@ export interface Reference {
   from: Resource;
   relationship: string;
 }
+
+/* ==================================================================== *
+ * Plain JSON — T1. `DocumentIndex` above is untouched by any of this.
+ * ==================================================================== */
+
+/**
+ * What `detectShape` decided a document is. `jsonapi` is the one shape that
+ * skips the paste-view offer and reads straight through, exactly as before
+ * T1 existed; every other shape is read through `JsonIndex` below.
+ */
+export type Shape =
+  | "jsonapi"
+  | "hal"
+  | "odata"
+  | "jsonrpc"
+  | "envelope"
+  | "collection"
+  | "ndjson"
+  | "plain";
+
+/**
+ * Why `detectShape` chose what it chose, as data rather than a sentence —
+ * `shape.ts` is pure and carries no English, the same discipline `format.ts`
+ * and `ident.ts` already keep. The rendering layer turns one of these into a
+ * localised string via `t().shape.evidence`.
+ */
+export type ShapeEvidence =
+  | { kind: "jsonapi-member"; member: "data" | "errors" | "meta" }
+  | { kind: "hal-links" }
+  | { kind: "hal-embedded" }
+  | { kind: "odata-context" }
+  | { kind: "jsonrpc-member" }
+  | { kind: "envelope-shape" }
+  | { kind: "envelope-conflict" }
+  | { kind: "collection-array"; length: number }
+  | {
+      kind: "ndjson-lines";
+      records: number;
+      /** Line number of the first line that failed to parse, or `null` if none did. */
+      malformedLine: number | null;
+      /** Total lines that failed to parse — not just whether one did, so the evidence can say how much was dropped. Always 0 when `malformedLine` is `null`. */
+      skipped: number;
+    }
+  | { kind: "plain-empty-object" }
+  | { kind: "plain-scalar" }
+  | { kind: "plain-object" }
+  | { kind: "plain-unparseable" };
+
+export interface ShapeDetection {
+  shape: Shape;
+  evidence: ShapeEvidence;
+  /**
+   * The value to index: the parsed document for every shape but `ndjson`, an
+   * array of records for `ndjson`. `undefined` — not `null` — only when
+   * nothing at all could be read as JSON or as JSON Lines: `null` is itself a
+   * legitimate parsed value (a bare `null` document), so it cannot also mean
+   * "nothing parsed" without conflating the two. `detectShape` never throws,
+   * so the caller that wants a message for the `undefined` case re-runs
+   * `parseJson` for its own error.
+   */
+  value: JsonValue | undefined;
+}
+
+/**
+ * An inferred collection: an array of two or more objects sharing a majority
+ * of their key names (`json-index.ts` has the exact heuristic), or the one
+ * bare top-level array a `collection`-shaped document is. Anchored, and so is
+ * each of its members — see `docs/task-specs/T1.md`.
+ */
+export interface JsonCollection {
+  /** JSON Pointer to the array itself — `/data/users`, or `""` for a bare top-level array. */
+  pointer: string;
+  /** Last non-index path segment, e.g. `users` — the display name and the string a `user_id`-style key is matched against. */
+  label: string;
+  /** Pointers to each member, in document order. */
+  memberPointers: string[];
+  domId: string;
+  hue: number;
+  sigil: string;
+  /**
+   * False when this collection is itself a member of another detected
+   * collection. It still gets anchors — a nested collection's members are
+   * addressable identity definitions — but not its own rail entry or group
+   * section, so the rail lists one row per collection a person would
+   * recognise rather than one per array in the document.
+   */
+  topLevel: boolean;
+}
+
+export type IdentityResolution = "resolved" | "ambiguous" | "dangling";
+
+/** What a reference occurrence resolves to. Looked up per pointer at render time. */
+export type IdentityReferenceInfo =
+  | { resolution: "resolved"; targetPointer: string; targetDomId: string }
+  | { resolution: "ambiguous"; candidates: number }
+  | { resolution: "dangling" };
+
+/**
+ * What a definition occurrence is, keyed by the pointer of the object whose
+ * identity it defines — not by the pointer of the `id`-like key itself, since
+ * "clicking `user_id: 42` lands on the object that defines `id: 42`" means
+ * the object, not the one attribute.
+ */
+export interface IdentityDefinitionInfo {
+  domId: string;
+  /** How many reference occurrences resolve here. Zero is normal — most ids are never referenced back. */
+  referenceCount: number;
+  /** True when this definition shares its scope and value with another — the ambiguous case. */
+  ambiguous: boolean;
+}
+
+/** One (scope, value) identity — for the overview counts and for tests; not itself walked at render time. */
+export interface IdentityCluster {
+  scope: string;
+  value: string;
+  resolution: IdentityResolution;
+  definitionPointers: string[];
+  referencePointers: string[];
+}
+
+/** A referenced-but-never-defined (scope, value) pair — feeds the panel `renderDangling` already draws. */
+export interface JsonDanglingEntry {
+  scope: string;
+  value: string;
+  /** How many places reference it. */
+  count: number;
+}
+
+export interface JsonCounts {
+  /** Total collection members across every detected collection. */
+  total: number;
+  /** How many collections were found, at any depth. */
+  collections: number;
+  /** Distinct identities that resolved to exactly one definition. */
+  resolved: number;
+  /** Distinct identities with two or more definitions sharing a scope and value. */
+  ambiguous: number;
+  /** Distinct dangling (scope, value) pairs. */
+  danglingDistinct: number;
+  /** Every dangling reference occurrence, not de-duplicated. */
+  danglingTotal: number;
+}
+
+/**
+ * The index a plain-JSON (non-JSON:API) document builds to. Carries the
+ * parsed root, the detected shape, the collections the rail reads, and the
+ * inferred identity graph — value to where it is defined and where it is
+ * referenced, resolved ahead of render time the same way `byKey` resolves
+ * `DocumentIndex` relationships ahead of time.
+ */
+export interface JsonIndex {
+  root: JsonValue;
+  shape: Shape;
+  shapeEvidence: ShapeEvidence;
+  collections: JsonCollection[];
+  identities: IdentityCluster[];
+  referenceAt: Map<string, IdentityReferenceInfo>;
+  definitionAt: Map<string, IdentityDefinitionInfo>;
+  dangling: JsonDanglingEntry[];
+  counts: JsonCounts;
+  /**
+   * True when the document exceeded the identity pass's node budget (see
+   * `IDENTITY_NODE_LIMIT` in `json-index.ts`) — inference was skipped rather
+   * than stalling, and the overview says so.
+   */
+  identitySkipped: boolean;
+}
+
+/**
+ * What the view layer consumes. `jsonapi` is `DocumentIndex`, unchanged; the
+ * JSON:API path is not touched by any of this. `json` is everything else,
+ * from a bare scalar to a HAL document — see `docs/task-specs/T1.md`.
+ */
+export type Lens = { kind: "jsonapi"; index: DocumentIndex } | { kind: "json"; index: JsonIndex };

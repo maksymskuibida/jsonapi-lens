@@ -1,0 +1,149 @@
+# Decisions
+
+Things settled once, that later work must respect. A change contradicting an entry here amends the
+entry in the same pull request, with reasoning — silent divergence is a blocking defect.
+
+---
+
+## D1 · Anchor ids are namespaced, and collision-freedom is proved, not assumed
+
+**Date:** 2026-09-02 · **Settles:** how a second document on the page gets anchors
+
+### Why this is load-bearing
+
+The whole navigation model is that a pointer is `<a href="#…">` and its target is a real element
+with that id. Back, Forward, deep links, find-in-page and "copy link address" all work *because*
+there is no router — and all of it rests on **element ids being unique**. A duplicate id does not
+throw. The browser silently resolves the anchor to the first match, so every link to the second one
+lands in the wrong place, and nothing anywhere reports it.
+
+Attaching a request makes this a live risk rather than a theoretical one: a `POST`/`PATCH` request
+body is often itself a JSON:API document, so the request and the response will both want
+`#r_trips__1`.
+
+### The scheme
+
+Every DOM id the app mints is `<scope><body>`, where:
+
+- **`<scope>` is exactly two characters** — one ASCII letter and `_` — and every scope's letter is
+  distinct. The full table lives in `src/ident.ts` and is the only place a scope may be defined.
+- **`<body>` is one or more segments** run through `encodeSegment` and joined with `__`.
+
+| Scope | For | Segments |
+|---|---|---|
+| `r_` | a response resource section | `type`, `id` |
+| `g_` | a response type group | `type` |
+| `q_` | a request field — a param, a header, a URL part | `kind`, `name` |
+| `b_` | a resource in the **request body** document | `type`, `id` |
+| `n_` | a node in a plain-JSON **response** | the JSON Pointer |
+| `d_` | a node in a plain-JSON **request body** | the JSON Pointer |
+| `f_` | a diagnostic finding | `check`, `subject` |
+
+`r_` and `g_` are exactly what the code mints today, so **every existing fragment keeps working**
+and no deep link or bookmarked anchor changes meaning. The new scopes are additions.
+
+### Why it cannot collide
+
+Two obligations, and both are discharged by construction rather than by care:
+
+1. **Across scopes.** Every scope prefix is two characters and the first character is unique to that
+   scope, so ids from different scopes differ at index 0. There is no input that can make them
+   agree, and no need to reason about the bodies at all.
+2. **Within a scope.** `encodeSegment` keeps `[A-Za-z0-9]` and maps every other UTF-16 code unit to
+   `_` + 4 hex digits — including `_` itself, to `_005f`. So it is injective, and in its output `_`
+   is *only ever* followed by a hex digit. The `__` joiner therefore cannot occur inside an encoded
+   segment, which makes the joined body unambiguously splittable and the whole id injective in its
+   segment tuple. This is the property the module's header comment already claims; the scope table
+   extends it rather than replacing it.
+
+### What enforces it
+
+The proof above is worthless if a later scope is added by hand and gets it wrong, so the table is
+guarded by tests in `test/ident.test.ts` that must exist:
+
+- every scope prefix is exactly two characters, an ASCII letter followed by `_`;
+- all scope first-characters are distinct — this is the assertion that makes obligation 1 true;
+- the table is exhaustive over the `AnchorScope` union, so adding a scope to the type without adding
+  it to the table fails to typecheck;
+- a cross-scope collision attempt over a corpus of hostile `type`/`id`/pointer pairs — values
+  containing `_`, `__`, `#`, `/`, emoji, and a `type` deliberately chosen to look like another
+  scope's encoded body — produces no two equal ids;
+- `parseDomId` recovers the scope and every segment, and returns `null` for a well-formed id in a
+  scope it was not asked about, rather than mis-parsing it as its own.
+
+### Rejected alternative
+
+Folding the scope into the body as a leading segment — `r_` + `encodeSegment(scope) + "__" + …` —
+is also provably safe and needs no prefix table. It was rejected because it changes every existing
+response id from `r_trips__1` to `r_res__trips__1`, which breaks fragments that are already in
+people's browser history and in the README, for no gain over a distinct first character.
+
+---
+
+## D2 · Identity inference is scoped by container name, and would rather miss a link than mint a wrong one
+
+**Date:** 2026-09-03 · **Settles:** what makes a repeated value in plain JSON "the same identity",
+for `src/json-index.ts` and for any later task that reads or extends it (T2's request-scoped
+anchors, T3/T4 reading the model T2 builds on this one)
+
+### Why this is load-bearing
+
+A generic tree view can show that `42` appears in six places; it cannot tell you whether those six
+`42`s mean the same thing. JSON:API answers this by declaring `{type, id}` explicitly. Plain JSON
+never does, so this tool has to infer it — and an inferred link that is wrong is actively worse than
+one that never appears, because a JSON:API-trained eye reads *any* rendered link as a claim the tool
+is making, not a guess. The rule that follows exists to keep every rendered link a claim this tool
+can actually stand behind.
+
+### The rule
+
+A candidate identifier is a scalar at a **bare** id-like key (`id`, `uuid`, `guid`, `key`, `code`,
+`ref`, `slug`, matched case- and separator-insensitively), a scalar at a **compound** key naming a
+container (`user_id`, `fooId`, the plural `order_ids`/`barIds` applied to each element of an array),
+or any string anywhere shaped like a UUID, ULID or 24-hex-character ObjectId.
+
+- A bare-key occurrence is a **definition**, scoped to the container name of the object it sits on —
+  the last non-index segment of *that object's* pointer, not the id field's own pointer. Clicking a
+  reference lands on the object, not on its `id` attribute.
+- A compound-key occurrence is a **reference**, scoped to the name the key implies. Both a
+  definition's and a reference's scope are reduced through the same `canonicalScope` before
+  comparison, which is what lets `user_id` find a `users` collection — see that function's own
+  comment for the one non-obvious rule it needs (`pages → page` without breaking `boxes → box`) and
+  the narrower class it still gets wrong (`house`, `response`).
+- A UUID/ULID/ObjectId match **ignores scope entirely** and matches on value alone, because those
+  formats are unique by construction. This is the one case where matching is *unconditional* — it
+  wins even when a compound key would otherwise imply a different scope, because the format itself
+  is already enough evidence.
+- **Two or more definitions sharing a scope and value make every reference to them ambiguous.**
+  Never resolved by picking the first, the most recently defined, or the one earlier in document
+  order — an ambiguous identity is shown, counted, and left unlinked.
+- **A reference with no matching definition is dangling**, full stop, regardless of how many times
+  it occurs — it feeds the same panel a JSON:API dangling pointer already does.
+- A lone, unreferenced value at a bare id-like key is not treated as an identity at all. It is an
+  ordinary attribute that happens to be named `id`; nothing about it is inferred.
+
+### Why scoping by container name, and not something looser
+
+A looser rule — any repeated value anywhere is "the same identity" — was considered and rejected: a
+bare `1` recurs constantly across unrelated objects in real payloads (page numbers, boolean-ish
+flags, the first row of every table), and treating every recurrence as one identity would produce
+links between things that have nothing to do with each other. Scoping by container name is what
+keeps `orders[].id: 1` and `users[].id: 1` from ever being confused, without needing a person to
+disambiguate anything by hand.
+
+### What this means for later tasks
+
+T2's request-scoped anchors (`q_`, `b_`, `d_` in D1, above) sit beside this graph rather than
+inside it — a request body's own plain-JSON identities are a
+separate `JsonIndex`, not merged into the response's. Cross-document identity (matching an id
+between a request and its response, or between two separately pasted documents) is explicitly out
+of scope for T1 and is not something this decision authorises; if a later task wants it, that is a
+new decision, not an extension of this one read loosely.
+
+### Rejected alternative
+
+Matching greedily — any two equal scalars are the same identity regardless of key or scope — needs
+no container-name logic at all and would catch more real links. It was rejected for the reason
+above: on a real payload it produces enough wrong links (via nothing more than two unrelated `1`s)
+that the feature would train people to distrust every link it draws, which defeats the point of
+drawing any.
