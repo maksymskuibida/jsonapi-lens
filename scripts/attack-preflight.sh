@@ -89,6 +89,31 @@ expect_ok() {
   printf 'pass  %-42s ok reported, not flagged\n' "$name"; pass=$((pass+1))
 }
 
+# fresh_repo_with_attack_suite <name> — like fresh_repo, but ADDS a
+# scripts/attack-preflight.sh on feat/x (so it lands in the diff under test,
+# the same way T0's real commit adding the attack suite lands in every
+# branch's diff until T0 merges — see docs/task-specs/T9.md). Its body is a
+# minimal stand-in, not a copy of the real 270-line suite: it plants exactly
+# the substrings the real one plants as fixtures for other checks — a
+# conflict marker, `.only(`, `innerHTML`, `href:`, `scrollY` — so a case
+# built on this helper exercises T9's fix without coupling to the real
+# suite's unrelated content ever drifting out from under it.
+fresh_repo_with_attack_suite() {
+  local d
+  d="$(fresh_repo "$1")"
+  cat > "$d/scripts/attack-preflight.sh" <<'ATTACK'
+#!/usr/bin/env bash
+# Stand-in for the real attack suite's own planted defects (T9).
+printf 'node.innerHTML = payload;\n'
+printf 'href: "${url}"\n'
+printf 'expect(window.scrollY).toBe(0);\n'
+printf 'it.only("x", () => {});\n'
+printf '<<<<<<< HEAD\n'
+ATTACK
+  git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "add attack suite fixture"
+  echo "$d"
+}
+
 # --- 1. fails closed when there is nothing to compare -----------------------
 d=$(fresh_repo nochange)
 expect "fails closed: no changes vs base" "$d" 2 "no changes against"
@@ -265,6 +290,81 @@ else
   printf 'FAIL  %-42s gate cannot read its own template output\n' "template round-trip"
   printf '%s\n' "$out" | grep -i evidence; fail=$((fail+1))
 fi
+
+# --- 13. T9: a diff touching only the attack suite reads clean ----------
+#
+# scripts/attack-preflight.sh plants a literal conflict marker, `.only(`,
+# `innerHTML`, `href:` and `scrollY` as ITS OWN fixtures. Before T9, a diff
+# that so much as touched this file read as a conflict marker, a focused
+# test and an innerHTML violation that do not exist, because those checks
+# scanned every added line in the whole diff rather than the files each
+# invariant actually governs. Assert the ABSENCE of each finding message
+# together with the PRESENCE of the check's own `ok` line for every code
+# invariant that can fire here — never the exit status alone, and never
+# absence alone: a gate stubbed dead (see the dead-gate run in the PR body)
+# emits neither ok nor finding, so an absence-only assertion would pass
+# against it just as happily as against a working gate.
+d=$(fresh_repo_with_attack_suite t9only)
+expect_ok "T9: attack-suite only — conflict markers silent" "$d" \
+  "no conflict markers" "conflict markers in the diff"
+expect_ok "T9: attack-suite only — focused/skipped silent" "$d" \
+  "no focused or skipped tests" "focused or skipped test added"
+expect_ok "T9: attack-suite only — innerHTML silent" "$d" \
+  "no raw HTML assignment added" "innerHTML/insertAdjacentHTML path is in the diff"
+expect_ok "T9: attack-suite only — network call silent" "$d" \
+  "no network call added outside the modules allowed one" "network call was added outside"
+expect_ok "T9: attack-suite only — DOM id silent" "$d" \
+  "no id minted outside ident.ts" "id or fragment may be built outside ident.ts"
+expect_ok "T9: attack-suite only — hardcoded copy silent" "$d" \
+  "no hardcoded copy detected" "possible hardcoded user-facing copy"
+# The href check used to be a bare `note`, with no positive line at all even
+# on a clean diff — which meant this case could only assert its ABSENCE, and
+# an absence-only assertion is exactly what this suite exists to rule out
+# (it passes against a gate stubbed dead as readily as a working one). Fixed
+# by giving the check a real `ok` branch alongside the note, in the same
+# T9 change, so expect_ok can hold it to the same standard as every other
+# invariant here.
+expect_ok "T9: attack-suite only — href note silent" "$d" \
+  "no href built in the diff" "an href is built in the diff"
+
+# --- 14. T9: jsdom-altitude must not fire on the suite's scrollY fixture -
+#
+# The altitude check only runs at all once a real test/ file (outside
+# test/browser/) is in the diff — exactly T1's actual bug report: a real
+# test file plus T0's attack-suite commit landing in the same diff. Case 13
+# above can't exercise this one, because its diff never opens that gate.
+d=$(fresh_repo_with_attack_suite t9altitude)
+mkdir -p "$d/test"
+printf 'import { it, expect } from "vitest";\nit("adds", () => { expect(1 + 1).toBe(2); });\n' \
+  > "$d/test/real.test.ts"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "add an unrelated real vitest test"
+expect_ok "T9: real test + attack suite — altitude silent" "$d" \
+  "no layout assertion under jsdom" "jsdom has no layout engine"
+
+# --- 15. T9: a REAL src/ violation is still found beside the suite ------
+d=$(fresh_repo_with_attack_suite t9realplusattack)
+printf 'node.innerHTML = payload;\n' >> "$d/src/main.ts"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "a real innerHTML violation, alongside the attack suite"
+expect "T9: real src/ innerHTML still found beside the suite" "$d" 1 \
+  "innerHTML/insertAdjacentHTML path is in the diff"
+
+# --- 16. T9: a conflict marker elsewhere is still found beside the suite -
+d=$(fresh_repo_with_attack_suite t9conflictelsewhere)
+printf 'echo hi\n<<<<<<< HEAD\necho conflicted\n=======\necho other\n>>>>>>> branch\n' \
+  > "$d/scripts/other-tool.sh"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "a real conflict marker in a different script"
+expect "T9: conflict marker elsewhere still found beside the suite" "$d" 1 \
+  "conflict markers in the diff"
+
+# --- 17. T9 ceiling: only the exact suite path is exempt ----------------
+# A similarly-named but different script must NOT be exempted — the
+# exclusion is one literal path, not a `scripts/attack-*.sh` glob, so it
+# cannot swallow a future script that merely starts the same way.
+d=$(fresh_repo t9notexempt)
+printf 'echo hi\n<<<<<<< HEAD\n' > "$d/scripts/attack-other.sh"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "conflict marker in a similarly named, non-suite script"
+expect "T9 ceiling: a similarly named script is not exempt" "$d" 1 \
+  "conflict markers in the diff"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 rm -rf "$WORK"

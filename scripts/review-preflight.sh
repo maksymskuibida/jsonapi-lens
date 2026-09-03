@@ -67,6 +67,49 @@ CHANGED="$(git diff --name-only "$MERGE_BASE"..HEAD)"
 DIFF="$(git diff "$MERGE_BASE"..HEAD)"
 ADDED="$(printf '%s\n' "$DIFF" | grep '^+' | grep -v '^+++' || true)"
 
+# T9: scripts/attack-preflight.sh plants the exact patterns several checks
+# below look for — literal `<<<<<<<`, `.only(`, `innerHTML`, `href:` and
+# `scrollY` — because planting them is how it proves each check fires. Any
+# diff that touches that file (every branch's diff until T0 merges, and every
+# future edit to the suite after that) used to read as unrelated violations
+# in application code that do not exist, because the checks below scanned
+# `$ADDED` — every added line in the whole diff — rather than the lines the
+# invariant is actually about. Two different fixes for two different kinds of
+# check (docs/task-specs/T9.md):
+#
+#   - The CODE INVARIANTS (the innerHTML/insertAdjacentHTML scan and the href
+#     note; the network-call, DOM-id and hardcoded-copy scans already read
+#     per-file under src/ and were never affected; the jsdom-altitude scan
+#     needs the equivalent for test/) are assertions about application code,
+#     so they read ADDED_SRC / ADDED_TEST_UNIT below. Both are built with a
+#     git pathspec that names what to INCLUDE, not what to exclude — so
+#     scoping them can never be widened by accident to cover a file it
+#     shouldn't, in scripts/ or anywhere else.
+#   - Conflict markers and focused/skipped tests are genuinely about any
+#     file — a real conflict marker or a real `.only(` in scripts/ is a real
+#     problem — so those two read ADDED_EXCEPT_ATTACK_SUITE, which excludes
+#     exactly one path, by its exact name, and nothing else. A glob such as
+#     `scripts/attack-*.sh` would risk exempting some future attack-*.sh that
+#     is not this suite; excluding the literal path cannot.
+#
+# Nothing about which patterns are searched changes here, only which lines
+# are offered to them.
+
+# Added lines confined to application code. Governs: the innerHTML/
+# insertAdjacentHTML scan, the href note.
+DIFF_SRC="$(git diff "$MERGE_BASE"..HEAD -- src)"
+ADDED_SRC="$(printf '%s\n' "$DIFF_SRC" | grep '^+' | grep -v '^+++' || true)"
+
+# Added lines confined to vitest specs — test/, excluding test/browser/, the
+# one place a layout measurement belongs. Governs: the jsdom-altitude scan.
+DIFF_TEST_UNIT="$(git diff "$MERGE_BASE"..HEAD -- test ':!test/browser')"
+ADDED_TEST_UNIT="$(printf '%s\n' "$DIFF_TEST_UNIT" | grep '^+' | grep -v '^+++' || true)"
+
+# Added lines for the whole diff except the attack suite's own fixtures.
+# Governs: the conflict-marker and focused/skipped-test hygiene checks.
+DIFF_EXCEPT_ATTACK_SUITE="$(git diff "$MERGE_BASE"..HEAD -- ':!scripts/attack-preflight.sh')"
+ADDED_EXCEPT_ATTACK_SUITE="$(printf '%s\n' "$DIFF_EXCEPT_ATTACK_SUITE" | grep '^+' | grep -v '^+++' || true)"
+
 [ -n "$CHANGED" ] || { echo "FATAL: no changes against $BASE_REF — nothing to review" >&2; exit 2; }
 
 changed_matching() { grep -qE "$1" <<<"$CHANGED"; }
@@ -126,12 +169,17 @@ fi
 # ---------------------------------------------------------------- hygiene ---
 
 say "Hygiene"
-if grep -qE '^\+.*(<<<<<<<|>>>>>>>|^\+=======$)' <<<"$ADDED"; then
+# Both checks below read ADDED_EXCEPT_ATTACK_SUITE, not ADDED: they are
+# genuinely about any file, so a real hit anywhere else must still fire — but
+# scripts/attack-preflight.sh plants a literal conflict marker and a literal
+# `it.only(` as its own fixtures, so it alone is exempt. See the T9 note above
+# ADDED_SRC.
+if grep -qE '^\+.*(<<<<<<<|>>>>>>>|^\+=======$)' <<<"$ADDED_EXCEPT_ATTACK_SUITE"; then
   find_ "conflict markers in the diff"
 else ok "no conflict markers"
 fi
 
-if grep -qE '\b(it|test|describe)\.(only|skip)\b|\bxit\(|\bxdescribe\(' <<<"$ADDED"; then
+if grep -qE '\b(it|test|describe)\.(only|skip)\b|\bxit\(|\bxdescribe\(' <<<"$ADDED_EXCEPT_ATTACK_SUITE"; then
   find_ "focused or skipped test added — \`.only\` hides the rest of the suite, \`.skip\` hides the case"
 else ok "no focused or skipped tests"
 fi
@@ -144,15 +192,24 @@ fi
 
 say "Project invariants"
 
-# XSS: an innerHTML assignment, or a template literal building a tag, in the diff.
-if grep -qE 'innerHTML|insertAdjacentHTML|outerHTML' <<<"$ADDED"; then
+# XSS: an innerHTML assignment, or a template literal building a tag, in the
+# diff. Reads ADDED_SRC, not ADDED — this is an assertion about application
+# code, and scripts/attack-preflight.sh plants the literal string `innerHTML`
+# as its own fixture (see the T9 note above ADDED_SRC).
+if grep -qE 'innerHTML|insertAdjacentHTML|outerHTML' <<<"$ADDED_SRC"; then
   find_ "an innerHTML/insertAdjacentHTML path is in the diff — trace one hostile payload value by hand through it (PROCESS.md §4)"
 else ok "no raw HTML assignment added"
 fi
 
-# A URL rendered as an href needs a scheme allowlist, not an escape.
-if grep -qE 'href:|href="\$\{|"href",' <<<"$ADDED"; then
+# A URL rendered as an href needs a scheme allowlist, not an escape. Also
+# scoped to ADDED_SRC for the same reason. Unlike the other invariants this
+# one is advisory (a note, not a finding) — but it still gets a real `ok`
+# line for the quiet case, not just silence, because an absence-only
+# assertion passes against a gate stubbed dead as readily as against a
+# working one (see the attack suite's expect_ok).
+if grep -qE 'href:|href="\$\{|"href",' <<<"$ADDED_SRC"; then
   note "an href is built in the diff — javascript: and data: survive HTML escaping; check for a scheme allowlist"
+else ok "no href built in the diff"
 fi
 
 # fetch outside the three modules allowed one.
@@ -200,9 +257,14 @@ if [ -n "$copyoffenders" ]; then
 else ok "no hardcoded copy detected"
 fi
 
-# jsdom-altitude: a layout assertion in a vitest test cannot fail.
+# jsdom-altitude: a layout assertion in a vitest test cannot fail. The gate
+# condition still checks $CHANGED for any test/ file outside test/browser/,
+# but the pattern match reads ADDED_TEST_UNIT — lines added inside that file
+# set only — because scripts/attack-preflight.sh plants the literal string
+# `scrollY` as its own fixture and is not a vitest spec (see the T9 note
+# above ADDED_SRC).
 if grep -qE '^test/[^b]' <<<"$CHANGED"; then
-  if grep -qE 'scrollY|scrollTop|getBoundingClientRect|offsetHeight|offsetTop|clientHeight' <<<"$ADDED"; then
+  if grep -qE 'scrollY|scrollTop|getBoundingClientRect|offsetHeight|offsetTop|clientHeight' <<<"$ADDED_TEST_UNIT"; then
     find_ "a layout measurement is asserted in a vitest test — jsdom has no layout engine, so that assertion cannot fail; it belongs in test/browser/nav-scenarios.js"
   else ok "no layout assertion under jsdom"
   fi
