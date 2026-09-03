@@ -126,6 +126,14 @@ Fixed order, and the deploy is gated on the whole of step 3 passing:
 3. **Verify locally, in full** — `docs/qa-checklists/REGRESSION.md` end to end, **plus** every new
    feature against its own task spec. This is the gate. A failure here is fixed and re-verified; it
    is never deployed and noted.
+3a. **Un-stack before merging.** A `pull_request` event evaluates the workflow from its **base**
+   branch, so removing the `branches: [main]` filter only gives a stacked pull request CI once the
+   fix is present in *its own base*. For a release built as a stack, that means the honest sequence
+   is: merge the tooling and foundation PRs to `main` first, then **rebase every remaining PR onto
+   `main`** so each one is a PR into `main` and gets checks. Do not treat a reviewer running the
+   chain by hand as equivalent — it is a mitigation, not a gate, and it does not survive the next
+   push to that branch.
+
 4. **Deploy once**, all of it, by merging to `main`. `deploy.yml` runs `check`, migrates D1, uploads
    the Worker and assets, and smoke-tests the origin.
 5. **Verify on production** — the same regression checklist again, because layout is what a build
