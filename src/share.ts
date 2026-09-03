@@ -2,15 +2,15 @@ import { copyText } from "./clipboard.js";
 import { el } from "./dom.js";
 import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
+import { mintShareEnvelope } from "./bundle.js";
 import {
   generateSecret,
-  isBundlePayload,
   open as openSealed,
-  seal,
   ShareError,
   shareSupported,
 } from "./crypto.js";
-import type { SharePayload } from "./crypto.js";
+import type { BundleEntry, BundlePayload, SharePayload } from "./crypto.js";
+import type { Exchange } from "./exchange.js";
 import { shareUrl } from "./router.js";
 import { openModal, toast } from "./ui.js";
 
@@ -75,19 +75,17 @@ async function upload(blob: Uint8Array, lifetime: LifetimeKey): Promise<CreatedS
 }
 
 /**
- * Fetch and decrypt a single-document share.
- *
- * `open` (from `crypto.ts`) can return either a `SharePayload` or a
- * `BundlePayload` — that is the whole point of a version-3 link declaring its
- * own kind — but this task adds no view for a bundle: T6 owns the import
- * screen a bundle needs, and until it lands the only caller of this function
- * (`main.ts`'s share route) has nowhere to put several documents. So this
- * keeps its existing, narrower contract and refuses cleanly rather than
- * handing back a payload with no `text` for that caller to render blank.
- * T6 reaches for `open`/`isBundlePayload` directly once it has a view to
- * offer either shape to.
+ * Fetch and decrypt a share link's payload — a single document or a bundle,
+ * whichever the sender minted. `open` (from `crypto.ts`) returns either
+ * shape because that is the whole point of a version-3 link declaring its
+ * own kind, and this function does no narrowing of its own: T6 gave a
+ * version-3 payload somewhere to go (the bundle import view), so the one
+ * caller (`main.ts`'s share route) tells the two apart itself, with
+ * `isBundlePayload`, and dispatches accordingly. Before T6 this function
+ * refused a bundle here instead — see git history if that refusal is ever
+ * needed again.
  */
-export async function fetchShare(id: number, secret: string): Promise<SharePayload> {
+export async function fetchShare(id: number, secret: string): Promise<SharePayload | BundlePayload> {
   let response: Response;
   try {
     response = await fetch(`/api/shares/${id}`);
@@ -112,11 +110,7 @@ export async function fetchShare(id: number, secret: string): Promise<SharePaylo
   }
 
   const blob = new Uint8Array(await response.arrayBuffer()) as Uint8Array<ArrayBuffer>;
-  const payload = await openSealed(blob, secret);
-  if (isBundlePayload(payload)) {
-    throw new ShareError(t().bundle.errors.unavailable.headline, t().bundle.errors.unavailable.hint);
-  }
-  return payload;
+  return openSealed(blob, secret);
 }
 
 /* ---------------------------------------------------------------- modal --- */
@@ -126,12 +120,29 @@ function expiryNote(expiresAt: number | null): string {
   return t().share.expiresOn(expiresAt);
 }
 
-export function openShareModal(text: string, label: string): void {
-  if (!shareSupported()) {
-    toast(t().share.unsupported, "error");
-    return;
-  }
-
+/**
+ * Everything the share modal looks like, independent of what is being
+ * sealed: the lifetime picker, the "deriving the key" status, the link and
+ * its copy button, the error state and its retry. `openShareModal` (one
+ * document — unchanged since before bundles existed) and
+ * `openBundleShareModal` (T6's several-document flow) both build this same
+ * chrome and differ only in the subtitle and in `mint`, which is how the
+ * task spec's "hand off to the existing share modal... do not build a
+ * second one" is kept true in code and not just in appearance: there is
+ * exactly one function that lays out a share dialog.
+ *
+ * A failed `mint`/upload leaves this same modal open with the error shown
+ * and `create` re-enabled — it never closes on failure — which is also what
+ * satisfies T6's "a failed upload preserves the selection": the resolved
+ * list of documents is captured in `mint`'s closure once, when the caller
+ * builds it, so retrying calls the same `mint` again rather than needing
+ * anyone to re-open the library and re-tick anything.
+ */
+function runShareModal(options: {
+  subtitle: string;
+  originalBytes: number;
+  mint: (secret: string) => Promise<Uint8Array<ArrayBuffer>>;
+}): void {
   let lifetime = readLifetime();
 
   const body = el("div", { class: "share" });
@@ -181,7 +192,7 @@ export function openShareModal(text: string, label: string): void {
 
   openModal({
     title: t().share.title,
-    subtitle: `${label} · ${formatBytes(new TextEncoder().encode(text).byteLength)}`,
+    subtitle: options.subtitle,
     body,
     footer,
   });
@@ -194,8 +205,7 @@ export function openShareModal(text: string, label: string): void {
 
     try {
       const secret = generateSecret();
-      const payload: SharePayload = { text, label, savedAt: Date.now() };
-      const blob = await seal(payload, secret);
+      const blob = await options.mint(secret);
 
       status.textContent = t().share.uploading(formatBytes(blob.byteLength));
       const created = await upload(blob, lifetime);
@@ -221,7 +231,7 @@ export function openShareModal(text: string, label: string): void {
           { class: "share__meta" },
           `${expiryNote(created.expiresAt)} ${t().share.sizes(
             formatBytes(blob.byteLength),
-            formatBytes(new TextEncoder().encode(text).byteLength),
+            formatBytes(options.originalBytes),
           )}`,
         ),
       );
@@ -250,5 +260,54 @@ export function openShareModal(text: string, label: string): void {
       create.disabled = false;
       for (const button of buttons) button.disabled = false;
     }
+  });
+}
+
+/**
+ * Share the currently open document. Unchanged in shape since before
+ * bundles existed: routing through `mintShareEnvelope` with a one-document
+ * list still calls `seal` underneath (see that function), so this produces
+ * the exact version-2 blob it always has. `exchange` is optional and new —
+ * T2 wires a real value through once it lands; every existing caller that
+ * passes only `text`/`label` keeps compiling and keeps sealing the same
+ * bytes.
+ */
+export function openShareModal(text: string, label: string, exchange?: Exchange): void {
+  if (!shareSupported()) {
+    toast(t().share.unsupported, "error");
+    return;
+  }
+
+  const originalBytes = new TextEncoder().encode(text).byteLength;
+  runShareModal({
+    subtitle: `${label} · ${formatBytes(originalBytes)}`,
+    originalBytes,
+    mint: (secret) => mintShareEnvelope([{ label, text, exchange }], secret),
+  });
+}
+
+/**
+ * Share several library entries as one bundle — T6's addition. Reuses
+ * `runShareModal` rather than a dialog of its own; see that function's
+ * header comment for why. `documents.length` is expected to be at least 2 —
+ * `panels.ts` mints a single-document share instead when only one row is
+ * ticked — but this does not assert that itself: `mintShareEnvelope` already
+ * decides the version from the count, so a caller that ever hands this a
+ * single document still gets a valid version-2 link rather than a wrong one.
+ */
+export function openBundleShareModal(documents: BundleEntry[]): void {
+  if (!shareSupported()) {
+    toast(t().share.unsupported, "error");
+    return;
+  }
+
+  const originalBytes = documents.reduce(
+    (sum, doc) => sum + new TextEncoder().encode(doc.text).byteLength,
+    0,
+  );
+  runShareModal({
+    subtitle: t().bundleUi.shareSubtitle(documents.length, formatBytes(originalBytes)),
+    originalBytes,
+    mint: (secret) => mintShareEnvelope(documents, secret),
   });
 }

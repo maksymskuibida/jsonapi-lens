@@ -21,6 +21,7 @@ import { legal } from "./legal/index.js";
 import { domId, parseDomId, resourceKey } from "./ident.js";
 import { openJumpModal } from "./jump.js";
 import { openLibraryModal, openRawModal, openSaveModal, openShortcutsModal } from "./panels.js";
+import { renderBundleImportView } from "./bundle.js";
 import { DocumentError, readDocument } from "./parse.js";
 import { resolve as resolvePointer } from "./pointer.js";
 import {
@@ -39,7 +40,7 @@ import type { LegalRoute, Route } from "./router.js";
 import { applyPageMeta, applyRouteMeta, documentMeta, metaForRoute } from "./seo.js";
 import { renderLegalPage } from "./views/legal.js";
 import { fetchShare, openShareModal } from "./share.js";
-import { ShareError } from "./crypto.js";
+import { isBundlePayload, ShareError } from "./crypto.js";
 import {
   clearDocument,
   countLibrary,
@@ -105,6 +106,13 @@ const libraryEl = need<HTMLButtonElement>("open-library");
 const libraryCountEl = need("library-count");
 const legalEl = need("legal");
 const languageEl = need<HTMLSelectElement>("language");
+
+// Reached only when a share link decrypts to a version-3 bundle. Created here
+// rather than as static markup in index.html, unlike every sibling view,
+// because that keeps this hook to main.ts down to what is below: no new
+// element for T1's concurrent rewrite of this file to carry forward.
+const bundleImportEl = el("div", { hidden: true });
+need("view").append(bundleImportEl);
 
 /* ------------------------------------------------------------- language --- */
 
@@ -172,6 +180,13 @@ interface Loaded {
 let current: Loaded | null = null;
 let soloType: string | null = null;
 
+// Is the bundle import view (rather than `current`) what `/view` should show
+// right now? The view's own content lives in `bundleImportEl`, already
+// rendered by `renderBundleImportView` and merely hidden/shown from here —
+// see the "view" branch of `applyRoute` below, and `showView`'s "bundle"
+// case — so Back/Forward onto it needs nothing more than this flag.
+let bundleView = false;
+
 /* ---------------------------------------------------------------- theme --- */
 
 type Theme = "auto" | "light" | "dark";
@@ -228,11 +243,12 @@ async function refreshLibraryCount(): Promise<void> {
 
 /* ----------------------------------------------------------- view state --- */
 
-function showView(which: "boot" | "paste" | "doc" | "legal", bootMessage?: string): void {
+function showView(which: "boot" | "paste" | "doc" | "legal" | "bundle", bootMessage?: string): void {
   bootEl.hidden = which !== "boot";
   pasteEl.hidden = which !== "paste";
   docEl.hidden = which !== "doc";
   legalEl.hidden = which !== "legal";
+  bundleImportEl.hidden = which !== "bundle";
   newDocEl.hidden = which !== "doc";
   topbarDocEl.hidden = which !== "doc";
   if (which === "boot") bootMessageEl.textContent = bootMessage ?? t().boot.reading;
@@ -1441,15 +1457,49 @@ document.addEventListener("keydown", (event) => {
 
 /* --------------------------------------------------------------- routes --- */
 
-/** Load a document that arrived as a share link. */
+/**
+ * Load a document that arrived as a share link — or, since T6, a bundle of
+ * several. `fetchShare` hands back whichever the link decrypted to;
+ * `isBundlePayload` is the one branch point this file needs, and everything
+ * a bundle does beyond that (the import list, duplicate detection, writing
+ * to the library) lives in `renderBundleImportView`.
+ */
 async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Promise<void> {
   showView("boot", t().boot.fetchingShare);
 
   try {
     const payload = await fetchShare(route.id, route.secret);
-    // Drop the key from the visible URL and from history before rendering, so
-    // it does not sit in the address bar or leak through a later Referer.
+    // Drop the key from the visible URL and from history before rendering
+    // either kind, so it does not sit in the address bar or leak through a
+    // later Referer.
     navigate(VIEW_PATH, { replace: true });
+
+    if (isBundlePayload(payload)) {
+      // The import view is about to occupy /view in place of whatever this
+      // tab had open, so the `view` route's usual "is there a current
+      // document" check must not find a stale one on a later Back/Forward.
+      current = null;
+      bundleView = true;
+      showView("bundle");
+      void renderBundleImportView(bundleImportEl, payload, {
+        onOpen: (entry) => {
+          bundleView = false;
+          void load(entry.text, entry.label, { persist: true, push: true });
+        },
+        onCancel: () => {
+          bundleView = false;
+          navigate(PASTE_PATH);
+          applyRouteMeta({ kind: "paste" });
+          showView("paste");
+          offerResume();
+          window.scrollTo(0, 0);
+        },
+        onChange: () => void refreshLibraryCount(),
+      });
+      return;
+    }
+
+    bundleView = false;
     await load(payload.text, payload.label || t().labels.sharedDocument(route.id), {
       persist: true,
     });
@@ -1489,6 +1539,17 @@ async function applyRoute(): Promise<void> {
     // Idempotent: traversing between fragments on /view must not re-render.
     if (current) {
       showView("doc");
+      return;
+    }
+    // A Back or Forward onto the bundle import view: its content is already
+    // rendered in `bundleImportEl` and merely hidden, exactly like every
+    // resource section underneath the document view, so showing it again is
+    // all a traversal needs. A reload starts a fresh module with `bundleView`
+    // back at `false`, which is correct — the secret is already gone from
+    // the URL by the time this state exists, so a reload could not recover
+    // the bundle regardless.
+    if (bundleView) {
+      showView("bundle");
       return;
     }
     const stored = await loadDocument();
