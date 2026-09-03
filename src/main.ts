@@ -433,12 +433,19 @@ function resolveHash(restore: EntryState | null = null): void {
 
   // Open before scrolling, so the scroll lands against final layout — but never
   // on top of a restored shape, which already says whether this row was open.
-  // `shape` only ever describes the JSON:API `.res` model (see `applyOpenRows`),
-  // so a plain-JSON target — which never sets one — always takes the ancestor
-  // branch, and correctly so: there is no restored shape for it to defer to.
-  if (!shape) {
-    if (target.classList.contains("res")) openSection(target);
-    else openAncestorDetails(target);
+  //
+  // The `!shape` guard belongs on the `.res` side only. `rememberState` is
+  // unconditional: it always writes `next.open = openRowIds()`, and
+  // `openRowIds` finds nothing on a plain-JSON document — but `[]` is a
+  // truthy array, not an absent value, so `shape` reads truthy on *every*
+  // restore of a plain-JSON document, `.res` or not. `applyOpenRows` (what
+  // `shape` feeds) has an opinion about `.res__d` rows and nothing else, so
+  // deferring to it for a plain-JSON target defers to an opinion that was
+  // never formed — the ancestor branch must run regardless of `shape`.
+  if (target.classList.contains("res")) {
+    if (!shape) openSection(target);
+  } else {
+    openAncestorDetails(target);
   }
 
   if (position) restorePosition(position);
@@ -1768,13 +1775,18 @@ async function boot(): Promise<void> {
 
   // Reading IndexedDB takes long enough that a document can be pasted before it
   // finishes — most easily on a cold profile, where opening the database is
-  // slowest. Either outcome of that race already has something on screen that
-  // boot must not disturb: a `jsonapi` paste has rendered and set `current`,
-  // and anything else has shown the shape-offer banner and set `pendingOffer`
-  // instead — `showView("paste")` below unconditionally clears a pending offer
-  // (see `showView`'s own comment), so missing this second case would silently
-  // wipe a banner the user is looking at, with no document and no error to
-  // explain why it vanished.
+  // slowest. `#paste` is `hidden` until the `showView("paste")` below runs, so
+  // a person cannot actually be looking at a banner or a textarea during this
+  // window — this guard is reachable only by a script driving `#input`/`#parse`
+  // directly, the way `test/browser/run.mjs`-style harnesses do, not by hand.
+  // It still matters: a `jsonapi` paste has rendered and set `current`, and
+  // anything else has shown the shape-offer banner and set `pendingOffer`
+  // instead, and both outcomes already own the screen. Missing the second case
+  // would not just clear that unseen offer (`showView("paste")` below does
+  // that unconditionally — see its own comment) — the next few lines set
+  // `inputEl.value = stored.text`, so it would overwrite whatever a
+  // fast-enough script had just placed in that same textarea with the stored
+  // document instead, silently destroying it.
   if (current || pendingOffer) return;
 
   showView("paste");
