@@ -288,3 +288,86 @@ describe("hostile values are preserved exactly, never sanitised", () => {
     expect(entry?.convention).toBe("plain");
   });
 });
+
+/**
+ * Differential test against the platform's own `URLSearchParams` — the
+ * cheapest high-value check available, since every T4 diagnostic is computed
+ * from what this module decodes. Two halves, both asserted for a reason:
+ * agreement on the cases where there is no genuine ambiguity (repeated keys,
+ * ordinary percent-decoding), so a future change cannot silently break the
+ * boring 90% of inputs; and *deliberate* disagreement on the cases this
+ * module exists to read differently (comma/space/pipe lists, bracket
+ * notation, base64url JSON, and the valueless/empty distinction), so a future
+ * change that accidentally makes this module agree with `URLSearchParams` on
+ * one of those fails loudly rather than looking like an improvement.
+ */
+describe("differential test against URLSearchParams", () => {
+  it("agrees on repeated keys", () => {
+    const wire = "a=1&a=2&a=3";
+    expect(readOf(wire, "a")?.value).toEqual(new URLSearchParams(wire).getAll("a"));
+  });
+
+  it("agrees on ordinary percent-decoding, when the decoded value has nothing this module treats specially", () => {
+    const wire = "a=caf%C3%A9"; // "café" -- no comma, pipe, space, brace or base64url shape
+    expect(readOf(wire, "a")?.value).toBe(new URLSearchParams(wire).get("a"));
+  });
+
+  it("agrees on a literal percent-encoded delimiter-like character once it is not the actual delimiter", () => {
+    const wire = "a=100%25"; // "100%" -- a literal percent sign, nothing to split on
+    expect(readOf(wire, "a")?.value).toBe(new URLSearchParams(wire).get("a"));
+  });
+
+  it("agrees that a leading '?' is stripped", () => {
+    const wire = "?a=1";
+    expect(readOf(wire, "a")?.value).toBe(new URLSearchParams(wire).get("a"));
+  });
+
+  it("deliberately disagrees on a comma list -- the platform never splits, this module's alternative recovers its reading", () => {
+    const wire = "a=1,2,3";
+    const native = new URLSearchParams(wire).get("a");
+    const entry = readOf(wire, "a");
+    expect(entry?.value).not.toEqual(native);
+    expect(entry?.alternatives.map((alt) => alt.value)).toContainEqual(native);
+  });
+
+  it("deliberately disagrees on a pipe/space list the same way", () => {
+    for (const wire of ["a=1|2", "a=1+2"]) {
+      const native = new URLSearchParams(wire).get("a");
+      const entry = readOf(wire, "a");
+      expect(entry?.value).not.toEqual(native);
+      expect(entry?.alternatives.map((alt) => alt.value)).toContainEqual(native);
+    }
+  });
+
+  it("deliberately disagrees on JSON-in-a-value and base64url JSON the same way", () => {
+    for (const wire of ['a={"b":1}', "cursor=eyJvIjoyNX0"]) {
+      const name = wire.startsWith("cursor") ? "cursor" : "a";
+      const native = new URLSearchParams(wire).get(name);
+      const entry = readOf(wire, name);
+      expect(entry?.value).not.toEqual(native);
+      expect(entry?.alternatives.map((alt) => alt.value)).toContainEqual(native);
+    }
+  });
+
+  it("deliberately disagrees on bracket notation -- the platform treats it as one opaque literal key", () => {
+    const wire = "a[b]=1";
+    const native = new URLSearchParams(wire);
+    expect(native.get("a[b]")).toBe("1"); // the platform's whole key is the literal text "a[b]"
+    expect(native.get("a")).toBeNull(); // it has no notion of "a" as a structured container
+    expect(readOf(wire, "a")?.value).toEqual({ b: "1" }); // this module reads the same text as {a: {b: "1"}}
+    expect(findParam(decodeParams(wire), "a[b]")).toBeUndefined(); // and never produces a literal "a[b]" name
+  });
+
+  it("deliberately disagrees on valueless vs empty -- the platform collapses both to an empty string", () => {
+    const empty = new URLSearchParams("a=");
+    const valueless = new URLSearchParams("a");
+    expect(empty.get("a")).toBe("");
+    expect(valueless.get("a")).toBe(""); // indistinguishable on the platform -- both "" and both .has() === true
+    expect(empty.has("a")).toBe(true);
+    expect(valueless.has("a")).toBe(true);
+
+    // This module keeps the distinction the spec explicitly asks for.
+    expect(readOf("a=", "a")?.value).toBe("");
+    expect(readOf("a", "a")?.value).toBeNull();
+  });
+});
