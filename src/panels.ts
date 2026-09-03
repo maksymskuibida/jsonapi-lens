@@ -107,6 +107,13 @@ export async function openLibraryModal(
     mode = "select";
     selected.clear();
     render(latestList);
+    // Mirrors `leaveSelect`'s own refocus below — without it, `render`
+    // rebuilding `body` out from under the just-clicked `Share` button drops
+    // focus to `<body>`, outside the dialog entirely, and `openModal`'s Tab
+    // trap cannot recover it (it only wraps at the first/last focusable
+    // element, so the next Tab restarts from the top of the page, not the
+    // first checkbox). PR #5 review, B2.
+    body.querySelector<HTMLInputElement>(".library__checkbox")?.focus();
   };
 
   const leaveSelect = (): void => {
@@ -309,7 +316,15 @@ export async function openLibraryModal(
       ? t().library.countInBrowser(entries.length)
       : t().library.storedLocally,
     body,
-    footer,
+    // `footer` is an element, so it is truthy even with no children — passing
+    // it unconditionally would have `openModal` wrap an empty `.modal__foot`
+    // bar (padding, border, background) under the empty-library message,
+    // which is not what the pre-T6 modal (no footer key at all) ever showed
+    // (PR #5 review, N11). Deciding this once, from the list this modal
+    // opened with, does not react to deleting every entry back to zero while
+    // it stays open — a much narrower case the review did not raise, and
+    // `openModal`'s API has no way to remove a footer after the fact.
+    footer: entries.length > 0 ? footer : undefined,
     variant: "tall",
   });
 

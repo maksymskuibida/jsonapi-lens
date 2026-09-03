@@ -21,7 +21,7 @@ import { legal } from "./legal/index.js";
 import { domId, parseDomId, resourceKey } from "./ident.js";
 import { openJumpModal } from "./jump.js";
 import { openLibraryModal, openRawModal, openSaveModal, openShortcutsModal } from "./panels.js";
-import { renderBundleImportView } from "./bundle.js";
+import { isWellFormedBundlePayload, renderBundleImportView } from "./bundle.js";
 import { DocumentError, readDocument } from "./parse.js";
 import { resolve as resolvePointer } from "./pointer.js";
 import {
@@ -180,12 +180,45 @@ interface Loaded {
 let current: Loaded | null = null;
 let soloType: string | null = null;
 
-// Is the bundle import view (rather than `current`) what `/view` should show
-// right now? The view's own content lives in `bundleImportEl`, already
-// rendered by `renderBundleImportView` and merely hidden/shown from here —
-// see the "view" branch of `applyRoute` below, and `showView`'s "bundle"
-// case — so Back/Forward onto it needs nothing more than this flag.
-let bundleView = false;
+/**
+ * Is `/view`'s current history entry a bundle-import entry? Review finding
+ * (PR #5, S3): a plain sticky module flag — set once on a bundle load, never
+ * cleared — leaked into a *later, unrelated* navigation: bundle -> Cancel ->
+ * paste -> paste a document -> New document -> Back showed the stale import
+ * view where a document used to be, because the flag had no notion of which
+ * history entry it was ever about.
+ *
+ * "Was this /view entry a bundle?" is a property of the **entry**, not of
+ * the module, so it is answered from `history.state` — stamped once, right
+ * after `loadSharedDocument` replaces the URL — exactly the way
+ * `EntryState` already answers "what was this entry scrolled to?" a few
+ * hundred lines up. A `history.pushState`/`replaceState` elsewhere in this
+ * file that does not spread the bundle marker forward (every other one
+ * passes `null` or a fresh `EntryState`) is what un-marks an entry; nothing
+ * has to remember to clear it by hand.
+ *
+ * The second half of the check — `bundleImportEl.hasChildNodes()` — is what
+ * keeps a *cold* reload of a bundle-marked entry from showing a blank
+ * container: the secret is gone from the URL by the time this state exists
+ * (see `loadSharedDocument`), so a reload cannot re-fetch or re-render the
+ * bundle regardless of what `history.state` still claims, the same way
+ * `current` naturally resets to `null` on reload. Content only ever reaches
+ * `bundleImportEl` via a live `renderBundleImportView` call in this same
+ * page load, so an empty element means exactly "not actually showing".
+ */
+interface BundleEntryState {
+  bundle?: true;
+}
+
+function isBundleEntryShowing(): boolean {
+  const state = history.state as BundleEntryState | null;
+  return state?.bundle === true && bundleImportEl.hasChildNodes();
+}
+
+/** Mark the current history entry as a bundle-import entry, preserving whatever else it already carries. */
+function markBundleEntry(): void {
+  history.replaceState({ ...(history.state as object | null), bundle: true }, "");
+}
 
 /* ---------------------------------------------------------------- theme --- */
 
@@ -1460,9 +1493,18 @@ document.addEventListener("keydown", (event) => {
 /**
  * Load a document that arrived as a share link — or, since T6, a bundle of
  * several. `fetchShare` hands back whichever the link decrypted to;
- * `isBundlePayload` is the one branch point this file needs, and everything
- * a bundle does beyond that (the import list, duplicate detection, writing
- * to the library) lives in `renderBundleImportView`.
+ * `isBundlePayload` alone is *not* enough to trust `payload.documents`
+ * (PR #5 review, B1): it tests only `.kind`, so a version-2 blob crafted
+ * with an extra `kind: "bundle"` field passes both version-2 validation and
+ * this check while carrying no `documents` array at all.
+ * `isWellFormedBundlePayload` is the second, stricter check that catches
+ * exactly that mismatch, thrown as the same readable `ShareError` a
+ * genuinely corrupt bundle already produces — see `t().bundle.errors.corrupt`.
+ * Beyond that, everything a bundle does (the import list, duplicate
+ * detection, writing to the library) lives in `renderBundleImportView`,
+ * which this function now `await`s rather than fires and forgets, so *any*
+ * exception inside it — this one included — reaches the `catch` below
+ * instead of becoming an unhandled rejection behind a blank page.
  */
 async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Promise<void> {
   showView("boot", t().boot.fetchingShare);
@@ -1475,20 +1517,16 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
     navigate(VIEW_PATH, { replace: true });
 
     if (isBundlePayload(payload)) {
+      if (!isWellFormedBundlePayload(payload)) {
+        throw new ShareError(t().bundle.errors.corrupt.headline, t().bundle.errors.corrupt.hint);
+      }
       // The import view is about to occupy /view in place of whatever this
       // tab had open, so the `view` route's usual "is there a current
       // document" check must not find a stale one on a later Back/Forward.
       current = null;
-      bundleView = true;
+      markBundleEntry();
       showView("bundle");
-      void renderBundleImportView(bundleImportEl, payload, {
-        // Neither handler below clears `bundleView`. It is deliberately
-        // sticky once a bundle has loaded in this tab: `current` is checked
-        // first in the `view` branch of `applyRoute`, so once `onOpen` sets
-        // it the flag is already dormant, and clearing it here would only
-        // break the case that matters more — `Cancel`, then Back, which has
-        // no document to fall back on and must still find the import view
-        // rather than falling through to the paste view a second time.
+      await renderBundleImportView(bundleImportEl, payload, {
         onOpen: (entry) => {
           void load(entry.text, entry.label, { persist: true, push: true });
         },
@@ -1504,7 +1542,6 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
       return;
     }
 
-    bundleView = false;
     await load(payload.text, payload.label || t().labels.sharedDocument(route.id), {
       persist: true,
     });
@@ -1549,11 +1586,10 @@ async function applyRoute(): Promise<void> {
     // A Back or Forward onto the bundle import view: its content is already
     // rendered in `bundleImportEl` and merely hidden, exactly like every
     // resource section underneath the document view, so showing it again is
-    // all a traversal needs. A reload starts a fresh module with `bundleView`
-    // back at `false`, which is correct — the secret is already gone from
-    // the URL by the time this state exists, so a reload could not recover
-    // the bundle regardless.
-    if (bundleView) {
+    // all a traversal needs. See `isBundleEntryShowing`'s own comment for why
+    // this is read from the history entry rather than a module flag, and why
+    // that is also what keeps a cold reload from showing an empty container.
+    if (isBundleEntryShowing()) {
       showView("bundle");
       return;
     }

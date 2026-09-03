@@ -58,12 +58,48 @@ export async function mintShareEnvelope(
 ): Promise<Uint8Array<ArrayBuffer>> {
   if (documents.length === 1) {
     const [only] = documents;
+    // `exchange` rides into the sealed blob and up to /api/shares unredacted
+    // (PR #5 review, S5). Harmless today — nothing in this codebase writes an
+    // `exchange` onto a `LibraryEntry` yet, so it is always absent here — but
+    // this is the line that goes live the moment T2 starts populating it.
+    // Redaction has to run *before* this call once that happens; it does not
+    // exist anywhere in this codebase yet, which is exactly why it cannot
+    // happen here. See docs/DECISIONS.md D3.
     return seal(
       { text: only!.text, label: only!.label, savedAt: Date.now(), exchange: only!.exchange },
       secret,
     );
   }
+  // Same warning as above, for every entry in a bundle: each carries its own
+  // `exchange` (BundleEntry, unredacted) into `sealBundle` untouched.
   return sealBundle({ kind: "bundle", savedAt: Date.now(), documents }, secret);
+}
+
+/**
+ * Structural check that a decrypted payload actually has the bundle shape
+ * this module needs — independent of, and stricter than, `crypto.ts`'s
+ * `isBundlePayload`, which by its own design tests only `.kind === "bundle"`
+ * to tell `open`'s two return shapes apart (see that function's doc
+ * comment). That is not the same question as "is this safe to treat as a
+ * bundle": a version-2 blob can be crafted with an extra `kind: "bundle"`
+ * field alongside a valid `text` string, which satisfies version-2
+ * validation *and* `isBundlePayload`'s duck-typing at once — PR #5 review,
+ * B1, reproduced a real blank-page crash this way, since `payload.documents`
+ * is then `undefined` and every function below that assumes an array throws.
+ * `main.ts` calls this immediately after `isBundlePayload` returns true and
+ * before touching `payload.documents` anywhere.
+ */
+export function isWellFormedBundlePayload(payload: BundlePayload): boolean {
+  return (
+    Array.isArray(payload.documents) &&
+    payload.documents.every(
+      (doc) =>
+        typeof doc === "object" &&
+        doc !== null &&
+        typeof doc.label === "string" &&
+        typeof doc.text === "string",
+    )
+  );
 }
 
 /* ---------------------------------------------------------- selection --- */
@@ -124,6 +160,28 @@ export interface ImportOutcome {
  * directly by this build, instead of round-tripping as `{ resources:
  * undefined }`.
  */
+/**
+ * A bundle entry's `resources`/`types`/`shape`/`exchange` are a sender's
+ * self-reported summary, decrypted from a blob this app never generated —
+ * `crypto.ts`'s `isBundleShape` validates only `label`/`text` on each entry
+ * (that is what it means for the envelope to be "a carrier, not a
+ * validator", per T5's own design), so nothing upstream of this function
+ * guarantees these fields are even the right *type*, let alone reasonable
+ * (PR #5 review, S4). No render path was found unsafe — every one of them
+ * goes through `el(..., { text })` — but writing a stranger's arbitrary JSON
+ * into these fields of the victim's own library is a bad default regardless
+ * of whether today's renderer happens to survive it, so each is checked
+ * before `draftFrom` lets it near `saveToLibrary`. A value that fails its
+ * check is dropped, exactly as if the sender had never sent it — the same
+ * "simply omit" contract `store.ts`'s own header comment already documents
+ * for a lens with nothing to report.
+ */
+const MAX_SHAPE_CHARS = 200; // generous: real shapes look like "data[2]" or "errors[3]"
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function draftFrom(doc: BundleEntry): Omit<LibraryEntry, "id"> {
   const draft: Omit<LibraryEntry, "id"> = {
     label: doc.label,
@@ -131,10 +189,18 @@ function draftFrom(doc: BundleEntry): Omit<LibraryEntry, "id"> {
     savedAt: Date.now(),
     bytes: new TextEncoder().encode(doc.text).byteLength,
   };
-  if (doc.resources !== undefined) draft.resources = doc.resources;
-  if (doc.types !== undefined) draft.types = doc.types;
-  if (doc.shape !== undefined) draft.shape = doc.shape;
-  if (doc.exchange !== undefined) draft.exchange = doc.exchange;
+  if (typeof doc.resources === "number" && Number.isFinite(doc.resources)) {
+    draft.resources = doc.resources;
+  }
+  if (typeof doc.types === "number" && Number.isFinite(doc.types)) {
+    draft.types = doc.types;
+  }
+  if (typeof doc.shape === "string" && doc.shape.length <= MAX_SHAPE_CHARS) {
+    draft.shape = doc.shape;
+  }
+  if (isPlainRecord(doc.exchange)) {
+    draft.exchange = doc.exchange;
+  }
   return draft;
 }
 
