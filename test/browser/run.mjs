@@ -445,16 +445,26 @@ try {
     })()`),
   );
 
-  // Both halves matter: `clickWorked` is the precondition (the link itself
+  // Three halves, not two: `clickWorked` is the precondition (the link itself
   // still resolves and opens its target) so a broken click path fails loudly
-  // as itself, not as a confusing false pass on the reload comparison.
+  // as itself, not as a confusing false pass on the reload comparison. The
+  // other two are the state and the place, checked separately on purpose —
+  // this project's own founding defect was a restoration that landed on the
+  // right pixel while the row underneath had silently stopped expanding, a
+  // place assertion passing over a broken state. This scenario is that
+  // lesson's exact mirror, so it does not get to make the same mistake in
+  // the other direction: `chain` is the state (every ancestor open), `height`
+  // is the place (the same box, not a collapsed one at the same scroll
+  // position). Both must hold, and `height` was already being collected and
+  // printed here before this was fixed to actually assert it.
   const clickWorked = before.chain.length > 0 && before.chain.every((open) => open === true);
-  const survivedReload = after.chain.length === before.chain.length && after.chain.every((open) => open === true);
-  const plainOk = clickWorked && survivedReload;
+  const chainSurvived = after.chain.length === before.chain.length && after.chain.every((open) => open === true);
+  const heightSurvived = Math.abs(after.height - before.height) <= 2;
+  const plainOk = clickWorked && chainSurvived && heightSurvived;
   if (!plainOk) failed += 1;
   console.log(
     `${plainOk ? "pass" : "FAIL"}  ${String(after.height).padStart(6)}px  27 plain JSON: a reference 2+ levels deep survives reload` +
-      `\n            chain ${JSON.stringify(before.chain)}->${JSON.stringify(after.chain)}, height ${before.height}->${after.height}, clickWorked=${clickWorked}`,
+      `\n            chain ${JSON.stringify(before.chain)}->${JSON.stringify(after.chain)}, height ${before.height}->${after.height}, clickWorked=${clickWorked}, chainSurvived=${chainSurvived}, heightSurvived=${heightSurvived}`,
   );
 
   console.log(`\n${keys.length + 2 - failed}/${keys.length + 2} passed`);
