@@ -89,6 +89,31 @@ expect_ok() {
   printf 'pass  %-42s ok reported, not flagged\n' "$name"; pass=$((pass+1))
 }
 
+# fresh_repo_with_attack_suite <name> — like fresh_repo, but ADDS a
+# scripts/attack-preflight.sh on feat/x (so it lands in the diff under test,
+# the same way T0's real commit adding the attack suite lands in every
+# branch's diff until T0 merges — see docs/task-specs/T9.md). Its body is a
+# minimal stand-in, not a copy of the real 270-line suite: it plants exactly
+# the substrings the real one plants as fixtures for other checks — a
+# conflict marker, `.only(`, `innerHTML`, `href:`, `scrollY` — so a case
+# built on this helper exercises T9's fix without coupling to the real
+# suite's unrelated content ever drifting out from under it.
+fresh_repo_with_attack_suite() {
+  local d
+  d="$(fresh_repo "$1")"
+  cat > "$d/scripts/attack-preflight.sh" <<'ATTACK'
+#!/usr/bin/env bash
+# Stand-in for the real attack suite's own planted defects (T9).
+printf 'node.innerHTML = payload;\n'
+printf 'href: "${url}"\n'
+printf 'expect(window.scrollY).toBe(0);\n'
+printf 'it.only("x", () => {});\n'
+printf '<<<<<<< HEAD\n'
+ATTACK
+  git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "add attack suite fixture"
+  echo "$d"
+}
+
 # --- 1. fails closed when there is nothing to compare -----------------------
 d=$(fresh_repo nochange)
 expect "fails closed: no changes vs base" "$d" 2 "no changes against"
@@ -265,6 +290,278 @@ else
   printf 'FAIL  %-42s gate cannot read its own template output\n' "template round-trip"
   printf '%s\n' "$out" | grep -i evidence; fail=$((fail+1))
 fi
+
+# --- 13. T9: a diff touching only the attack suite reads clean ----------
+#
+# scripts/attack-preflight.sh plants a literal conflict marker, `.only(`,
+# `innerHTML`, `href:` and `scrollY` as ITS OWN fixtures. Before T9, a diff
+# that so much as touched this file read as a conflict marker, a focused
+# test and an innerHTML violation that do not exist, because those checks
+# scanned every added line in the whole diff rather than the files each
+# invariant actually governs. Assert the ABSENCE of each finding message
+# together with the PRESENCE of the check's own `ok` line for every code
+# invariant that can fire here — never the exit status alone, and never
+# absence alone: a gate stubbed dead (see the dead-gate run in the PR body)
+# emits neither ok nor finding, so an absence-only assertion would pass
+# against it just as happily as against a working gate.
+d=$(fresh_repo_with_attack_suite t9only)
+expect_ok "T9: attack-suite only — conflict markers silent" "$d" \
+  "no conflict markers" "conflict markers in the diff"
+expect_ok "T9: attack-suite only — focused/skipped silent" "$d" \
+  "no focused or skipped tests" "focused or skipped test added"
+expect_ok "T9: attack-suite only — innerHTML silent" "$d" \
+  "no raw HTML assignment added" "innerHTML/insertAdjacentHTML path is in the diff"
+expect_ok "T9: attack-suite only — network call silent" "$d" \
+  "no network call added outside the modules allowed one" "network call was added outside"
+expect_ok "T9: attack-suite only — DOM id silent" "$d" \
+  "no id minted outside ident.ts" "id or fragment may be built outside ident.ts"
+expect_ok "T9: attack-suite only — hardcoded copy silent" "$d" \
+  "no hardcoded copy detected" "possible hardcoded user-facing copy"
+# The href check used to be a bare `note`, with no positive line at all even
+# on a clean diff — which meant this case could only assert its ABSENCE, and
+# an absence-only assertion is exactly what this suite exists to rule out
+# (it passes against a gate stubbed dead as readily as a working one). Fixed
+# by giving the check a real `ok` branch alongside the note, in the same
+# T9 change, so expect_ok can hold it to the same standard as every other
+# invariant here.
+expect_ok "T9: attack-suite only — href note silent" "$d" \
+  "no href built in the diff" "an href is built in the diff"
+
+# --- 14. T9: jsdom-altitude must not fire on the suite's scrollY fixture -
+#
+# The altitude check only runs at all once a real test/ file (outside
+# test/browser/) is in the diff — exactly T1's actual bug report: a real
+# test file plus T0's attack-suite commit landing in the same diff. Case 13
+# above can't exercise this one, because its diff never opens that gate.
+d=$(fresh_repo_with_attack_suite t9altitude)
+mkdir -p "$d/test"
+printf 'import { it, expect } from "vitest";\nit("adds", () => { expect(1 + 1).toBe(2); });\n' \
+  > "$d/test/real.test.ts"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "add an unrelated real vitest test"
+expect_ok "T9: real test + attack suite — altitude silent" "$d" \
+  "no layout assertion under jsdom" "jsdom has no layout engine"
+
+# --- 15. T9: a REAL src/ violation is still found beside the suite ------
+d=$(fresh_repo_with_attack_suite t9realplusattack)
+printf 'node.innerHTML = payload;\n' >> "$d/src/main.ts"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "a real innerHTML violation, alongside the attack suite"
+expect "T9: real src/ innerHTML still found beside the suite" "$d" 1 \
+  "innerHTML/insertAdjacentHTML path is in the diff"
+
+# --- 16. T9: a conflict marker elsewhere is still found beside the suite -
+d=$(fresh_repo_with_attack_suite t9conflictelsewhere)
+printf 'echo hi\n<<<<<<< HEAD\necho conflicted\n=======\necho other\n>>>>>>> branch\n' \
+  > "$d/scripts/other-tool.sh"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "a real conflict marker in a different script"
+expect "T9: conflict marker elsewhere still found beside the suite" "$d" 1 \
+  "conflict markers in the diff"
+
+# --- 17. T9 ceiling: only the exact suite path is exempt ----------------
+# A similarly-named but different script must NOT be exempted — the
+# exclusion is one literal path, not a `scripts/attack-*.sh` glob, so it
+# cannot swallow a future script that merely starts the same way.
+d=$(fresh_repo t9notexempt)
+printf 'echo hi\n<<<<<<< HEAD\n' > "$d/scripts/attack-other.sh"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "conflict marker in a similarly named, non-suite script"
+expect "T9 ceiling: a similarly named script is not exempt" "$d" 1 \
+  "conflict markers in the diff"
+
+# --- 18. T9: innerHTML mentioned as prose in a doc file must not fire ---
+#
+# The bug outlives the attack suite. PROCESS.md and the agent briefs discuss
+# these very invariants in prose (an innerHTML assignment, for instance), so
+# scoping the code invariants to application code has to keep them quiet on
+# a doc-only diff too — otherwise every future edit to that paragraph would
+# misreport a real violation, forever, long after T0 merges. No attack-suite
+# fixture is involved here at all; this is the plain fresh_repo.
+d=$(fresh_repo t9docprose)
+mkdir -p "$d/docs"
+cat > "$d/docs/PROCESS.md" <<'DOC'
+# Process
+
+Every interpolation on an innerHTML path goes through escapeHtml.
+DOC
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "document the innerHTML rule in prose"
+expect_ok "T9: innerHTML mentioned in a doc file — invariant silent" "$d" \
+  "no raw HTML assignment added" "innerHTML/insertAdjacentHTML path is in the diff"
+
+# --- 19. T9: the PR's own base wins over a stale origin/main ------------
+#
+# This repository's real implementer branches fork from a shared integration
+# branch rather than from main directly, so main can lag behind by an entire
+# unmerged commit's worth of unrelated changes — this is the deeper cause
+# behind why the attack suite's fixtures reach every branch's diff in the
+# first place. Simulated here: an "integration" commit lands on top of the
+# shared base and adds a real (if contrived) innerHTML hit that origin/main
+# does not have; feat/x is then rebuilt ON TOP of integration, the way this
+# repo's branches actually are, adding one small, unrelated change of its
+# own. If the gate fell back to stale origin/main it would report the
+# integration commit's innerHTML as part of THIS diff. Resolving the PR's
+# real base instead excludes it. `gh` is stubbed on PATH so this does not
+# depend on network access or a real PR.
+d=$(fresh_repo t9prbase)
+git -C "$d" checkout -q -b integration
+printf 'node.innerHTML = integrationNoise;\n' > "$d/src/other.ts"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "integration commit origin/main does not have yet"
+git -C "$d" update-ref refs/remotes/origin/integration integration
+git -C "$d" checkout -q -B feat/x integration
+echo "// the actual feature change" >> "$d/src/main.ts"
+git -C "$d" commit -qam "the actual feature commit"
+
+FAKEBIN="$(mktemp -d)"
+cat > "$FAKEBIN/gh" <<'FAKEGH'
+#!/usr/bin/env bash
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  echo "integration"
+  exit 0
+fi
+exit 1
+FAKEGH
+chmod +x "$FAKEBIN/gh"
+out="$(cd "$d" && PATH="$FAKEBIN:$PATH" ./scripts/review-preflight.sh 42 2>&1)"
+rm -rf "$FAKEBIN"
+
+if printf '%s' "$out" | grep -qE 'comparing against the base branch of PR #42 \(origin/integration\)' \
+   && printf '%s' "$out" | grep -qE '^  ok .*no raw HTML assignment added' \
+   && ! printf '%s' "$out" | grep -qE 'innerHTML/insertAdjacentHTML path is in the diff'; then
+  printf 'pass  %-42s used the PR base, not stale origin/main\n' "T9: PR base-ref wins over stale origin/main"
+  pass=$((pass+1))
+else
+  printf 'FAIL  %-42s did not resolve or use the PR base correctly\n' "T9: PR base-ref wins over stale origin/main"
+  printf '%s\n' "$out"
+  fail=$((fail+1))
+fi
+
+# --- 20. T9: exhausting every base-ref candidate still fails closed -----
+d=$(fresh_repo t9baseexhausted)
+git -C "$d" update-ref -d refs/remotes/origin/main
+echo "y" >> "$d/src/main.ts"; git -C "$d" commit -qam x
+# A PR number is given, but this throwaway repo has no real GitHub remote,
+# so even the most-trusted source resolves to nothing — real gh fails fast
+# and cleanly against a repo like this (verified by hand: "no git remotes
+# found", exit 1, no network round trip, no prompt — and if gh is not
+# installed at all, the resolver skips straight past it). The chain must
+# still fall through the unconfigured upstream to origin/main, find that
+# missing too, and fail closed rather than silently reporting a pass.
+out="$(cd "$d" && ./scripts/review-preflight.sh 999999 2>&1)"; code=$?
+if [ "$code" = 2 ] && printf '%s' "$out" | grep -qE "cannot resolve origin/main"; then
+  printf 'pass  %-42s exhausted chain still fails closed\n' "T9: base-ref chain exhausted, even with a PR"
+  pass=$((pass+1))
+else
+  printf 'FAIL  %-42s exit %s — wanted 2 with cannot resolve origin/main\n' \
+    "T9: base-ref chain exhausted, even with a PR" "$code"
+  fail=$((fail+1))
+fi
+
+# --- 21. T9 ceiling: a same-named upstream is not mistaken for a base ---
+#
+# `git push -u origin <branch>` is how a branch in this repository actually
+# reaches the remote — including this one — and it sets @{u} to that same
+# branch's own copy of itself, not to whatever it was forked from. Found
+# empirically: running this exact resolver, on this exact branch, right
+# after pushing it, silently reported "no changes against
+# origin/fix/T9-preflight-self-fixtures" instead of the real diff, because
+# @{u} was trusted without checking what it actually pointed at. This case
+# reproduces that shape (a real `origin` remote is needed for
+# --set-upstream-to to accept a tracking ref; fresh_repo does not configure
+# one, so it is added just for this case) and asserts the resolver falls
+# through to origin/main instead of trusting a same-named upstream.
+d=$(fresh_repo t9selfupstream)
+git -C "$d" remote add origin /nonexistent/dummy.git
+git -C "$d" update-ref refs/remotes/origin/feat/x feat/x
+git -C "$d" branch --set-upstream-to=origin/feat/x feat/x >/dev/null
+echo "// a real change" >> "$d/src/main.ts"; git -C "$d" commit -qam x
+out="$(cd "$d" && ./scripts/review-preflight.sh 2>&1)"
+if printf '%s' "$out" | grep -qE 'comparing against origin/main' \
+   && ! printf '%s' "$out" | grep -qE "comparing against this branch's upstream"; then
+  printf 'pass  %-42s same-named upstream discarded, fell through\n' "T9 ceiling: same-named upstream is not a base"
+  pass=$((pass+1))
+else
+  printf 'FAIL  %-42s trusted a same-named upstream as a base\n' "T9 ceiling: same-named upstream is not a base"
+  printf '%s\n' "$out"
+  fail=$((fail+1))
+fi
+
+# --- 22. T9: a real innerHTML in index.html is still found beside the ---
+#          suite (review B1) ------------------------------------------
+#
+# index.html ships as the actual document — vite build's output — with real
+# hrefs, real DOM ids and an inline <script>. B1 in review: DIFF_SRC read
+# only `src`, so an innerHTML assignment or an href added inside index.html
+# went uncaught, a real regression on the project's highest-severity check.
+d=$(fresh_repo_with_attack_suite t9indexhtml)
+cat > "$d/index.html" <<'EOF'
+<!doctype html>
+<script>node.innerHTML = payload;</script>
+EOF
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm "a real innerHTML in index.html, alongside the attack suite"
+expect "T9: innerHTML in index.html still found beside the suite" "$d" 1 \
+  "innerHTML/insertAdjacentHTML path is in the diff"
+
+# --- 23. T9: a layout assertion in test/bundle.test.ts is caught --------
+#          (review B2) --------------------------------------------------
+#
+# B2 in review: the gate condition `^test/[^b]` excluded every test file
+# whose name BEGINS WITH "b" — bundle.test.ts, base64.test.ts — not
+# test/browser/, so a layout assertion in one of those files was silently
+# never scanned. T6 is literally "share bundle".
+d=$(fresh_repo t9bundletest)
+mkdir -p "$d/test"
+printf 'expect(window.scrollY).toBe(0);\n' > "$d/test/bundle.test.ts"
+git -C "$d" add -A >/dev/null; git -C "$d" commit -qm x
+expect "T9: layout assertion in test/bundle.test.ts caught" "$d" 1 \
+  "jsdom has no layout engine"
+
+# --- 24. T9 ceiling: a differently-named upstream containing HEAD is ----
+#         still not mistaken for a base (review S1) ---------------------
+#
+# The same-named-upstream fix (case 21) compares NAMES, so it does not
+# cover checking this exact branch out locally under a DIFFERENT name
+# (`git checkout -b review-4 origin/<branch>`) — reproduced live, on this
+# exact PR branch, during review: @{u} still names the original upstream,
+# under its original name, and HEAD is byte-identical to it. The condition
+# that actually matters is identity, not naming: does the candidate already
+# contain HEAD. Built here without a rename by pointing a differently-named
+# ref at HEAD's own commit, which is the same relationship.
+d=$(fresh_repo t9renamedupstream)
+git -C "$d" remote add origin /nonexistent/dummy.git
+echo "// a real change" >> "$d/src/main.ts"; git -C "$d" commit -qam x
+git -C "$d" update-ref refs/remotes/origin/upstream-branch feat/x
+git -C "$d" branch --set-upstream-to=origin/upstream-branch feat/x >/dev/null
+out="$(cd "$d" && ./scripts/review-preflight.sh 2>&1)"
+if printf '%s' "$out" | grep -qE 'comparing against origin/main' \
+   && ! printf '%s' "$out" | grep -qE "comparing against this branch's upstream"; then
+  printf 'pass  %-42s renamed-upstream identity discarded, fell through\n' "T9 ceiling: differently-named upstream is not a base"
+  pass=$((pass+1))
+else
+  printf 'FAIL  %-42s trusted a differently-named upstream that already contains HEAD\n' "T9 ceiling: differently-named upstream is not a base"
+  printf '%s\n' "$out"
+  fail=$((fail+1))
+fi
+
+# --- 25. T9 ceiling: a legitimate scrollY assertion in test/browser/ is ----
+#         NOT code-invariant-flagged (S5) --------------------------------
+#
+# Deleting `':!test/browser'` from both DIFF_TEST_UNIT and the gate
+# condition below it (review-preflight.sh) leaves the suite at 44/44 green
+# — no case here plants anything under test/browser/, so nothing notices
+# the gate widening back to scan it. That mutation re-introduces T1's
+# original false positive: a real `window.scrollY` read in
+# test/browser/nav-scenarios.js, which is exactly where such an assertion
+# belongs, gets flagged as if it were a vitest layout assertion. This case
+# opens the gate with a real, unrelated vitest file (so the outer condition
+# is satisfied) while planting the scrollY read only under test/browser/,
+# and asserts the check's own `ok` line — not just the absence of the
+# finding, per this suite's own rule.
+d=$(fresh_repo t9browserscrollok)
+mkdir -p "$d/test/browser"
+printf 'import { it, expect } from "vitest";\nit("adds", () => { expect(1 + 1).toBe(2); });\n' \
+  > "$d/test/real.test.ts"
+printf 'window.scrollY;\nexpect(window.scrollY).toBe(0);\n' > "$d/test/browser/nav-scenarios.js"
+git -C "$d" add -A >/dev/null
+git -C "$d" commit -qm "a real vitest test plus a legitimate browser scroll assertion"
+expect_ok "T9 ceiling: scrollY in test/browser/ is not flagged" "$d" \
+  "no layout assertion under jsdom" "jsdom has no layout engine"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 rm -rf "$WORK"

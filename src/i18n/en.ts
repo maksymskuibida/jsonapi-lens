@@ -304,10 +304,12 @@ export const en = {
           return "This document has both `data` and `errors`, which JSON:API forbids together.";
         case "collection-array":
           return `The document is a bare array of ${f.n(value.length)} ${f.plural(value.length, { one: "item", other: "items" })}.`;
-        case "ndjson-lines":
-          return value.malformedLine === null
-            ? `Read as ${f.n(value.records)} JSON Lines ${f.plural(value.records, { one: "record", other: "records" })}.`
-            : `Read as ${f.n(value.records)} JSON Lines ${f.plural(value.records, { one: "record", other: "records" })}; line ${f.n(value.malformedLine)} did not parse and was skipped.`;
+        case "ndjson-lines": {
+          const base = `Read as ${f.n(value.records)} JSON Lines ${f.plural(value.records, { one: "record", other: "records" })}`;
+          if (value.skipped === 0) return `${base}.`;
+          if (value.skipped === 1) return `${base}; line ${f.n(value.malformedLine!)} did not parse and was skipped.`;
+          return `${base}; ${f.n(value.skipped)} lines did not parse and were skipped, the first at line ${f.n(value.malformedLine!)}.`;
+        }
         case "plain-empty-object":
           return "The document is an empty object.";
         case "plain-scalar":

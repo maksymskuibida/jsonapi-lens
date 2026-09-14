@@ -104,40 +104,63 @@ describe("detectShape", () => {
     it("reads a stream of JSON Lines as one collection of n records", () => {
       const result = detectShape('{"a":1}\n{"a":2}\n{"a":3}');
       expect(result.shape).toBe("ndjson");
-      expect(result.evidence).toEqual({ kind: "ndjson-lines", records: 3, malformedLine: null });
+      expect(result.evidence).toEqual({
+        kind: "ndjson-lines",
+        records: 3,
+        malformedLine: null,
+        skipped: 0,
+      });
       expect(result.value).toEqual([{ a: 1 }, { a: 2 }, { a: 3 }]);
     });
 
     it("tolerates a trailing newline", () => {
       const result = detectShape('{"a":1}\n{"a":2}\n');
       expect(result.shape).toBe("ndjson");
-      expect(result.evidence).toEqual({ kind: "ndjson-lines", records: 2, malformedLine: null });
+      expect(result.evidence).toEqual({
+        kind: "ndjson-lines",
+        records: 2,
+        malformedLine: null,
+        skipped: 0,
+      });
     });
 
     it("tolerates a blank line in the middle", () => {
       const result = detectShape('{"a":1}\n\n{"a":2}\n');
       expect(result.shape).toBe("ndjson");
-      expect(result.evidence).toEqual({ kind: "ndjson-lines", records: 2, malformedLine: null });
+      expect(result.evidence).toEqual({
+        kind: "ndjson-lines",
+        records: 2,
+        malformedLine: null,
+        skipped: 0,
+      });
     });
 
     it("reports a malformed line's number and reads the rest", () => {
       const result = detectShape('{"a":1}\nnot json\n{"a":3}');
       expect(result.shape).toBe("ndjson");
-      expect(result.evidence).toEqual({ kind: "ndjson-lines", records: 2, malformedLine: 2 });
+      expect(result.evidence).toEqual({
+        kind: "ndjson-lines",
+        records: 2,
+        malformedLine: 2,
+        skipped: 1,
+      });
       expect(result.value).toEqual([{ a: 1 }, { a: 3 }]);
     });
 
-    // Round 2 review, blocker: the NDJSON fallback tolerated any number of
-    // malformed lines, so it could hijack a document that was plainly meant
-    // to be read as one whole thing and silently discard most of it — the
-    // opposite of "one malformed line reports its line number and reads the
-    // rest", which promises exactly one.
+    // Round 2 review, blocker (then): the NDJSON fallback tolerated any
+    // number of malformed lines, so it could hijack a document that was
+    // plainly meant to be read as one whole thing. Fixed then with
+    // `records >= 2 && malformedCount <= 1` — which round 3's review showed
+    // was the wrong axis: a count cannot tell "a broken document with a few
+    // lines that happen to parse alone" from "a genuine stream with a few
+    // bad lines," because both can produce the same count. Kept here,
+    // unmodified fixtures, now gated on the round-3 rule instead (below):
+    // the first non-blank line must parse.
 
     it("does not hijack a comma-broken JSON:API payload into a false NDJSON reading", () => {
-      // Only the two innermost objects happen to stand alone as valid JSON;
-      // the four surrounding lines (`{`, `"data": [`, `]`, `}`) do not, which
-      // is four malformed lines, not one. This must fall through to the
-      // ordinary parse error instead of reporting "2 records".
+      // The opener `{` on its own line fails to parse alone — that alone is
+      // enough to reject this, regardless of how many later lines
+      // (`{"type":"a","id":"2"}`, etc.) happen to stand alone as valid JSON.
       const result = detectShape(
         '{\n  "data": [\n    {"type":"a","id":"1"}\n    {"type":"a","id":"2"}\n  ]\n}',
       );
@@ -147,19 +170,59 @@ describe("detectShape", () => {
     });
 
     it("does not present a truncated array as a one-record stream, silently dropping the rest", () => {
-      // `[` and `1,` both fail to parse on their own; only the trailing `2`
-      // does. One surviving record is not "at least two", so this must not
-      // read as NDJSON at all — the `1` would otherwise vanish with nothing
-      // reported.
       const result = detectShape("[\n1,\n2");
       expect(result.shape).toBe("plain");
       expect(result.evidence).toEqual({ kind: "plain-unparseable" });
     });
 
-    it("refuses the NDJSON reading once more than one line fails to parse", () => {
-      const result = detectShape('{"a":1}\nnope\n{"a":2}\nnope again\n{"a":3}');
+    // Round 3 review, blocker: the round-2 count-based gate
+    // (`records >= 2 && malformedCount <= 1`) still let a broken document
+    // through whenever enough of its fragments happened to parse alone on
+    // their own line — and it introduced a new regression, refusing a large
+    // legitimate log stream outright the moment it had more than one bad
+    // line. Both are fixed by gating on the first non-blank line alone.
+
+    it("does not read a truncated array with no commas as a multi-record NDJSON stream", () => {
+      // `[` fails to parse alone; `1`, `2` and `3` each succeed. The old
+      // count-based gate accepted this (3 records, 1 malformed line) even
+      // though the document was plainly one truncated array, not a stream —
+      // the opener is silently dropped with nothing reported.
+      const result = detectShape("[\n1\n2\n3");
       expect(result.shape).toBe("plain");
       expect(result.evidence).toEqual({ kind: "plain-unparseable" });
+    });
+
+    it("does not silently drop the first resource of a comma-broken JSON:API array", () => {
+      // The opener shares its line with the first resource this time —
+      // `{"data":[{"type":"a","id":"1"}` fails to parse alone, but the two
+      // resources after it each stand alone. The old gate accepted this as
+      // "2 records" with resource "1" simply gone and nothing said about it;
+      // gating on the first line catches this shape regardless of where the
+      // opener falls relative to the first resource.
+      const result = detectShape(
+        '{"data":[{"type":"a","id":"1"}\n{"type":"a","id":"2"}\n{"type":"a","id":"3"}',
+      );
+      expect(result.shape).toBe("plain");
+      expect(result.evidence).toEqual({ kind: "plain-unparseable" });
+    });
+
+    it("still reads a legitimate log stream with several bad lines, and says how many were dropped", () => {
+      // The round-2 gate refused this outright once a second bad line
+      // appeared (`malformedCount <= 1`), which is the opposite failure: a
+      // real, multi-thousand-line NDJSON export with a couple of truncated
+      // lines is the ordinary case, not a reason to refuse reading any of
+      // it. The first line is a valid record, so this is accepted, and the
+      // total skipped count is carried (not just the first bad line) so the
+      // evidence can say how much was dropped.
+      const result = detectShape('{"a":1}\nnope\n{"a":2}\nnope again\n{"a":3}');
+      expect(result.shape).toBe("ndjson");
+      expect(result.evidence).toEqual({
+        kind: "ndjson-lines",
+        records: 3,
+        malformedLine: 2,
+        skipped: 2,
+      });
+      expect(result.value).toEqual([{ a: 1 }, { a: 2 }, { a: 3 }]);
     });
   });
 

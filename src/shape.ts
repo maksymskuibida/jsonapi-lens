@@ -120,33 +120,40 @@ function detectStructural(value: JsonValue): { shape: Shape; evidence: ShapeEvid
  * Split into lines and parse each one as JSON, tolerating blank lines
  * (including a trailing one) and reporting the first line that does not
  * parse rather than giving up at it — "one malformed line reports its line
- * number and reads the rest." `malformedCount` is the total, not just
- * whether `malformedLine` is set, because the caller's plausibility check
- * needs to tell "one bad line" from "several" — `malformedLine` alone only
- * ever names the first.
+ * number and reads the rest," generalised to any number of them: a real log
+ * stream with a couple of truncated lines is the ordinary case for NDJSON,
+ * not a reason to refuse the whole file. `malformedCount` is the total, kept
+ * so the evidence can say *how much* was dropped, not only *where* the first
+ * fault was. `firstLineParsed` is what the caller actually gates on — see
+ * `detectShape`'s comment for why "the first non-blank line parses" is the
+ * right question and a total count is not.
  */
 function parseNdjsonLines(text: string): {
   records: JsonValue[];
   malformedLine: number | null;
   malformedCount: number;
+  firstLineParsed: boolean;
 } {
   const lines = text.split(/\r\n|\r|\n/);
   const records: JsonValue[] = [];
   let malformedLine: number | null = null;
   let malformedCount = 0;
+  let firstLineParsed: boolean | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!.trim();
     if (line === "") continue;
     try {
       records.push(JSON.parse(line) as JsonValue);
+      firstLineParsed ??= true;
     } catch {
       malformedCount++;
       if (malformedLine === null) malformedLine = i + 1;
+      firstLineParsed ??= false;
     }
   }
 
-  return { records, malformedLine, malformedCount };
+  return { records, malformedLine, malformedCount, firstLineParsed: firstLineParsed === true };
 }
 
 /**
@@ -168,21 +175,32 @@ export function detectShape(text: string): ShapeDetection {
     return { shape, evidence, value };
   }
 
-  // A reading this permissive would rather hijack a broken single document
-  // than admit it cannot parse one: a comma-broken JSON:API payload has most
-  // of its lines fail (only the innermost objects happen to stand alone as
-  // valid JSON), and a truncated array can leave exactly one bare scalar
-  // line behind. Both must fall through to the ordinary parse error below,
-  // not be presented as a readable JSON-Lines stream that quietly dropped
-  // everything else. "At most one" is the spec's own tolerance — a real
-  // NDJSON stream with a single typo'd line still reads as the rest of it —
-  // and "at least two records" keeps one stray valid-looking line from
-  // outvoting a document that was plainly meant to be parsed whole.
+  // Gated on one question: does the first non-blank line parse on its own?
+  // A genuine NDJSON stream essentially always has a valid first record — a
+  // log line, an export row. A broken single document essentially always has
+  // its opener (`{`, `[`, or the start of one) on line 1, whether or not a
+  // pretty-printer put later fragments of it on lines that happen to parse
+  // alone. A total malformed-line *count* cannot tell these apart: a
+  // comma-broken JSON:API payload with its opener on its own line, or with
+  // the opener sharing a line with the first resource, both fail this test
+  // the same way regardless of how many of the remaining lines happen to
+  // stand alone as valid JSON — including the case that used to slip
+  // through here, where all but one line failed except that the *survivors*
+  // outnumbered the failures. A count-based ceiling also over-corrects in
+  // the other direction: a 1,000-line log with a couple of truncated lines
+  // is the ordinary shape of a real NDJSON export, not a reason to refuse
+  // reading any of it — so there is no cap on how many *later* lines may
+  // fail, only on whether the very first one does.
   const ndjson = parseNdjsonLines(trimmed);
-  if (ndjson.records.length >= 2 && ndjson.malformedCount <= 1) {
+  if (ndjson.firstLineParsed) {
     return {
       shape: "ndjson",
-      evidence: { kind: "ndjson-lines", records: ndjson.records.length, malformedLine: ndjson.malformedLine },
+      evidence: {
+        kind: "ndjson-lines",
+        records: ndjson.records.length,
+        malformedLine: ndjson.malformedLine,
+        skipped: ndjson.malformedCount,
+      },
       value: ndjson.records,
     };
   }

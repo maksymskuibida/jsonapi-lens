@@ -218,6 +218,106 @@ describe("buildJsonIndex — identity: a compound reference key needs a real bou
     );
     expect(index.referenceAt.get("/refs/0/widget_id")).toMatchObject({ targetPointer: "/widgets/0" });
   });
+
+  // Round 4 review (S6): the boundary rule closed the wrong-link cases above
+  // but was too strict in two directions it did not need to be, and the
+  // reviewer's own split is adopted here — two of three are fixed, the
+  // third is recorded as deliberate rather than chased.
+
+  it("recognises a dot or a space as a separator, alongside underscore and hyphen", () => {
+    // A dot carries no ambiguity cost at all — `user.id` cannot be confused
+    // with `valid` the way a bare boundary-less suffix can — and it is
+    // about to become an ordinary shape: T2's parameter decoder hands this
+    // module flattened and bracketed-filter keys, which use `.` as their
+    // own separator.
+    const index = buildJsonIndex(
+      {
+        users: [{ id: 1, name: "a" }],
+        a: [{ "user.id": 1 }],
+        b: [{ "user id": 1 }],
+        c: [{ "USER.ID": 1 }],
+      } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/a/0/user.id")).toMatchObject({ resolution: "resolved" });
+    expect(index.referenceAt.get("/b/0/user id")).toMatchObject({ resolution: "resolved" });
+    expect(index.referenceAt.get("/c/0/USER.ID")).toMatchObject({ resolution: "resolved" });
+  });
+
+  it("recognises a non-ASCII lower-case letter as a camelCase boundary, not only a-z", () => {
+    // This app ships a German and a Ukrainian catalogue; an identity rule
+    // that only ever recognised `[a-z0-9]` silently worked on every English
+    // or German key spelled entirely in ASCII (`benutzerId`) and never on an
+    // entirely ordinary camelCase key written in the language the app is
+    // localised into. Collection names are given singular, matching the
+    // reference's own scope exactly, so this stays a test of the camelCase
+    // boundary alone — `canonicalScope` only strips English `s`/`es`/`ies`
+    // endings and does not know Ukrainian plural morphology (`користувачі`,
+    // the real plural of `користувач`, would not canonicalise to it), which
+    // is a separate, undocumented gap this test is not the place to chase.
+    const index = buildJsonIndex(
+      {
+        // "user" in Ukrainian, singular; ends in the Cyrillic letter "ч".
+        користувач: [{ id: 1, name: "a" }],
+        a: [{ користувачId: 1 }],
+        // "foot" in German, singular; ends in "ß", outside [a-z0-9].
+        fuß: [{ id: 3, name: "b" }],
+        b: [{ fußId: 3 }],
+      } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/a/0/користувачId")).toMatchObject({
+      resolution: "resolved",
+      targetPointer: "/користувач/0",
+    });
+    expect(index.referenceAt.get("/b/0/fußId")).toMatchObject({
+      resolution: "resolved",
+      targetPointer: "/fuß/0",
+    });
+  });
+
+  it("leaves userid, USERID, userids and uid deliberately unmatched", () => {
+    // No separator and no case change means nothing distinguishes these
+    // from `valid` without a dictionary of real container names — the
+    // reviewer's own framing: this is the correct trade, not a limitation.
+    // `uid` is the same shape (no separator, no case boundary) and, as a
+    // side effect of the boundary fix, no longer canonicalises to the
+    // never-matchable scope `u` the way it did before round 4 — it simply
+    // is not an identity candidate at all now.
+    const index = buildJsonIndex(
+      {
+        users: [{ id: 1, name: "a" }],
+        a: [{ userid: 1 }],
+        b: [{ USERID: 1 }],
+        c: [{ userids: [1] }],
+        d: [{ uid: 1 }],
+      } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/a/0/userid")).toBeUndefined();
+    expect(index.referenceAt.get("/b/0/USERID")).toBeUndefined();
+    expect(index.referenceAt.get("/c/0/userids")).toBeUndefined();
+    expect(index.referenceAt.get("/d/0/uid")).toBeUndefined();
+    expect(index.dangling).toEqual([]);
+  });
+
+  it("still yields scope u for the explicitly-separated u_id, unlike bare uid", () => {
+    // A short stem is not the same defect as a missing separator — `u_id`
+    // carries a real separator, which is real evidence, however short the
+    // word either side of it.
+    const index = buildJsonIndex(
+      { u: [{ id: 7, name: "a" }], refs: [{ u_id: 7 }] } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/refs/0/u_id")).toMatchObject({
+      resolution: "resolved",
+      targetPointer: "/u/0",
+    });
+  });
 });
 
 describe("buildJsonIndex — identity: no references means no identity, however many definitions", () => {

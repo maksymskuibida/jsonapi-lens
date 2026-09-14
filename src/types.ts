@@ -2,7 +2,7 @@
  * Minimal structural types for the parts of JSON:API this viewer reads —
  * and, since T1, for a plain-JSON document too. `Lens` is the seam: the view
  * layer consumes one or the other, `DocumentIndex` unchanged and `JsonIndex`
- * new. See `docs/task-specs/T1.md` and `docs/DECISIONS.md` D4.
+ * new. See `docs/task-specs/T1.md` and `docs/DECISIONS.md` D3.
  */
 
 export type JsonValue =
@@ -165,7 +165,14 @@ export type ShapeEvidence =
   | { kind: "envelope-shape" }
   | { kind: "envelope-conflict" }
   | { kind: "collection-array"; length: number }
-  | { kind: "ndjson-lines"; records: number; malformedLine: number | null }
+  | {
+      kind: "ndjson-lines";
+      records: number;
+      /** Line number of the first line that failed to parse, or `null` if none did. */
+      malformedLine: number | null;
+      /** Total lines that failed to parse — not just whether one did, so the evidence can say how much was dropped. Always 0 when `malformedLine` is `null`. */
+      skipped: number;
+    }
   | { kind: "plain-empty-object" }
   | { kind: "plain-scalar" }
   | { kind: "plain-object" }

@@ -273,10 +273,15 @@ export const uk: Messages = {
           return "Цей документ має водночас `data` і `errors`, а JSON:API забороняє поєднувати їх.";
         case "collection-array":
           return `Документ — це голий масив, ${f.n(value.length)} ${f.plural(value.length, { one: "елемент", few: "елементи", many: "елементів", other: "елемента" })}.`;
-        case "ndjson-lines":
-          return value.malformedLine === null
-            ? `Прочитано як ${f.n(value.records)} ${f.plural(value.records, { one: "запис", few: "записи", many: "записів", other: "запису" })} JSON Lines.`
-            : `Прочитано як ${f.n(value.records)} ${f.plural(value.records, { one: "запис", few: "записи", many: "записів", other: "запису" })} JSON Lines; рядок ${f.n(value.malformedLine)} не розібрався і був пропущений.`;
+        case "ndjson-lines": {
+          const base = `Прочитано як ${f.n(value.records)} ${f.plural(value.records, { one: "запис", few: "записи", many: "записів", other: "запису" })} JSON Lines`;
+          if (value.skipped === 0) return `${base}.`;
+          if (value.skipped === 1) {
+            return `${base}; рядок ${f.n(value.malformedLine!)} не розібрався і був пропущений.`;
+          }
+          const lines = f.plural(value.skipped, { one: "рядок", few: "рядки", many: "рядків", other: "рядка" });
+          return `${base}; ${f.n(value.skipped)} ${lines} не розібралися і були пропущені, перший — рядок ${f.n(value.malformedLine!)}.`;
+        }
         case "plain-empty-object":
           return "Документ — це порожній об’єкт.";
         case "plain-scalar":

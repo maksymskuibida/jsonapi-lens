@@ -129,6 +129,13 @@ called — so it matches the rest of the UI. `/imprint`, `/legal`, `/datenschutz
   would put the paste view back over the top of it, which looks exactly like the paste having been
   ignored. A person cannot paste and click inside that window, but a test can, so both `boot` and
   `applyRoute` check for it rather than being accidentally right.
+- **A loaded document and an empty `#doc` is a normal state.** Landing on `/` with a document stored,
+  `boot()` parses it so "Back to document" is instant but deliberately stays on the paste view —
+  nothing is rendered until you ask for it. So `showDocument()` owns the only `showView("doc")` in
+  the file: it builds when `#doc` is empty and reveals otherwise, and the one call site that always
+  has a new document renders it outright first. Getting that wrong gave a blank page below the
+  topbar, with the right URL, the right title and no console error, on the most ordinary flow there
+  is — leave the tab, come back, click the button.
 - **A pointer with no matching resource** renders as an explicit struck-through "not in document"
   marker, and is counted in the summary. That distinction is usually the thing being diagnosed.
 - **`scroll-margin-top`** on every anchor target, or the sticky header and sticky group header would

@@ -6,7 +6,7 @@
  * so. Two defects already shipped in this release from exactly that shape of
  * mistake — a heuristic that looked right and picked silently — so every
  * ambiguous read here keeps its alternative attached as data, for T2b to
- * render and let a person choose. See `docs/DECISIONS.md` D5 for the binding
+ * render and let a person choose. See `docs/DECISIONS.md` D4 for the binding
  * version of this rule — what T3's importers and T4's diagnostics may and may
  * not assume about a decoded parameter.
  *
@@ -483,7 +483,7 @@ function buildLeafNode(pairs: InternalPair[]): BuiltNode {
   const alternatives: ParamAlternative[] = [];
   // Each repetition keeps its own reading's convention — a plain
   // `usedConventions: ["repeated-key"]` here would silently drop "comma" from
-  // `a=1,2&a=3`, which is exactly the D5 violation this line exists to avoid.
+  // `a=1,2&a=3`, which is exactly the D4 violation this line exists to avoid.
   const usedConventions = new Set<ParamConvention>(["repeated-key"]);
   decoded.forEach((d, i) => {
     if (d) {
@@ -533,7 +533,7 @@ function buildArrayFromGroups(groups: ArrayGroup[], depth: number): BuiltNode {
  *     genuinely ambiguous — PHP and `qs` give the indices priority; this
  *     module gives wire order priority, as its most literal,
  *     least-surprising reading — but *either* choice made silently, with the
- *     other simply discarded, is the exact "guessed away" failure D5
+ *     other simply discarded, is the exact "guessed away" failure D4
  *     forbids. So wire order is `value`, and the indices-first ordering is
  *     attached as a `[]`-pathed `alternative` whenever it would actually
  *     read differently.

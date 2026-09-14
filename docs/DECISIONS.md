@@ -145,9 +145,7 @@ Waiting for T2 to land before starting T5 — rejected outright, since it defeat
 T1 and T5 as a wave. `docs/STATUS.md` §1a's dependency graph (`T5 → {T2, T6, T7}`) requires T5 to ship
 first, and this module is what makes that possible without T5 guessing at T2's design.
 
----
-
-## D4 · Identity inference is scoped by container name, and would rather miss a link than mint a wrong one
+## D3 · Identity inference is scoped by container name, and would rather miss a link than mint a wrong one
 
 **Date:** 2026-09-03 · **Settles:** what makes a repeated value in plain JSON "the same identity",
 for `src/json-index.ts` and for any later task that reads or extends it (T2's request-scoped
@@ -217,7 +215,7 @@ drawing any.
 
 ---
 
-## D5 · A decoded parameter is a reading plus its alternatives, never a resolved scalar alone
+## D4 · A decoded parameter is a reading plus its alternatives, never a resolved scalar alone
 
 > **Numbering note:** assigned as the next free slot as of this PR (D3 is reserved by T6's
 > not-yet-merged branch; D4 is T1's, already on `integration/wave1`). Confirm this does not collide

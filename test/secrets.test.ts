@@ -53,8 +53,18 @@ describe("isSecretHeaderName", () => {
 
 describe("detectCredentialShape", () => {
   it("recognises a JWT shape — three base64url segments — without decoding it", () => {
-    expect(detectCredentialShape("abc.def.ghi")).toEqual({ kind: "jwt" });
-    expect(detectCredentialShape("Bearer abc.def.ghi")).toEqual({ kind: "jwt" });
+    // Segments are >= 10 base64url characters each: `JWT_SHAPE_RE` carries a
+    // floor precisely so `1.2.3`, `my.file.txt` and `en.US.utf8` are not read
+    // as tokens and silently redacted. `abc.def.ghi` is below it by design.
+    const jwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJlXw";
+    expect(detectCredentialShape(jwt)).toEqual({ kind: "jwt" });
+    expect(detectCredentialShape(`Bearer ${jwt}`)).toEqual({ kind: "jwt" });
+  });
+
+  it("does not read an ordinary three-part dotted value as a JWT", () => {
+    expect(detectCredentialShape("1.2.3")).toBeNull();
+    expect(detectCredentialShape("my.file.txt")).toBeNull();
+    expect(detectCredentialShape("en.US.utf8")).toBeNull();
   });
 
   it("recognises sk_/pk_-prefixed keys", () => {
@@ -86,7 +96,7 @@ describe("shouldMaskHeader", () => {
   });
 
   it("masks by value shape even under an unlisted header name", () => {
-    expect(shouldMaskHeader("X-Session", "abc.def.ghi")).toBe(true);
+    expect(shouldMaskHeader("X-Session", "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJlXw")).toBe(true);
   });
 
   it("leaves an ordinary header/value pair alone", () => {

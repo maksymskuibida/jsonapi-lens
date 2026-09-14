@@ -265,10 +265,14 @@ export const de: Messages = {
           return "Dieses Dokument hat sowohl `data` als auch `errors`, was JSON:API zusammen verbietet.";
         case "collection-array":
           return `Das Dokument ist ein nacktes Array mit ${f.n(value.length)} ${f.plural(value.length, { one: "Eintrag", other: "Einträgen" })}.`;
-        case "ndjson-lines":
-          return value.malformedLine === null
-            ? `Gelesen als ${f.n(value.records)} JSON-Lines-${f.plural(value.records, { one: "Datensatz", other: "Datensätze" })}.`
-            : `Gelesen als ${f.n(value.records)} JSON-Lines-${f.plural(value.records, { one: "Datensatz", other: "Datensätze" })}; Zeile ${f.n(value.malformedLine)} ließ sich nicht parsen und wurde übersprungen.`;
+        case "ndjson-lines": {
+          const base = `Gelesen als ${f.n(value.records)} JSON-Lines-${f.plural(value.records, { one: "Datensatz", other: "Datensätze" })}`;
+          if (value.skipped === 0) return `${base}.`;
+          if (value.skipped === 1) {
+            return `${base}; Zeile ${f.n(value.malformedLine!)} ließ sich nicht parsen und wurde übersprungen.`;
+          }
+          return `${base}; ${f.n(value.skipped)} Zeilen ließen sich nicht parsen und wurden übersprungen, erstmals in Zeile ${f.n(value.malformedLine!)}.`;
+        }
         case "plain-empty-object":
           return "Das Dokument ist ein leeres Objekt.";
         case "plain-scalar":
