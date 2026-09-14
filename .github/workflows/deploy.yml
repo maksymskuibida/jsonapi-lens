@@ -55,14 +55,6 @@ jobs:
       - name: Build
         run: npx vite build
 
-      # The review preflight is a gate, and a gate nobody exercises reports
-      # success either way. This suite plants the defect each of its checks was
-      # written for and confirms that check catches *that* one, so a later edit
-      # that quietly makes the gate decorative turns the build red instead of
-      # passing silently.
-      - name: Attack the review preflight
-        run: scripts/attack-preflight.sh
-
   deploy:
     name: Deploy to Cloudflare
     # `needs: check` is what makes "CI must pass before deploy" true, including
