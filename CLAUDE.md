@@ -30,7 +30,7 @@ is actually enforced — nothing in this repository may contradict that table.
 ## Verify before you open anything
 
 ```bash
-npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh
+npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npx tsc -p mcp/tsconfig.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh
 ```
 
 `npx wrangler types` first is not optional — `worker-configuration.d.ts` is generated rather than
