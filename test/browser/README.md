@@ -93,7 +93,8 @@ Every one of them runs at whatever `--width` is given, so narrow layouts are the
 rather than a separate list. 390, 768 and 1512 are the widths worth trying; fractional row heights at
 390 are what caught the rounding fault.
 
-Two more the runner does itself, around the scenarios, because both need a page load:
+Three more the runner does itself, around the scenarios, because each needs a page load — and a load
+destroys the context every `SCEN.*` runs in, which is why they cannot be scenarios:
 
 - **Reload restores the same place** — the case the old absolute-offset restoration got most wrong,
   at -1215px, because a fresh load has measured nothing and is therefore at its shortest.
@@ -101,6 +102,12 @@ Two more the runner does itself, around the scenarios, because both need a page 
   an `await` and used to call `showView("paste")` regardless of what had happened meanwhile, so a
   document pasted before that read finished was replaced by the paste view a moment later. Rendering
   once is not proof.
+- **"Back to document" renders it.** Landing on `/` with a document stored, `boot()` parses it so the
+  resume button is instant but stays on the paste view — so a loaded document and an empty `#doc` is
+  a normal state, and every path that reveals the document view has to build it rather than assume
+  someone else did. Revealing it unbuilt gave a blank page below the topbar, with the right URL and
+  the right title and no console error. The line prints `#doc children 0->2`; a run that starts at
+  anything but 0 says so, because then the click proved nothing.
 
 Two are still by hand, both needing a second page load mid-scenario: Back *after* a reload-restored
 position, and a cold deep link followed out and then back. Drive them from the console in two steps,

@@ -167,6 +167,15 @@ interface Loaded {
   label: string;
   bytes: number;
   text: string;
+  /**
+   * How long `readDocument` took, in milliseconds.
+   *
+   * Carried on the document rather than passed to the render, because a
+   * document parsed at boot is rendered later — or not at all, if the paste
+   * view is where you stay — and the overview still has to be able to say how
+   * long indexing it took.
+   */
+  parseMs: number;
 }
 
 let current: Loaded | null = null;
@@ -857,8 +866,8 @@ function documentActions(): HTMLElement {
   );
 }
 
-function renderDocumentView(loaded: Loaded, parseMs: number): void {
-  const { index } = loaded;
+function renderDocumentView(loaded: Loaded): void {
+  const { index, parseMs } = loaded;
   const started = performance.now();
 
   const main = el("div", { class: "main" });
@@ -932,6 +941,28 @@ function renderDocumentView(loaded: Loaded, parseMs: number): void {
   // `/view` shows a document held in this browser alone, so the head stops
   // claiming to be an indexable page for as long as one is open.
   applyPageMeta(documentMeta(loaded.label));
+}
+
+/**
+ * Reveal the document view, building it first if it is not built yet.
+ *
+ * A loaded document and an empty `#doc` is a normal state, not a broken one:
+ * `boot()` parses a stored document so that "Back to document" is instant, but
+ * stays on the paste view, and building a DOM nobody has asked to see would
+ * undo the point of that. Every path that reveals the document view therefore
+ * has to be able to build it rather than assume something else already did —
+ * an empty `#doc` behind a visible topbar looks exactly like the app having
+ * lost the document.
+ */
+function showDocument(): void {
+  if (!current) return;
+  // Rendering ends in `showView("doc")` and the document's page meta itself.
+  if (docEl.childElementCount === 0) {
+    renderDocumentView(current);
+    return;
+  }
+  showView("doc");
+  applyPageMeta(documentMeta(current.label));
 }
 
 /* Lazy bodies. `toggle` does not bubble, so this listens in the capture phase,
@@ -1200,7 +1231,7 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   }
 
   const parseMs = performance.now() - started;
-  current = { index, label, bytes, text };
+  current = { index, label, bytes, text, parseMs };
 
   if (options.persist) {
     // A fresh document invalidates any fragment from the previous one, and the
@@ -1213,7 +1244,7 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   // its remembered rows and its anchor belong to the document being replaced.
   dropPendingRestore();
 
-  renderDocumentView(current, parseMs);
+  renderDocumentView(current);
 
   if (options.persist) {
     window.scrollTo(0, 0);
@@ -1363,8 +1394,7 @@ function offerResume(): void {
       });
       button.addEventListener("click", () => {
         navigate(VIEW_PATH);
-        if (current) applyPageMeta(documentMeta(current.label));
-        showView("doc");
+        showDocument();
       });
       return button;
     })(),
@@ -1486,9 +1516,11 @@ async function applyRoute(): Promise<void> {
   }
 
   if (route.kind === "view") {
-    // Idempotent: traversing between fragments on /view must not re-render.
+    // Idempotent: traversing between fragments on /view must not re-render —
+    // `showDocument` builds only when `#doc` is empty, which it still is when
+    // boot parsed a stored document and stayed on the paste view.
     if (current) {
-      showView("doc");
+      showDocument();
       return;
     }
     const stored = await loadDocument();
@@ -1496,7 +1528,7 @@ async function applyRoute(): Promise<void> {
     // pasted while that await was pending is already rendered and already owns
     // the view, and continuing here would put the paste view back over it.
     if (current) {
-      showView("doc");
+      showDocument();
       return;
     }
     if (stored) {
@@ -1568,12 +1600,14 @@ async function boot(): Promise<void> {
 
   // Parse it so "Back to document" is instant, but stay on the paste view.
   try {
+    const started = performance.now();
     const index = readDocument(stored.text);
     current = {
       index,
       label: stored.label ?? t().labels.storedDocument,
       bytes: new TextEncoder().encode(stored.text).byteLength,
       text: stored.text,
+      parseMs: performance.now() - started,
     };
     offerResume();
   } catch {
