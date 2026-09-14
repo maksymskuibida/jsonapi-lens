@@ -186,6 +186,15 @@ interface Loaded {
   label: string;
   bytes: number;
   text: string;
+  /**
+   * How long `readDocument` took, in milliseconds — see `readLoaded`.
+   *
+   * Carried on the document rather than passed to the render, because a
+   * document parsed at boot is rendered later — or not at all, if the paste
+   * view is where you stay — and the overview still has to be able to say how
+   * long indexing it took.
+   */
+  parseMs: number;
 }
 
 let current: Loaded | null = null;
@@ -1010,10 +1019,12 @@ interface LoadedView<T> {
 }
 
 /**
- * The JSON:API document view — unchanged from before `Lens` existed, aside
- * from taking `{index: DocumentIndex, …}` explicitly rather than through the
- * old `Loaded`. "Same resources, same anchors, same overview, same rail" is
- * this function, byte for byte.
+ * Build the JSON:API document view — unchanged from before `Lens` existed,
+ * aside from taking `{index: DocumentIndex, …}` explicitly rather than
+ * through the full `Loaded`. "Same resources, same anchors, same overview,
+ * same rail" is this function, byte for byte. Revealing it is `showDocument`'s
+ * job, not this one's; every call site reaches this through `renderLoadedView`
+ * so a document is never built without going through that dispatch.
  */
 function renderDocumentView(loaded: LoadedView<DocumentIndex>, parseMs: number): void {
   const { index } = loaded;
@@ -1066,7 +1077,6 @@ function renderDocumentView(loaded: LoadedView<DocumentIndex>, parseMs: number):
 
   const renderMs = performance.now() - started;
 
-  showView("doc");
   soloType = null;
   applyFilter();
 
@@ -1086,10 +1096,35 @@ function renderDocumentView(loaded: LoadedView<DocumentIndex>, parseMs: number):
     render: formatDuration(renderMs),
     bodies: eager ? "eager" : "lazy (on expand)",
   });
+}
 
+/**
+ * Reveal the document view, building it first if it is not built yet. The only
+ * way `#doc` is ever shown, so that "built" cannot be forgotten again.
+ *
+ * A loaded document and an empty `#doc` is a normal state, not a broken one:
+ * `boot()` parses a stored document so that "Back to document" is instant, but
+ * stays on the paste view, and building a DOM nobody has asked to see would
+ * undo the point of that. Every path that reveals the document view therefore
+ * has to be able to build it rather than assume something else already did —
+ * an empty `#doc` behind a visible topbar looks exactly like the app having
+ * lost the document.
+ *
+ * The other branch rests on an invariant worth stating plainly: a non-empty
+ * `#doc` always holds `current`'s own render. That holds because the one
+ * assignment which leaves a document unrendered is `boot()`, and it runs while
+ * `#doc` is still the empty element `index.html` ships. A future path that
+ * parses a *different* document without rendering it would break the invariant
+ * rather than this function, and the symptom would be the previous document's
+ * rows under the new one's label.
+ */
+function showDocument(): void {
+  if (!current) return;
+  if (docEl.childElementCount === 0) renderLoadedView(current, current.parseMs);
+  showView("doc");
   // `/view` shows a document held in this browser alone, so the head stops
   // claiming to be an indexable page for as long as one is open.
-  applyPageMeta(documentMeta(loaded.label));
+  applyPageMeta(documentMeta(current.label));
 }
 
 /**
@@ -1434,24 +1469,44 @@ interface LoadOptions {
   lens?: Lens;
 }
 
+/**
+ * Parse a document into the shape the rest of the app holds it in.
+ *
+ * One function because the timing window is easy to get subtly wrong: `parseMs`
+ * has to be taken before the byte count, or a `TextEncoder` pass over the whole
+ * text is folded into the figure the overview reports — which is how the same
+ * document came to report two different numbers depending on the route taken to
+ * it. Throws `DocumentError`; what to do about that differs by caller.
+ *
+ * `lens`/`forceJsonApi` mirror `LoadOptions`' own fields of the same name —
+ * `load` passes them straight through when a shape has already been decided
+ * (the shape-offer flow, or "read as JSON:API anyway"); a caller that omits
+ * both, such as restoring a stored document at boot, gets the ordinary
+ * `readAny` classification.
+ */
+function readLoaded(
+  text: string,
+  label: string,
+  options: { lens?: Lens; forceJsonApi?: boolean } = {},
+): Loaded {
+  const started = performance.now();
+  const lens =
+    options.lens ?? (options.forceJsonApi ? { kind: "jsonapi" as const, index: readDocument(text) } : readAny(text));
+  const parseMs = performance.now() - started;
+  return { lens, label, bytes: new TextEncoder().encode(text).byteLength, text, parseMs };
+}
+
 async function load(text: string, label: string, options: LoadOptions): Promise<boolean> {
   hideError();
   hideShapeOffer();
 
-  const bytes = new TextEncoder().encode(text).byteLength;
-  const started = performance.now();
-
-  let lens: Lens;
   try {
-    lens = options.lens ?? (options.forceJsonApi ? { kind: "jsonapi", index: readDocument(text) } : readAny(text));
+    current = readLoaded(text, label, { lens: options.lens, forceJsonApi: options.forceJsonApi });
   } catch (error) {
     showView("paste");
     showError(error);
     return false;
   }
-
-  const parseMs = performance.now() - started;
-  current = { lens, label, bytes, text };
 
   if (options.persist) {
     // A fresh document invalidates any fragment from the previous one, and the
@@ -1464,7 +1519,13 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   // its remembered rows and its anchor belong to the document being replaced.
   dropPendingRestore();
 
-  renderLoadedView(current, parseMs);
+  // A new document replaces whatever is built, so it is rendered outright —
+  // `showDocument`'s "only fill an empty `#doc`" guard is for a document that
+  // might already be sitting there, which a freshly loaded one never is. But
+  // `showDocument` still does the revealing, so `#doc` is never shown any
+  // other way.
+  renderLoadedView(current, current.parseMs);
+  showDocument();
 
   if (options.persist) {
     window.scrollTo(0, 0);
@@ -1656,8 +1717,13 @@ function offerResume(): void {
       });
       button.addEventListener("click", () => {
         navigate(VIEW_PATH);
-        if (current) applyPageMeta(documentMeta(current.label));
-        showView("doc");
+        showDocument();
+        // The paste view may have been scrolled well down to reach this button,
+        // and nothing was carrying a place inside the document to return to —
+        // so without this you arrive somewhere in the middle of it. A traversal
+        // is different: that has a remembered position, and `scheduleSettle`
+        // puts it back.
+        window.scrollTo(0, 0);
       });
       return button;
     })(),
@@ -1826,9 +1892,11 @@ async function applyRoute(): Promise<void> {
   }
 
   if (route.kind === "view") {
-    // Idempotent: traversing between fragments on /view must not re-render.
+    // Idempotent: traversing between fragments on /view must not re-render —
+    // `showDocument` builds only when `#doc` is empty, which it still is when
+    // boot parsed a stored document and stayed on the paste view.
     if (current) {
-      showView("doc");
+      showDocument();
       return;
     }
     // A Back or Forward onto the bundle import view: its content is already
@@ -1846,7 +1914,7 @@ async function applyRoute(): Promise<void> {
     // pasted while that await was pending is already rendered and already owns
     // the view, and continuing here would put the paste view back over it.
     if (current) {
-      showView("doc");
+      showDocument();
       return;
     }
     if (stored) {
@@ -1920,36 +1988,25 @@ async function boot(): Promise<void> {
   inputEl.value = stored.text;
   updateDropMeta();
 
-  // Parse *and render* it so "Back to document" is instant, but stay on the
-  // paste view. Pre-existing bug, reproduced on the unmodified base commit
-  // and fixed here because this is the function that already needed
-  // rewriting for `readAny`: this branch used to set `current` and call
-  // `offerResume()` without ever rendering into `docEl`, so a document
-  // stored from an earlier session, reloaded fresh on `/`, showed a
-  // completely blank document view the moment "Back to document" was
-  // clicked — `showView("doc")` reveals `docEl`, and nothing had ever put
-  // anything there. Rendering now and folding back to the paste view with a
-  // second `showView`/`applyRouteMeta` call keeps the visible screen and the
-  // page's own metadata matching what is actually on it, while leaving
-  // `docEl` already populated for whenever "Back to document" is clicked.
+  // Parse it (but do not render it) so "Back to document" has something to
+  // show, and stay on the paste view. `#doc` is left empty here on purpose:
+  // a loaded document and an empty `#doc` is a normal state (see
+  // `showDocument`'s own comment), and `showDocument` — the only path that
+  // ever reveals `#doc` — builds it lazily the moment "Back to document" is
+  // clicked. An earlier version of this function set `current` without ever
+  // rendering into `docEl` *and* revealed the document view through a path
+  // other than `showDocument`, which is what let a document restored here
+  // show up blank; building lazily through `showDocument` closes that gap
+  // structurally rather than by remembering to render at this call site too.
   //
   // `readAny` rather than `readDocument`: a stored document is one that was
   // already read successfully once — including a plain-JSON one — and this
   // is a restore, not a fresh submission, so there is no shape offer to show
-  // here even if the shape is not `jsonapi`.
+  // here even if the shape is not `jsonapi`. `readLoaded` defaults to
+  // `readAny` when neither `lens` nor `forceJsonApi` is given, which is
+  // exactly this case.
   try {
-    const started = performance.now();
-    const lens = readAny(stored.text);
-    const parseMs = performance.now() - started;
-    current = {
-      lens,
-      label: stored.label ?? t().labels.storedDocument,
-      bytes: new TextEncoder().encode(stored.text).byteLength,
-      text: stored.text,
-    };
-    renderLoadedView(current, parseMs);
-    showView("paste");
-    applyRouteMeta({ kind: "paste" });
+    current = readLoaded(stored.text, stored.label ?? t().labels.storedDocument);
     offerResume();
   } catch {
     // A stored document that no longer parses is not worth blocking the paste

@@ -77,7 +77,7 @@ If you write your own, two rules matter more than the rest:
 
 ## What is covered
 
-25 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
+24 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
 unwound one Back at a time, Back-then-Forward, rapid double Backs, Back/Forward hammering, returning
 to the very top and the very bottom, a type filter active, "Expand all" on a 36-row group, a position
 deep inside a tall expanded row, a reverse pointer out of "Referenced by", the jump modal, collapsing
@@ -104,11 +104,12 @@ it landed on is open, because a position-only assertion cannot see that failing 
 exactly the right place whether or not the row expanded, and a regression there is unmissable in use
 and invisible in the numbers.
 
-Every one of them runs at whatever `--width` is given, so narrow layouts are the same 23 scenarios
+Every one of them runs at whatever `--width` is given, so narrow layouts are the same 24 scenarios
 rather than a separate list. 390, 768 and 1512 are the widths worth trying; fractional row heights at
 390 are what caught the rounding fault.
 
-Two more the runner does itself, around the scenarios, because both need a page load:
+Four more the runner does itself, around the scenarios, because each needs a page load — and a load
+destroys the context every `SCEN.*` runs in, which is why they cannot be scenarios:
 
 - **Reload restores the same place** — the case the old absolute-offset restoration got most wrong,
   at -1215px, because a fresh load has measured nothing and is therefore at its shortest.
@@ -116,6 +117,22 @@ Two more the runner does itself, around the scenarios, because both need a page 
   an `await` and used to call `showView("paste")` regardless of what had happened meanwhile, so a
   document pasted before that read finished was replaced by the paste view a moment later. Rendering
   once is not proof.
+- **"Back to document" renders it.** Landing on `/` with a document stored, `boot()` parses it so the
+  resume button is instant but stays on the paste view — so a loaded document and an empty `#doc` is
+  a normal state, and every path that reveals the document view has to build it rather than assume
+  someone else did. Revealing it unbuilt gave a blank page below the topbar, with the right URL and
+  the right title and no console error. It also clicks from a scrolled paste view and asserts the
+  landing is at the top, because a built document that inherits the previous view's offset drops you
+  into the middle of one you have not seen. The line prints `#doc children 0->2`; starting at
+  anything but 0 is a *failure*, not a note — the click would have proved nothing.
+- **A cold reload of a bundle-marked entry is not blank.** Closing a coverage gap PR #5 review round 2
+  found (S9): `isBundleEntryShowing`'s `bundleImportEl.hasChildNodes()` half had no test anywhere that
+  could fail it. A real browser keeps a `/view` entry's `history.state` across `location.reload()`,
+  but the secret and the bundle's rendered content do not — a fresh load starts `bundleImportEl`
+  empty, and nothing in the session re-populates it. Without the guard, `applyRoute` reads the stale
+  marker alone and shows that empty container. The marker is stamped by hand here rather than run
+  through `s27`'s `fetch` stub and a real share round trip, since the guard only ever reads
+  `history.state` and `bundleImportEl`'s children and does not care how the entry came to be marked.
 
 Two are still by hand, both needing a second page load mid-scenario: Back *after* a reload-restored
 position, and a cold deep link followed out and then back. Drive them from the console in two steps,

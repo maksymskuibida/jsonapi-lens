@@ -179,6 +179,22 @@ const chrome = spawn(
 
 let page;
 let failed = 0;
+let total = 0;
+
+/**
+ * One result line, and the two counters the summary is built from.
+ *
+ * Every check goes through this rather than a hand-maintained denominator: the
+ * runner-level checks around the scenarios are exactly the ones an addition
+ * forgets to count, and an under-counted total is invisible in a green run.
+ */
+function report(ok, metric, name, detail) {
+  total += 1;
+  if (!ok) failed += 1;
+  let line = `${ok ? "pass" : "FAIL"}  ${String(metric).padStart(8)}  ${name}`;
+  if (detail) line += `\n            ${detail}`;
+  console.log(line);
+}
 
 try {
   page = await connect(port);
@@ -293,123 +309,205 @@ try {
   console.log(`running ${keys.length} scenarios\n`);
 
   for (const key of keys) {
-    let line;
     try {
       const raw = await page.evaluate(
         `(async () => JSON.stringify(await SCEN[${JSON.stringify(key)}](NAV)))()`,
       );
       const result = JSON.parse(raw);
-      if (!result.ok) failed += 1;
-      line = `${result.ok ? "pass" : "FAIL"}  ${String(result.driftPx ?? "?").padStart(6)}px  ${result.name ?? key}`;
-      if (!result.ok) line += `\n            ${result.detail ?? ""}`;
+      // Detail on failures only: on dozens of passing scenarios it is just noise.
+      report(
+        result.ok,
+        `${result.driftPx ?? "?"}px`,
+        result.name ?? key,
+        result.ok ? null : (result.detail ?? ""),
+      );
     } catch (error) {
-      failed += 1;
-      line = `FAIL       err  ${key}\n            ${error.message}`;
+      report(false, "err", key, error.message);
     }
-    console.log(line);
   }
 
-  // Reload, near-last, because it destroys the page context the scenarios
-  // run in — the injected `NAV`/`SCEN` harness does not survive it, so
-  // nothing below this point may call either again.
+  // Reload, first of three checks that need a page load, because it destroys
+  // the page context the scenarios run in — the injected `NAV`/`SCEN` harness
+  // does not survive it, so nothing below this point may call either again.
   //
   // This is the case the old absolute-offset restoration got most wrong — -1215px
   // — and the reason is worth keeping in front of whoever changes this next: on a
   // fresh load nothing has been measured yet, so the page is at its shortest and
   // a saved pixel offset means the least it will ever mean. Restoring a place
   // instead survives it, and the restored offset is expected to differ.
-  const probe = await page.evaluate(`(async () => {
-    await NAV.fresh();
-    await NAV.open(...SCEN.ID.mc);
-    await NAV.open(...SCEN.ID.c5);
-    await NAV.scrollToFraction(0.55);
-    const watch = NAV.topmostVisible();
-    return JSON.stringify({ id: watch.id, top: NAV.top(watch), y: Math.round(scrollY), h: NAV.height() });
-  })()`);
-  const saved = JSON.parse(probe);
+  try {
+    const probe = await page.evaluate(`(async () => {
+      await NAV.fresh();
+      await NAV.open(...SCEN.ID.mc);
+      await NAV.open(...SCEN.ID.c5);
+      await NAV.scrollToFraction(0.55);
+      const watch = NAV.topmostVisible();
+      return JSON.stringify({ id: watch.id, top: NAV.top(watch), y: Math.round(scrollY), h: NAV.height() });
+    })()`);
+    const saved = JSON.parse(probe);
 
-  await page.evaluate("location.reload(); undefined").catch(() => {});
-  await waitFor(
-    page,
-    "document.querySelectorAll('.res').length > 0 && !document.getElementById('doc').hidden",
-    "the document to come back after a reload",
-  );
-  const landed = JSON.parse(
-    await page.evaluate(`(async () => {
-      await new Promise((r) => setTimeout(r, 1200));
-      const el = document.getElementById(${JSON.stringify(saved.id)});
-      return JSON.stringify({
-        top: el ? Math.round(el.getBoundingClientRect().top) : null,
-        y: Math.round(scrollY),
-        h: document.documentElement.scrollHeight,
-      });
-    })()`),
-  );
-  const reloadDrift = landed.top === null ? NaN : landed.top - saved.top;
-  const reloadOk = Math.abs(reloadDrift) <= 2;
-  if (!reloadOk) failed += 1;
-  console.log(
-    `${reloadOk ? "pass" : "FAIL"}  ${String(reloadDrift).padStart(6)}px  reload restores the same place` +
-      `\n            top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
-  );
+    await page.evaluate("location.reload(); undefined").catch(() => {});
+    await waitFor(
+      page,
+      "document.querySelectorAll('.res').length > 0 && !document.getElementById('doc').hidden",
+      "the document to come back after a reload",
+    );
+    const landed = JSON.parse(
+      await page.evaluate(`(async () => {
+        await new Promise((r) => setTimeout(r, 1200));
+        const el = document.getElementById(${JSON.stringify(saved.id)});
+        return JSON.stringify({
+          top: el ? Math.round(el.getBoundingClientRect().top) : null,
+          y: Math.round(scrollY),
+          h: document.documentElement.scrollHeight,
+        });
+      })()`),
+    );
+    const reloadDrift = landed.top === null ? NaN : landed.top - saved.top;
+    report(
+      Math.abs(reloadDrift) <= 2,
+      `${reloadDrift}px`,
+      "reload restores the same place",
+      `top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
+    );
+  } catch (error) {
+    report(false, "err", "reload restores the same place", error.message);
+  }
+
+  // Resuming a stored document from the paste view, which needs a page load of
+  // its own and so cannot be a scenario — every `SCEN.*` runs in one page
+  // context, and a load destroys it.
+  //
+  // `boot()` parses a stored document so that "Back to document" is instant but
+  // deliberately stays on the paste view, so a loaded document and an empty
+  // `#doc` is a normal state. Revealing the document view without building it
+  // first showed a blank page below the topbar, and "leave the tab, come back
+  // later, click the button" is an ordinary way to use the app.
+  try {
+    await page.navigate(`${ORIGIN}/`);
+    // The button clause first: `Page.navigate` resolves at navigation commit,
+    // when the parser may not have reached `#resume` yet, and reading `.hidden`
+    // off the null that gets you throws out of the run instead of polling again.
+    await waitFor(
+      page,
+      "!!document.querySelector('#resume button') && !document.getElementById('resume').hidden",
+      "the resume button offering the stored document",
+    );
+    const resumed = JSON.parse(
+      await page.evaluate(`(async () => {
+        const doc = document.getElementById('doc');
+        // Nothing built yet is the state under test: if the document view were
+        // already there, clicking would prove nothing about building it.
+        const before = doc.childElementCount;
+        // Reaching this button often means scrolling the paste view, and the
+        // built document inherits whatever offset that left behind — so the
+        // click has to be made from somewhere other than the top.
+        window.scrollTo(0, 400);
+        await new Promise((r) => setTimeout(r, 250));
+        const beforeY = Math.round(scrollY);
+        document.querySelector('#resume button').click();
+        // Polled rather than slept: the handler is synchronous today, so this
+        // returns at once, and a fixed wait would quietly become the assertion
+        // if that ever changed.
+        for (let i = 0; i < 50 && doc.childElementCount === 0; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return JSON.stringify({
+          before,
+          beforeY,
+          path: location.pathname,
+          hidden: doc.hidden,
+          children: doc.childElementCount,
+          sections: document.querySelectorAll('.res').length,
+          y: Math.round(scrollY),
+        });
+      })()`),
+    );
+    // `before === 0` is load-bearing, not commentary: if some later change
+    // builds `#doc` at boot, this check would pass while proving nothing, and
+    // the fix it guards could be reverted under a green run.
+    const resumeOk =
+      resumed.before === 0 &&
+      resumed.path === "/view" &&
+      !resumed.hidden &&
+      resumed.children > 0 &&
+      resumed.sections > 0 &&
+      // Built and revealed is not enough: inheriting the paste view's offset
+      // drops you into the middle of a document you have not seen yet.
+      resumed.y === 0;
+    report(
+      resumeOk,
+      resumed.sections,
+      "resume renders the stored document",
+      `#doc children ${resumed.before}->${resumed.children} at ${resumed.path}, y ${resumed.beforeY}->${resumed.y}` +
+        (resumed.before > 0 ? " — already built before the click, so this proved nothing" : ""),
+    );
+  } catch (error) {
+    report(false, "err", "resume renders the stored document", error.message);
+  }
 
   // One more reload, genuinely last, closing a coverage gap PR #5 review
   // round 2 found (S9): `isBundleEntryShowing`'s `bundleImportEl.hasChildNodes()`
   // half — main.ts, just above `markBundleEntry` — had no test anywhere that
   // could fail. Deleting it and keeping only `state?.bundle === true` left
-  // the entire suite green: 265/265 vitest and every scenario above. What it
-  // guards is a plain F5 on a bundle-marked /view entry: a real browser keeps
-  // an entry's `history.state` across `location.reload()`, but the secret and
-  // the bundle's rendered content do not survive it — a fresh page load
-  // starts `bundleImportEl` empty, and nothing in this session re-populates
-  // it. Without the guard, `applyRoute` reads the stale marker alone, calls
-  // `showView("bundle")`, and shows that empty container: B1's blank page,
-  // reached by a different route. The marker is stamped by hand rather than
-  // run through s27's `fetch` stub and a real share round trip — the guard
-  // only ever reads `history.state` and `bundleImportEl`'s children, and
-  // neither cares how the entry came to be marked, so a hand-stamped one
-  // exercises the exact same mechanism far more cheaply. Placed after the
-  // reload above, not before it, because this one needs no `NAV`/`SCEN` call
-  // of its own — only raw DOM queries — so it does not need the harness
-  // re-injected after destroying the page context a second time.
+  // the entire suite green: every vitest test and every scenario above. What
+  // it guards is a plain F5 on a bundle-marked /view entry: a real browser
+  // keeps an entry's `history.state` across `location.reload()`, but the
+  // secret and the bundle's rendered content do not survive it — a fresh
+  // page load starts `bundleImportEl` empty, and nothing in this session
+  // re-populates it. Without the guard, `applyRoute` reads the stale marker
+  // alone, calls `showView("bundle")`, and shows that empty container: B1's
+  // blank page, reached by a different route. The marker is stamped by hand
+  // rather than run through s27's `fetch` stub and a real share round trip —
+  // the guard only ever reads `history.state` and `bundleImportEl`'s
+  // children, and neither cares how the entry came to be marked, so a
+  // hand-stamped one exercises the exact same mechanism far more cheaply.
+  // Placed after the two checks above, not before them, because this one
+  // needs no `NAV`/`SCEN` call of its own — only raw DOM queries — so it
+  // does not need the harness re-injected after destroying the page context
+  // again.
   //
   // `bundleImportEl` carries no id or class (see its own comment in
   // main.ts), so it is found the same way `showView` distinguishes it from
   // its four static siblings: the one child of #view whose id is not one of
   // theirs.
-  await page.evaluate("history.pushState({ bundle: true }, '', '/view'); undefined");
-  await page.evaluate("location.reload(); undefined").catch(() => {});
-  await waitFor(
-    page,
-    "!!document.getElementById('boot') && document.getElementById('boot').hidden === true",
-    "the app to leave the boot view after a bundle-marked reload",
-  );
-  await sleep(1200); // boot() awaits IndexedDB before it settles on a view.
-  const bundleReload = JSON.parse(
-    await page.evaluate(`JSON.stringify((() => {
-      const view = document.getElementById('view');
-      const known = new Set(['boot', 'paste', 'doc', 'legal']);
-      const extra = [...view.children].find((el) => !known.has(el.id));
-      return {
-        path: location.pathname,
-        pasteShowing: !document.getElementById('paste').hidden,
-        docShowing: !document.getElementById('doc').hidden,
-        bundleContainerShowing: extra ? !extra.hidden : null,
-        bundleContainerHasChildren: extra ? extra.hasChildNodes() : null,
-      };
-    })())`),
-  );
-  const bundleReloadOk =
-    bundleReload.bundleContainerShowing === false &&
-    (bundleReload.pasteShowing || bundleReload.docShowing);
-  if (!bundleReloadOk) failed += 1;
-  console.log(
-    `${bundleReloadOk ? "pass" : "FAIL"}       -  a cold reload of a bundle-marked entry is not blank` +
-      `\n            ${JSON.stringify(bundleReload)}`,
-  );
+  try {
+    await page.evaluate("history.pushState({ bundle: true }, '', '/view'); undefined");
+    await page.evaluate("location.reload(); undefined").catch(() => {});
+    await waitFor(
+      page,
+      "!!document.getElementById('boot') && document.getElementById('boot').hidden === true",
+      "the app to leave the boot view after a bundle-marked reload",
+    );
+    await sleep(1200); // boot() awaits IndexedDB before it settles on a view.
+    const bundleReload = JSON.parse(
+      await page.evaluate(`JSON.stringify((() => {
+        const view = document.getElementById('view');
+        const known = new Set(['boot', 'paste', 'doc', 'legal']);
+        const extra = [...view.children].find((el) => !known.has(el.id));
+        return {
+          path: location.pathname,
+          pasteShowing: !document.getElementById('paste').hidden,
+          docShowing: !document.getElementById('doc').hidden,
+          bundleContainerShowing: extra ? !extra.hidden : null,
+          bundleContainerHasChildren: extra ? extra.hasChildNodes() : null,
+        };
+      })())`),
+    );
+    const bundleReloadOk =
+      bundleReload.bundleContainerShowing === false &&
+      (bundleReload.pasteShowing || bundleReload.docShowing);
+    report(
+      bundleReloadOk,
+      "-",
+      "a cold reload of a bundle-marked entry is not blank",
+      JSON.stringify(bundleReload),
+    );
+  } catch (error) {
+    report(false, "err", "a cold reload of a bundle-marked entry is not blank", error.message);
+  }
 
-  // +2: the scroll-restoration reload above, and the bundle-marked reload above it.
-  console.log(`\n${keys.length + 2 - failed}/${keys.length + 2} passed`);
+  console.log(`\n${total - failed}/${total} passed`);
 } finally {
   page?.close();
   chrome.kill();
