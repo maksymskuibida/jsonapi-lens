@@ -2756,6 +2756,91 @@ body.has-modal {
   text-wrap: pretty;
 }
 
+/* T6's selection mode: a row's Open/Rename/Delete controls are replaced by
+   one checkbox+label, reusing .library__row/__name/__meta/__shape as-is —
+   only the clickable area itself needs a layout of its own, since a
+   <label> wrapping a checkbox plus a name/meta column is not the single
+   grid .library__open lays out for a plain button. */
+.library__select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  cursor: pointer;
+}
+
+.library__select-text {
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.library__checkbox {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Why a control is disabled — "Create link" with nothing ticked, "Import
+   selected" with nothing ticked — shown as text, not left to a title
+   tooltip nobody can reach by keyboard or touch. */
+.bundle-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+/* -------------------------------------------------------- bundle import --- */
+
+/* The view reached when a share link decrypts to a bundle (`crypto.ts`'s
+   version 3) — a sibling of .paste/.doc/.legal-view, not a modal, because it
+   replaces the document view for the load that landed here. */
+.bundle-import {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--sp-6);
+  width: min(48rem, 100%);
+  margin-inline: auto;
+  padding: var(--sp-9) var(--sp-6) var(--sp-10);
+}
+
+.bundle-import__head {
+  flex: none;
+}
+
+.bundle-import__title {
+  font-family: var(--font-display);
+  font-size: clamp(var(--fs-lg), 4vw, var(--fs-2xl));
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  color: var(--text);
+}
+
+.bundle-import__subtitle {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-wrap: pretty;
+}
+
+/* A capped height so 50 rows scroll inside this list rather than stretching
+   the page — the list is the one part of this view with unbounded content. */
+.bundle-import__list {
+  flex: 1;
+  min-height: 0;
+  max-height: min(58dvh, 34rem);
+  overflow: auto;
+  align-content: start;
+}
+
+.bundle-import__foot {
+  flex: none;
+}
+
 /* ---------------------------------------------------------------- save --- */
 
 .field {

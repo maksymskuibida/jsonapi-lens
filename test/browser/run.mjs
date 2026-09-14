@@ -359,8 +359,11 @@ try {
     }
   }
 
-  // Reload, first of the two checks that need a page load, because it destroys
-  // the page context the scenarios run in.
+  // Reload, first of the four checks below that need a page load of their own,
+  // because it destroys the page context the scenarios run in — the injected
+  // `NAV`/`SCEN` harness does not survive it, so nothing below this point may
+  // call either again. The three after it (resume, plain JSON, bundle) are
+  // ordered so each only needs what the one before it leaves behind.
   //
   // This is the case the old absolute-offset restoration got most wrong — -1215px
   // — and the reason is worth keeping in front of whoever changes this next: on a
@@ -478,8 +481,6 @@ try {
     report(false, "err", "resume renders the stored document", error.message);
   }
 
-  console.log(`\n${total - failed}/${total} passed`);
-
   // Plain JSON: a reference nested deeper than `AUTO_OPEN_DEPTH` must still be
   // *visibly* open after a reload, not merely present in the DOM. This is the
   // one check in this suite that can see that class of regression at all —
@@ -557,13 +558,75 @@ try {
   const chainSurvived = after.chain.length === before.chain.length && after.chain.every((open) => open === true);
   const heightSurvived = Math.abs(after.height - before.height) <= 2;
   const plainOk = clickWorked && chainSurvived && heightSurvived;
-  if (!plainOk) failed += 1;
-  console.log(
-    `${plainOk ? "pass" : "FAIL"}  ${String(after.height).padStart(6)}px  27 plain JSON: a reference 2+ levels deep survives reload` +
-      `\n            chain ${JSON.stringify(before.chain)}->${JSON.stringify(after.chain)}, height ${before.height}->${after.height}, clickWorked=${clickWorked}, chainSurvived=${chainSurvived}, heightSurvived=${heightSurvived}`,
+  report(
+    plainOk,
+    `${after.height}px`,
+    "28 plain JSON: a reference 2+ levels deep survives reload",
+    `chain ${JSON.stringify(before.chain)}->${JSON.stringify(after.chain)}, height ${before.height}->${after.height}, clickWorked=${clickWorked}, chainSurvived=${chainSurvived}, heightSurvived=${heightSurvived}`,
   );
 
-  console.log(`\n${keys.length + 2 - failed}/${keys.length + 2} passed`);
+  // One more reload, genuinely last, closing a coverage gap PR #5 review
+  // round 2 found (S9): `isBundleEntryShowing`'s `bundleImportEl.hasChildNodes()`
+  // half — main.ts, just above `markBundleEntry` — had no test anywhere that
+  // could fail. Deleting it and keeping only `state?.bundle === true` left
+  // the entire suite green: 265/265 vitest and every scenario above. What it
+  // guards is a plain F5 on a bundle-marked /view entry: a real browser keeps
+  // an entry's `history.state` across `location.reload()`, but the secret and
+  // the bundle's rendered content do not survive it — a fresh page load
+  // starts `bundleImportEl` empty, and nothing in this session re-populates
+  // it. Without the guard, `applyRoute` reads the stale marker alone, calls
+  // `showView("bundle")`, and shows that empty container: B1's blank page,
+  // reached by a different route. The marker is stamped by hand rather than
+  // run through s27's `fetch` stub and a real share round trip — the guard
+  // only ever reads `history.state` and `bundleImportEl`'s children, and
+  // neither cares how the entry came to be marked, so a hand-stamped one
+  // exercises the exact same mechanism far more cheaply. Placed after the
+  // reload above, not before it, because this one needs no `NAV`/`SCEN` call
+  // of its own — only raw DOM queries — so it does not need the harness
+  // re-injected after destroying the page context a second time.
+  //
+  // `bundleImportEl` carries no id or class (see its own comment in
+  // main.ts), so it is found the same way `showView` distinguishes it from
+  // its four static siblings: the one child of #view whose id is not one of
+  // theirs.
+  await page.evaluate("history.pushState({ bundle: true }, '', '/view'); undefined");
+  await page.evaluate("location.reload(); undefined").catch(() => {});
+  await waitFor(
+    page,
+    "!!document.getElementById('boot') && document.getElementById('boot').hidden === true",
+    "the app to leave the boot view after a bundle-marked reload",
+  );
+  await sleep(1200); // boot() awaits IndexedDB before it settles on a view.
+  const bundleReload = JSON.parse(
+    await page.evaluate(`JSON.stringify((() => {
+      const view = document.getElementById('view');
+      const known = new Set(['boot', 'paste', 'doc', 'legal']);
+      const extra = [...view.children].find((el) => !known.has(el.id));
+      return {
+        path: location.pathname,
+        pasteShowing: !document.getElementById('paste').hidden,
+        docShowing: !document.getElementById('doc').hidden,
+        bundleContainerShowing: extra ? !extra.hidden : null,
+        bundleContainerHasChildren: extra ? extra.hasChildNodes() : null,
+      };
+    })())`),
+  );
+  const bundleReloadOk =
+    bundleReload.bundleContainerShowing === false &&
+    (bundleReload.pasteShowing || bundleReload.docShowing);
+  report(
+    bundleReloadOk,
+    "-",
+    "a cold reload of a bundle-marked entry is not blank",
+    JSON.stringify(bundleReload),
+  );
+
+  // `total` is whatever `report` was actually called with, rather than a
+  // hand-maintained `keys.length + n`: every check added since this line was
+  // written was added outside `SCEN`, and each one silently widened the gap
+  // between the denominator and the run. An under-counted total is invisible
+  // in a green run — see `report`'s own comment.
+  console.log(`\n${total - failed}/${total} passed`);
 } finally {
   page?.close();
   chrome.kill();

@@ -2,8 +2,10 @@ import { copyBlob, downloadText } from "./clipboard.js";
 import { el } from "./dom.js";
 import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
+import { resolveSelection } from "./bundle.js";
 import { browserNavKeys, IS_APPLE, MOD_KEY } from "./platform.js";
 import type { KeyHint } from "./platform.js";
+import { openBundleShareModal, openShareModal } from "./share.js";
 import { deleteFromLibrary, listLibrary, renameInLibrary } from "./store.js";
 import type { LibraryEntry } from "./store.js";
 import { openModal, toast } from "./ui.js";
@@ -63,6 +65,26 @@ function relativeTime(epochMs: number): string {
   return t().library.savedOn(epochMs);
 }
 
+/** The name/shape/size/age block shared by a list row and a selection row. */
+function rowMeta(entry: LibraryEntry): HTMLElement {
+  return el(
+    "span",
+    { class: "library__meta" },
+    // All three of shape/resources/types are absent for a document whose
+    // lens has no resource/type concept — a plain-JSON reading, or a v2
+    // entry from before that lens existed. Each is omitted rather than
+    // shown empty or as zero: `el`'s `text` silently skips `undefined`,
+    // which for `shape` alone would still emit an empty `<code>` — a stray
+    // flex child, not "nothing to report" the way omitting the element
+    // entirely is.
+    entry.shape !== undefined ? el("code", { class: "library__shape", text: entry.shape }) : null,
+    entry.resources !== undefined ? el("span", { text: t().library.resources(entry.resources) }) : null,
+    entry.types !== undefined ? el("span", { text: t().library.types(entry.types) }) : null,
+    el("span", { text: formatBytes(entry.bytes) }),
+    el("span", { class: "library__when", text: relativeTime(entry.savedAt) }),
+  );
+}
+
 export async function openLibraryModal(
   onOpen: (entry: LibraryEntry) => void,
   onChange: () => void = () => {},
@@ -70,8 +92,59 @@ export async function openLibraryModal(
   const entries = await listLibrary();
 
   const body = el("div", { class: "library" });
+  const footer = el("div", { class: "modal__actions" });
+
+  // Selection mode, entered from the `Share` button in the footer below.
+  // `docs/task-specs/T6.md` §"Selection mode": every row gains a checkbox
+  // and its own Open/Rename/Delete controls disappear, because in this mode
+  // a click on the row means "select" — two meanings for one click is how a
+  // document gets lost.
+  let mode: "list" | "select" = "list";
+  const selected = new Set<number>();
+  let latestList: LibraryEntry[] = entries;
+
+  const enterSelect = (): void => {
+    mode = "select";
+    selected.clear();
+    render(latestList);
+    // Mirrors `leaveSelect`'s own refocus below — without it, `render`
+    // rebuilding `body` out from under the just-clicked `Share` button drops
+    // focus to `<body>`, outside the dialog entirely, and `openModal`'s Tab
+    // trap cannot recover it (it only wraps at the first/last focusable
+    // element, so the next Tab restarts from the top of the page, not the
+    // first checkbox). PR #5 review, B2.
+    body.querySelector<HTMLInputElement>(".library__checkbox")?.focus();
+  };
+
+  const leaveSelect = (): void => {
+    mode = "list";
+    selected.clear();
+    render(latestList);
+    // The control just under focus is gone the moment list mode redraws the
+    // footer; the button that re-enters selection mode is the sensible place
+    // to land, and `render` just rebuilt it into `footer` above.
+    footer.querySelector<HTMLButtonElement>("[data-role='library-share']")?.focus();
+  };
+
+  async function createLinkFromSelection(): Promise<void> {
+    const cachedById = new Map<number, LibraryEntry>();
+    for (const entry of latestList) {
+      if (entry.id !== undefined) cachedById.set(entry.id, entry);
+    }
+    const { found, missingLabels } = await resolveSelection([...selected], cachedById);
+
+    if (missingLabels.length > 0) {
+      toast(t().bundleUi.selectionMissing(missingLabels.join(", ")), "error");
+    }
+    if (found.length === 0) return;
+
+    if (found.length === 1) openShareModal(found[0]!.text, found[0]!.label, found[0]!.exchange);
+    else openBundleShareModal(found);
+  }
 
   const render = (list: LibraryEntry[]): void => {
+    latestList = list;
+
     if (!list.length) {
       body.replaceChildren(
         el(
@@ -81,80 +154,139 @@ export async function openLibraryModal(
           el("p", { class: "library__empty-hint" }, t().library.emptyHint),
         ),
       );
+      // Nothing to select, and nothing to share — see the task spec's edge
+      // case table: an empty library shows no `Share` button at all.
+      footer.replaceChildren();
       return;
     }
 
     const rows = el("ul", { class: "library__list" });
 
-    for (const entry of list) {
-      const row = el("li", { class: "library__row" });
+    if (mode === "list") {
+      for (const entry of list) {
+        const row = el("li", { class: "library__row" });
 
-      const openButton = el(
-        "button",
-        { class: "library__open", type: "button", title: t().library.open(entry.label) },
-        el("span", { class: "library__name", text: entry.label }),
-        el(
-          "span",
-          { class: "library__meta" },
-          // All three of shape/resources/types are absent for a document
-          // whose lens has no resource/type concept — a plain-JSON reading,
-          // or a v2 entry from before that lens existed. Each is omitted
-          // rather than shown empty or as zero: `el`'s `text` silently skips
-          // `undefined`, which for `shape` alone would still emit an empty
-          // `<code>` — a stray flex child, not "nothing to report" the way
-          // omitting the element entirely is.
-          entry.shape !== undefined ? el("code", { class: "library__shape", text: entry.shape }) : null,
-          entry.resources !== undefined ? el("span", { text: t().library.resources(entry.resources) }) : null,
-          entry.types !== undefined ? el("span", { text: t().library.types(entry.types) }) : null,
-          el("span", { text: formatBytes(entry.bytes) }),
-          el("span", { class: "library__when", text: relativeTime(entry.savedAt) }),
-        ),
-      );
-      openButton.addEventListener("click", () => onOpen(entry));
+        const openButton = el(
+          "button",
+          { class: "library__open", type: "button", title: t().library.open(entry.label) },
+          el("span", { class: "library__name", text: entry.label }),
+          rowMeta(entry),
+        );
+        openButton.addEventListener("click", () => onOpen(entry));
 
-      const rename = el("button", {
-        class: "act",
+        const rename = el("button", {
+          class: "act",
+          type: "button",
+          title: t().library.renameTitle,
+          "aria-label": t().library.renameLabel(entry.label),
+          text: t().library.rename,
+        });
+        rename.addEventListener("click", async () => {
+          const next = window.prompt(t().library.renamePrompt, entry.label);
+          if (next === null) return;
+          const trimmed = next.trim();
+          if (!trimmed) return;
+          if (entry.id !== undefined && (await renameInLibrary(entry.id, trimmed))) {
+            entry.label = trimmed;
+            render(list);
+            onChange();
+            toast(t().library.renamed(trimmed));
+          } else {
+            toast(t().library.renameFailed, "error");
+          }
+        });
+
+        const remove = el("button", {
+          class: "act act--danger",
+          type: "button",
+          title: t().library.deleteTitle,
+          "aria-label": t().library.deleteLabel(entry.label),
+          text: t().library.delete,
+        });
+        remove.addEventListener("click", async () => {
+          if (!window.confirm(t().library.deleteConfirm(entry.label))) return;
+          if (entry.id !== undefined && (await deleteFromLibrary(entry.id))) {
+            const remaining = list.filter((e) => e.id !== entry.id);
+            render(remaining);
+            onChange();
+            toast(t().library.deleted(entry.label));
+          } else {
+            toast(t().library.deleteFailed, "error");
+          }
+        });
+
+        row.append(openButton, el("div", { class: "library__row-actions" }, rename, remove));
+        rows.append(row);
+      }
+
+      const shareButton = el("button", {
+        class: "btn",
         type: "button",
-        title: t().library.renameTitle,
-        "aria-label": t().library.renameLabel(entry.label),
-        text: t().library.rename,
+        "data-role": "library-share",
+        text: t().bundleUi.shareButton,
       });
-      rename.addEventListener("click", async () => {
-        const next = window.prompt(t().library.renamePrompt, entry.label);
-        if (next === null) return;
-        const trimmed = next.trim();
-        if (!trimmed) return;
-        if (entry.id !== undefined && (await renameInLibrary(entry.id, trimmed))) {
-          entry.label = trimmed;
-          render(list);
-          onChange();
-          toast(t().library.renamed(trimmed));
-        } else {
-          toast(t().library.renameFailed, "error");
-        }
-      });
-
-      const remove = el("button", {
-        class: "act act--danger",
+      shareButton.addEventListener("click", enterSelect);
+      footer.replaceChildren(shareButton);
+    } else {
+      const hint = el("p", { class: "bundle-hint" });
+      const createButton = el("button", {
+        class: "btn btn--primary",
         type: "button",
-        title: t().library.deleteTitle,
-        "aria-label": t().library.deleteLabel(entry.label),
-        text: t().library.delete,
-      });
-      remove.addEventListener("click", async () => {
-        if (!window.confirm(t().library.deleteConfirm(entry.label))) return;
-        if (entry.id !== undefined && (await deleteFromLibrary(entry.id))) {
-          const remaining = list.filter((e) => e.id !== entry.id);
-          render(remaining);
-          onChange();
-          toast(t().library.deleted(entry.label));
-        } else {
-          toast(t().library.deleteFailed, "error");
-        }
+        "data-role": "library-create-link",
+        text: t().share.create,
       });
 
-      row.append(openButton, el("div", { class: "library__row-actions" }, rename, remove));
-      rows.append(row);
+      const updateCreateState = (): void => {
+        const n = selected.size;
+        createButton.disabled = n === 0;
+        hint.hidden = n !== 0;
+        hint.textContent = n === 0 ? t().bundleUi.tickToShare : "";
+      };
+
+      for (const entry of list) {
+        if (entry.id === undefined) continue; // never true for a row `listLibrary()` returned
+        const row = el("li", { class: "library__row" });
+
+        const checkbox = el("input", {
+          type: "checkbox",
+          class: "library__checkbox",
+          "aria-label": t().bundleUi.selectRow(entry.label),
+        }) as HTMLInputElement;
+        checkbox.checked = selected.has(entry.id);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) selected.add(entry.id!);
+          else selected.delete(entry.id!);
+          updateCreateState();
+        });
+
+        row.append(
+          el(
+            "label",
+            { class: "library__select" },
+            checkbox,
+            el(
+              "span",
+              { class: "library__select-text" },
+              el("span", { class: "library__name", text: entry.label }),
+              rowMeta(entry),
+            ),
+          ),
+        );
+        rows.append(row);
+      }
+
+      updateCreateState();
+
+      const cancelButton = el("button", {
+        class: "btn",
+        type: "button",
+        "data-role": "library-cancel",
+        text: t().bundleUi.cancel,
+      });
+      cancelButton.addEventListener("click", leaveSelect);
+      createButton.addEventListener("click", () => void createLinkFromSelection());
+
+      footer.replaceChildren(hint, el("div", { class: "modal__actions" }, cancelButton, createButton));
     }
 
     body.replaceChildren(rows);
@@ -162,14 +294,45 @@ export async function openLibraryModal(
 
   render(entries);
 
-  openModal({
+  // Escape has two jobs here, and only one of them belongs to `ui.ts`'s own
+  // modal handler: the first Escape leaves selection mode without closing
+  // the modal (the smaller step undoes first), and only a second Escape
+  // closes it. `ui.ts` registers its own Escape handler, also on `document`
+  // in the capture phase, inside `openModal` below — registering this one
+  // first and calling `stopImmediatePropagation` is what lets this run
+  // ahead of it and suppress it for exactly the one case that needs to.
+  const onKeydownCapture = (event: KeyboardEvent): void => {
+    if (event.key !== "Escape" || event.shiftKey) return;
+    if (mode !== "select") return; // second Escape: let ui.ts close the modal
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    leaveSelect();
+  };
+  document.addEventListener("keydown", onKeydownCapture, true);
+
+  const handle = openModal({
     title: t().library.title,
     subtitle: entries.length
       ? t().library.countInBrowser(entries.length)
       : t().library.storedLocally,
     body,
+    // `footer` is an element, so it is truthy even with no children — passing
+    // it unconditionally would have `openModal` wrap an empty `.modal__foot`
+    // bar (padding, border, background) under the empty-library message,
+    // which is not what the pre-T6 modal (no footer key at all) ever showed
+    // (PR #5 review, N11). Deciding this once, from the list this modal
+    // opened with, does not react to deleting every entry back to zero while
+    // it stays open — a much narrower case the review did not raise, and
+    // `openModal`'s API has no way to remove a footer after the fact.
+    footer: entries.length > 0 ? footer : undefined,
     variant: "tall",
   });
+
+  const closeModal = handle.close;
+  handle.close = () => {
+    document.removeEventListener("keydown", onKeydownCapture, true);
+    closeModal();
+  };
 }
 
 /** Ask for a name before saving. */
