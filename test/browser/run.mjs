@@ -309,7 +309,9 @@ try {
     console.log(line);
   }
 
-  // Reload, last, because it destroys the page context the scenarios run in.
+  // Reload, near-last, because it destroys the page context the scenarios
+  // run in — the injected `NAV`/`SCEN` harness does not survive it, so
+  // nothing below this point may call either again.
   //
   // This is the case the old absolute-offset restoration got most wrong — -1215px
   // — and the reason is worth keeping in front of whoever changes this next: on a
@@ -351,7 +353,63 @@ try {
       `\n            top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
   );
 
-  console.log(`\n${keys.length + 1 - failed}/${keys.length + 1} passed`);
+  // One more reload, genuinely last, closing a coverage gap PR #5 review
+  // round 2 found (S9): `isBundleEntryShowing`'s `bundleImportEl.hasChildNodes()`
+  // half — main.ts, just above `markBundleEntry` — had no test anywhere that
+  // could fail. Deleting it and keeping only `state?.bundle === true` left
+  // the entire suite green: 265/265 vitest and every scenario above. What it
+  // guards is a plain F5 on a bundle-marked /view entry: a real browser keeps
+  // an entry's `history.state` across `location.reload()`, but the secret and
+  // the bundle's rendered content do not survive it — a fresh page load
+  // starts `bundleImportEl` empty, and nothing in this session re-populates
+  // it. Without the guard, `applyRoute` reads the stale marker alone, calls
+  // `showView("bundle")`, and shows that empty container: B1's blank page,
+  // reached by a different route. The marker is stamped by hand rather than
+  // run through s27's `fetch` stub and a real share round trip — the guard
+  // only ever reads `history.state` and `bundleImportEl`'s children, and
+  // neither cares how the entry came to be marked, so a hand-stamped one
+  // exercises the exact same mechanism far more cheaply. Placed after the
+  // reload above, not before it, because this one needs no `NAV`/`SCEN` call
+  // of its own — only raw DOM queries — so it does not need the harness
+  // re-injected after destroying the page context a second time.
+  //
+  // `bundleImportEl` carries no id or class (see its own comment in
+  // main.ts), so it is found the same way `showView` distinguishes it from
+  // its four static siblings: the one child of #view whose id is not one of
+  // theirs.
+  await page.evaluate("history.pushState({ bundle: true }, '', '/view'); undefined");
+  await page.evaluate("location.reload(); undefined").catch(() => {});
+  await waitFor(
+    page,
+    "!!document.getElementById('boot') && document.getElementById('boot').hidden === true",
+    "the app to leave the boot view after a bundle-marked reload",
+  );
+  await sleep(1200); // boot() awaits IndexedDB before it settles on a view.
+  const bundleReload = JSON.parse(
+    await page.evaluate(`JSON.stringify((() => {
+      const view = document.getElementById('view');
+      const known = new Set(['boot', 'paste', 'doc', 'legal']);
+      const extra = [...view.children].find((el) => !known.has(el.id));
+      return {
+        path: location.pathname,
+        pasteShowing: !document.getElementById('paste').hidden,
+        docShowing: !document.getElementById('doc').hidden,
+        bundleContainerShowing: extra ? !extra.hidden : null,
+        bundleContainerHasChildren: extra ? extra.hasChildNodes() : null,
+      };
+    })())`),
+  );
+  const bundleReloadOk =
+    bundleReload.bundleContainerShowing === false &&
+    (bundleReload.pasteShowing || bundleReload.docShowing);
+  if (!bundleReloadOk) failed += 1;
+  console.log(
+    `${bundleReloadOk ? "pass" : "FAIL"}       -  a cold reload of a bundle-marked entry is not blank` +
+      `\n            ${JSON.stringify(bundleReload)}`,
+  );
+
+  // +2: the scroll-restoration reload above, and the bundle-marked reload above it.
+  console.log(`\n${keys.length + 2 - failed}/${keys.length + 2} passed`);
 } finally {
   page?.close();
   chrome.kill();

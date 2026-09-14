@@ -147,6 +147,67 @@ first, and this module is what makes that possible without T5 guessing at T2's d
 
 ---
 
+## D3 · One function decides version 2 vs version 3, and it is not UI code
+
+**Date:** 2026-09-03 · **Settles:** where the "one document seals as a plain share, several seal as a
+bundle" decision lives, for every future caller
+
+### Why this is load-bearing
+
+T6 needed this decision in exactly one place: `openLibraryModal`'s selection mode must never mint a
+bundle for a single tick (an acceptance criterion, tested on the sealed bytes' version byte, not a
+variable). T7's task spec asks for the identical decision — `share` takes a document list and seals
+"one document or a bundle" — from a caller that never touches the DOM at all.
+
+### The choice
+
+`mintShareEnvelope(documents: BundleEntry[], secret: string)`, in `src/bundle.ts`, is the one place
+that branches on count: exactly one document calls `seal` (T5's version-2 path, unchanged), anything
+else — including zero — calls `sealBundle` (which already refuses zero, correctly, at version 3's own
+layer). Nothing else in the client makes this decision; `share.ts`'s `openShareModal` and
+`openBundleShareModal` are both thin wrappers that build a `BundleEntry[]` and call this function.
+
+### What T7 should do
+
+Import `mintShareEnvelope` from `src/bundle.ts` rather than re-deriving the one-vs-many rule against
+`seal`/`sealBundle` directly. It takes no DOM, no `i18n` rendering dependency beyond `crypto.ts`'s own
+error catalogue (already required for `seal`/`sealBundle` to run at all), and no store dependency — it
+is safe to call from a module with no UI. If T7's document list needs a different shape than
+`BundleEntry`, either satisfies it structurally (as `LibraryEntry` already does, being a superset) or
+the two task's needs have diverged enough that this decision should be revisited here, not solved
+twice.
+
+### Rejected alternative
+
+Leaving the decision inline in each caller (`openShareModal` checking `if (documents.length === 1)`
+itself, `openBundleShareModal` never receiving fewer than two by convention) — rejected because
+"by convention" is exactly the kind of invariant that survives until the second caller, and T7 is
+already a known second caller before this entry was written.
+
+### A warning for T2, left here because this is where the wiring already reaches the network
+
+`mintShareEnvelope` seals whatever `Exchange` a `LibraryEntry`/`BundleEntry` carries, unredacted, and
+`panels.ts`'s selection flow hands whole library rows to it — so the moment something writes a real
+`Exchange` onto a saved document, sharing it (singly or in a bundle) uploads that `Exchange` as-is.
+Today this is inert: nothing in this codebase writes an `Exchange` yet, T6's own review confirmed it
+by inspection, and building a redaction gate is explicitly T2's task, not T6's. **T2: redaction has
+to run before a document's `Exchange` reaches `mintShareEnvelope`, on both the single-document and
+the bundle path, since both go through the same function** (see the header of this entry). The
+sealing code itself carries the same warning inline, at the two points `exchange` is read
+(`src/bundle.ts`, `mintShareEnvelope`).
+
+### A number this entry may not keep
+
+This is the first `D3` on any branch, but `docs/DECISIONS.md` does not exist on `main` yet, and both
+T1 and T5 independently created it with their own, different `D2`. Whichever integration merges those
+two will have to renumber one of them, and every `D3`-and-later entry — this one included — most
+likely shifts to `D4`. Do not renumber pre-emptively on this branch; follow whatever number the
+integration assigns once it exists, and update every reference to "D3" in this repository's docs
+(`STATUS.md`'s T6 row, this file's own cross-references, anything in a later task's brief) together,
+in one change, rather than piecemeal.
+
+---
+
 ## D4 · Identity inference is scoped by container name, and would rather miss a link than mint a wrong one
 
 **Date:** 2026-09-03 · **Settles:** what makes a repeated value in plain JSON "the same identity",

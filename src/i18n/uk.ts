@@ -691,4 +691,29 @@ export const uk: Messages = {
     storedDocument: "збережений документ",
     sharedDocument: (id) => `спільний документ ${f.n(id)}`,
   },
+
+  bundleUi: {
+    shareButton: "Поділитися",
+    cancel: "Скасувати",
+    tickToShare: "Позначте щонайменше один документ, щоб створити посилання.",
+    selectRow: (label) => `Вибрати ${label}`,
+    selectionMissing: (labels) => `Більше не збережено, тому не включено: ${labels}`,
+    shareSubtitle: (n, size) =>
+      `${f.n(n)} ${f.plural(n, { one: "документ", few: "документи", many: "документів", other: "документа" })} · ${size}`,
+
+    importTitle: "Імпортувати спільні документи",
+    importCount: (n) =>
+      `${f.n(n)} ${f.plural(n, { one: "документ", few: "документи", many: "документів", other: "документа" })} у цьому посиланні`,
+    alreadySaved: "Уже збережено",
+    importSelected: "Імпортувати вибрані",
+    tickToImport: "Позначте щонайменше один документ для імпорту.",
+    open: "Відкрити",
+    // Not `f.plural`: after "з" (out of), the noun takes genitive case rather
+    // than agreeing with `total` the way a bare "N документи" would — genitive
+    // singular for exactly 1, genitive plural for anything else.
+    imported: (saved, total) =>
+      `Збережено ${f.n(saved)} з ${f.n(total)} ${total === 1 ? "документа" : "документів"}.`,
+    importFailed: "Нічого не вдалося зберегти. Можливо, ваш браузер блокує сховище.",
+    done: "Готово",
+  },
 };

@@ -749,6 +749,14 @@ export const en = {
         headline: "That shared bundle is corrupt.",
         hint: "It decrypted, but does not contain a bundle.",
       },
+      // Dead since T6 shipped the bundle import view — `share.ts`'s
+      // `fetchShare` no longer narrows a bundle away and refuse it with this
+      // message, so nothing calls it any more (PR #5 review, N9). Left in
+      // place rather than removed: it stays inside T6's own diff's reach to
+      // delete only by touching T5's `bundle` key, which is the one thing
+      // every concurrent diff on this file was asked to avoid. Safe to
+      // delete (in all three catalogues) whenever someone is next editing
+      // this exact key for another reason.
       unavailable: {
         headline: "This share link contains several documents.",
         hint: "This version of jsonapi-lens has no bundle view yet, so nothing here can display it. Ask for a single-document link instead, or try again later.",
@@ -762,6 +770,42 @@ export const en = {
     pastedDocument: "pasted document",
     storedDocument: "stored document",
     sharedDocument: (id: number) => `shared document ${f.n(id)}`,
+  },
+
+  /*
+   * ----------------------------------------------------------- bundleUi ---
+   * T6's own top-level key: selection mode in the saved-documents library,
+   * and the view that imports a bundle a share link decrypted to. Kept apart
+   * from `bundle` — T5's envelope-level strings, just above `labels` — for
+   * the same reason `bundle` gave itself a key of its own: this diff, T5's,
+   * T1's and T2's all touch this file, and staying inside one new top-level
+   * key each is what lets four of them merge.
+   */
+
+  bundleUi: {
+    shareButton: "Share",
+    cancel: "Cancel",
+    tickToShare: "Tick at least one document to create a link.",
+    selectRow: (label: string) => `Select ${label}`,
+    selectionMissing: (labels: string) => `No longer saved, so not included: ${labels}`,
+    shareSubtitle: (n: number, size: string) =>
+      `${f.n(n)} ${f.plural(n, { one: "document", other: "documents" })} · ${size}`,
+
+    importTitle: "Import shared documents",
+    importCount: (n: number) =>
+      `${f.n(n)} ${f.plural(n, { one: "document", other: "documents" })} in this link`,
+    alreadySaved: "Already saved",
+    importSelected: "Import selected",
+    tickToImport: "Tick at least one document to import.",
+    open: "Open",
+    // Not `f.plural`: "X of Y" always takes the plural noun form for any Y
+    // other than exactly 1 in every language this catalogue covers so far —
+    // it is the "of" that decides the form, not Y's own CLDR category — so
+    // this is a plain two-way branch rather than a category lookup.
+    imported: (saved: number, total: number) =>
+      `Saved ${f.n(saved)} of ${f.n(total)} ${total === 1 ? "document" : "documents"}.`,
+    importFailed: "Nothing could be saved. Your browser may be blocking storage.",
+    done: "Done",
   },
 };
 
