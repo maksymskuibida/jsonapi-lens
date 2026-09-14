@@ -486,7 +486,11 @@ src/
   share.ts            share API client and its modal (one document or several)
   bundle.ts           minting a bundle, selection resolution, duplicate detection, the import view
   store.ts            IndexedDB: current document and saved library
-  exchange.ts         placeholder for T2's captured-request model
+  exchange.ts         the Exchange model (request/response/body) and mergeExchange
+  params.ts           one query-string/form decoder, every encoding named, ambiguity kept
+  headers.ts          case-insensitive header lookup with duplicates preserved in order
+  cookies.ts          Cookie and Set-Cookie parsing into name/value/attributes
+  secrets.ts          secret-header/credential-shape detection, JWT decoding, redaction
   clipboard.ts        copy and download
   ui.ts               toast and modal
   panels.ts           raw view, saved documents (with its selection mode), save, shortcuts

@@ -481,8 +481,6 @@ try {
     report(false, "err", "resume renders the stored document", error.message);
   }
 
-  console.log(`\n${total - failed}/${total} passed`);
-
   // Plain JSON: a reference nested deeper than `AUTO_OPEN_DEPTH` must still be
   // *visibly* open after a reload, not merely present in the DOM. This is the
   // one check in this suite that can see that class of regression at all —
@@ -560,10 +558,11 @@ try {
   const chainSurvived = after.chain.length === before.chain.length && after.chain.every((open) => open === true);
   const heightSurvived = Math.abs(after.height - before.height) <= 2;
   const plainOk = clickWorked && chainSurvived && heightSurvived;
-  if (!plainOk) failed += 1;
-  console.log(
-    `${plainOk ? "pass" : "FAIL"}  ${String(after.height).padStart(6)}px  28 plain JSON: a reference 2+ levels deep survives reload` +
-      `\n            chain ${JSON.stringify(before.chain)}->${JSON.stringify(after.chain)}, height ${before.height}->${after.height}, clickWorked=${clickWorked}, chainSurvived=${chainSurvived}, heightSurvived=${heightSurvived}`,
+  report(
+    plainOk,
+    `${after.height}px`,
+    "28 plain JSON: a reference 2+ levels deep survives reload",
+    `chain ${JSON.stringify(before.chain)}->${JSON.stringify(after.chain)}, height ${before.height}->${after.height}, clickWorked=${clickWorked}, chainSurvived=${chainSurvived}, heightSurvived=${heightSurvived}`,
   );
 
   // One more reload, genuinely last, closing a coverage gap PR #5 review
@@ -615,14 +614,19 @@ try {
   const bundleReloadOk =
     bundleReload.bundleContainerShowing === false &&
     (bundleReload.pasteShowing || bundleReload.docShowing);
-  if (!bundleReloadOk) failed += 1;
-  console.log(
-    `${bundleReloadOk ? "pass" : "FAIL"}       -  a cold reload of a bundle-marked entry is not blank` +
-      `\n            ${JSON.stringify(bundleReload)}`,
+  report(
+    bundleReloadOk,
+    "-",
+    "a cold reload of a bundle-marked entry is not blank",
+    JSON.stringify(bundleReload),
   );
 
-  // +2: the scroll-restoration reload above, and the bundle-marked reload above it.
-  console.log(`\n${keys.length + 2 - failed}/${keys.length + 2} passed`);
+  // `total` is whatever `report` was actually called with, rather than a
+  // hand-maintained `keys.length + n`: every check added since this line was
+  // written was added outside `SCEN`, and each one silently widened the gap
+  // between the denominator and the run. An under-counted total is invisible
+  // in a green run — see `report`'s own comment.
+  console.log(`\n${total - failed}/${total} passed`);
 } finally {
   page?.close();
   chrome.kill();

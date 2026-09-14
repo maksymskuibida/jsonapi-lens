@@ -19,5 +19,11 @@
   // The Worker runs on workerd, not in a browser: its `Request`/`Response` and
   // globals come from @cloudflare/workers-types and conflict with the DOM lib
   // above. It is typechecked separately by tsconfig.worker.json.
-  "exclude": ["src/worker.ts"]
+  //
+  // test/mcp runs on plain Node (it exercises the mcp/ tree, including one
+  // real subprocess), so it needs `@types/node` and Node module resolution
+  // rather than this program's `types: ["vite/client"]` and bundler
+  // resolution. It is typechecked by mcp/tsconfig.json instead, for the same
+  // reason as the worker exclusion above — see that file's header comment.
+  "exclude": ["src/worker.ts", "test/mcp"]
 }

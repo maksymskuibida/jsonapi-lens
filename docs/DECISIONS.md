@@ -82,7 +82,12 @@ people's browser history and in the README, for no gain over a distinct first ch
 
 ## D2 · `Exchange` is a placeholder module, not an inline opaque type
 
-**Date:** 2026-09-03 · **Settles:** how T5's types reference a model T2 has not built yet
+**Date:** 2026-09-03 · **Settles:** how T5's types reference a model T2 has not built yet ·
+**Discharged:** 2026-09-03, by T2a — see "What T2a actually did" below. Kept rather than deleted:
+the reasoning for the placeholder is still why `store.ts` and `crypto.ts` (T5) and `mcp/` (T7,
+queued) could be built before this module's real design existed, and a later reader asking "why does
+this codebase have a decision about a type that no longer looks like this" needs that history, not a
+gap where it used to be.
 
 ### Why this is load-bearing
 
@@ -91,9 +96,9 @@ T5 (storage and the share envelope) attaches an optional exchange to four differ
 carry one (`store.ts`, `crypto.ts`). The real shape of a captured HTTP exchange is T2's design, built
 in a later wave, and [T5's task spec](task-specs/T5.md) is explicit that T5 must not block on it.
 
-### The choice
+### The choice, as it stood until T2a
 
-`src/exchange.ts` is a new module exporting one interface:
+`src/exchange.ts` was a new module exporting one interface:
 
 ```ts
 export interface Exchange {
@@ -102,7 +107,8 @@ export interface Exchange {
 ```
 
 Every type that carries an exchange imports `Exchange` from this module, rather than each declaring
-its own inline `Record<string, unknown>`.
+its own inline `Record<string, unknown>`. This is no longer what the file contains — see below — but
+the shape above is what T5, and any code written against T5 before T2a landed, was built against.
 
 ### Why not the inline alternative
 
@@ -114,10 +120,24 @@ if one is missed. A dedicated module means T2 edits **one file** — the body of
 every consumer that only carries the value forward, never reading a field off it, keeps compiling
 unchanged.
 
-### What T2 must do
+### What T2a actually did
 
-Replace the body of `src/exchange.ts` with the real interface. No other file that imports `Exchange`
-needs to change unless it starts reading a specific field off it — none of T5's code does, by design.
+Replaced the body of `src/exchange.ts` with the real model: `Exchange { request?: RequestPart,
+response?: ResponsePart, origin?: OriginMeta }`, `RequestPart`, `ResponsePart` and `BodyPart` (see
+`src/exchange.ts`'s own header comment for the full shape and `mergeExchange`), plus `OriginMeta`
+itself carrying forward this decision's own pattern — an opaque `{ [key: string]: unknown }`, this
+time as a placeholder for **T3**, which depends on T2a and has not landed yet.
+
+The prediction this entry made held exactly: `store.ts` and `crypto.ts` needed **no changes** to
+their own logic, because neither reads a field off an `Exchange` value — both only ever carry one
+forward, whole. Two of T5's *tests* did need a mechanical fix (`test/store.test.ts`,
+`test/crypto.test.ts`): two sample literals hard-coded fields directly on `exchange` (e.g.
+`{ method: "GET", url: "..." }`) rather than nested under `exchange.request`/`exchange.response`,
+which only ever typechecked against the opaque placeholder above. That is a consequence of
+constructing sample data with a guessed shape, not of reading a field off a real value, so it does
+not contradict what this entry predicted — it is the one corner "no other file needs to change"
+did not quite reach, and is called out here so the next placeholder-discharging task knows to check
+for it too.
 
 ### Rejected alternative
 
@@ -195,6 +215,73 @@ drawing any.
 
 ---
 
+## D4 · A decoded parameter is a reading plus its alternatives, never a resolved scalar alone
+
+**Date:** 2026-09-03 · **Settles:** what `params.ts#decodeParams` hands back for one query-string or
+form-urlencoded parameter, and what T3's importers and T4's diagnostics may assume about it.
+
+### Why this is load-bearing
+
+`docs/task-specs/T2.md`'s Parameters section exists because this codebase has already shipped two
+defects shaped exactly like "a heuristic that looked right and picked silently" — a broken pointer
+from treating any `id`-suffixed key as a reference, and a falsy-`[]` check that skipped restoration
+entirely. A parameter decoder is the same trap with a wider mouth: `a=1,2` is a list under the
+JSON:API convention this tool is built for and the literal three-character string `"1,2"` under
+Express's, and the wire text cannot tell you which. Every later diagnostic (T4) and every importer
+that writes a `ParamSet` (T3) reads or produces this shape, so what "a decoded parameter" *is*
+has to be settled once, here, rather than re-derived differently by each.
+
+### The rule
+
+A `ParamEntry` separates two independent axes of ambiguity, and never collapses either into a single
+guessed answer:
+
+- **Key shape** (which convention governs the pair's syntax — bare, `a[]`, `a[N]`, `a[key]`, `a.key`)
+  is unambiguous for one pair in isolation, but two pairs for the *same top-level name* can use
+  syntaxes that cannot both be true at once (`a=1` beside `a[]=2`). This is a **conflict**:
+  `value`/`convention` are left unset, and `conflict` carries every incompatible reading the wire
+  data implies — not the first one, not the "most common" one, all of them. Detected by bucketing a
+  name's pairs into bare/index-like/key-like and treating more than one non-empty bucket as a
+  conflict, at any count (two incompatible syntaxes or three).
+- **Value shape** (how one scalar wire value reads — comma list, space/pipe list, a JSON literal,
+  base64url-encoded JSON, or plain text) is genuinely ambiguous from the wire text alone. The decoder
+  picks the JSON:API-shaped reading as `value`/`convention` (this tool exists to read JSON:API) and
+  keeps every other plausible reading in `alternatives`, each located by `path` within the
+  parameter's own value — so a leaf several levels deep (`filter[status][in]`'s comma list) can be
+  flagged without disturbing the object around it.
+- `conventions` lists every convention actually used anywhere while decoding one entry, not just the
+  outermost — `filter[status][in]=booked,held` reports both `bracket-object` and `comma`, because
+  both are true of how that one parameter was read.
+- **Nothing here is guessed away silently, and nothing is thrown either.** A malformed key, an
+  unresolvable value, a value that happens to be short/plain — every case in `params.ts` returns a
+  value; none of them raise.
+
+### What this means for T3 and T4
+
+- **T3's importers** produce `Partial<Exchange>` values that merge through `mergeExchange`
+  (`docs/task-specs/T3.md`'s own Interface section). Any importer that builds a `query`/`form`
+  `ParamSet` by hand (rather than by calling `decodeParams` on wire text it already has) must produce
+  entries shaped this way — in particular, it may not resolve an ambiguous value to a bare scalar and
+  drop the alternative, and it may not paper over a genuine key-syntax conflict by picking one
+  reading. If an importer's source format has its own unambiguous notion of a parameter (a HAR
+  entry's already-parsed query array, say), the honest encoding is still `convention: "plain"` per
+  value with no invented ambiguity — never a convention the source format did not actually use.
+- **T4's diagnostics** may read `entry.value`/`entry.convention` as this decoder's best single answer,
+  but a check that depends on knowing whether a value was genuinely ambiguous must look at
+  `alternatives`/`conflict` rather than assume `value` is the only defensible reading. A cross-check
+  that silently prefers `value` over a live `conflict` reproduces the exact failure mode this
+  decision exists to prevent, one layer up.
+
+### Rejected alternative
+
+Picking one reading and exposing the rest only as a debug/verbose field — the shape most decoders
+default to — was rejected because it reintroduces the choice this task exists to remove: a "debug"
+field nobody reads by default is functionally the same as not having the alternative at all, and this
+release has already shipped two defects that were exactly one unread edge case away from being
+caught. Making `alternatives`/`conflict` first-class, typed members of `ParamEntry` — not an optional
+afterthought — is what makes it possible for T2b to render "read as a list, click to read as text"
+as a normal interaction rather than a debugging feature, and for T4 to check them at all.
+
 ## D5 · One function decides version 2 vs version 3, and it is not UI code
 
 **Date:** 2026-09-03 · **Settles:** where the "one document seals as a plain share, several seal as a
@@ -244,12 +331,9 @@ the bundle path, since both go through the same function** (see the header of th
 sealing code itself carries the same warning inline, at the two points `exchange` is read
 (`src/bundle.ts`, `mintShareEnvelope`).
 
-### A number this entry may not keep
+### The number this entry ended up with
 
-This is the first `D3` on any branch, but `docs/DECISIONS.md` does not exist on `main` yet, and both
-T1 and T5 independently created it with their own, different `D2`. Whichever integration merges those
-two will have to renumber one of them, and every `D3`-and-later entry — this one included — most
-likely shifts to `D4`. Do not renumber pre-emptively on this branch; follow whatever number the
-integration assigns once it exists, and update every reference to "D3" in this repository's docs
-(`STATUS.md`'s T6 row, this file's own cross-references, anything in a later task's brief) together,
-in one change, rather than piecemeal.
+The renumbering this entry once warned about has happened, and this records the
+outcome so nobody re-derives it: **D3** is T1's identity scoping, **D4** is
+T2a's parameter model, and this entry is **D5**. Every reference was moved in
+one change — `src/bundle.ts`, `STATUS.md`'s T6 row, and `docs/evidence/T6.md`.
