@@ -217,10 +217,6 @@ drawing any.
 
 ## D4 · A decoded parameter is a reading plus its alternatives, never a resolved scalar alone
 
-> **Numbering note:** assigned as the next free slot as of this PR (D3 is reserved by T6's
-> not-yet-merged branch; D4 is T1's, already on `integration/wave1`). Confirm this does not collide
-> before merging — see the T2a pull request body.
-
 **Date:** 2026-09-03 · **Settles:** what `params.ts#decodeParams` hands back for one query-string or
 form-urlencoded parameter, and what T3's importers and T4's diagnostics may assume about it.
 

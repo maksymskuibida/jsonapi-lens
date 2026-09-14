@@ -10,6 +10,7 @@ import {
 import type { Exchange } from "../src/exchange.js";
 import { headerSet } from "../src/headers.js";
 import { decodeParams, findParam } from "../src/params.js";
+import { parseSetCookies } from "../src/cookies.js";
 
 /**
  * A JWT built independently of `src/params.ts#bytesToBase64Url`, so this test
@@ -278,6 +279,52 @@ describe("redactExchange", () => {
 
     const noQuery = "https://api.example.com/x";
     expect(redactExchange({ request: { url: noQuery } }).exchange.request?.url).toBe(noQuery);
+  });
+
+  /**
+   * BL-1. The fragment is where an OAuth implicit-flow token actually lands
+   * (`#access_token=…`), and `redactUrl` handles it — but until this test
+   * existed, deleting that handling left the whole suite green, because the
+   * only other fragment case puts its secret in the *query* and asserts just
+   * that `#section` survives. Mutating `redactedFragment` back to `fragment`
+   * must turn this red.
+   */
+  it("redacts a credential carried in the URL fragment, not just the query", () => {
+    const jwt = makeJwt({ alg: "HS256", typ: "JWT" }, { sub: "12345" });
+    const { exchange: redacted, count } = redactExchange({
+      request: { url: `https://api.example.com/cb#access_token=${jwt}&state=xyz` },
+    });
+    const url = redacted.request?.url ?? "";
+    expect(count).toBe(1);
+    expect(url).not.toContain(jwt);
+    expect(url).toContain(encodeURIComponent(REDACTED_VALUE));
+    // The rest of the fragment is data, not a credential, and must survive.
+    expect(url).toContain("state=xyz");
+  });
+
+  it("leaves a fragment that carries no credential byte-identical", () => {
+    const url = "https://api.example.com/docs#section-2";
+    expect(redactExchange({ request: { url } }).exchange.request?.url).toBe(url);
+  });
+
+  /**
+   * BL-2. A `Set-Cookie` line without a comma-separated split puts a second
+   * cookie's `name=value` inside the first's `Path` attribute, so an attribute
+   * value can carry a credential verbatim. Removing `attributeLooksUnsafe`
+   * left the suite green before this test existed.
+   */
+  it("redacts a credential hiding in a Set-Cookie attribute value", () => {
+    const secret = "SUPERSECRETVALUE1234567890abcdef";
+    const cookies = parseSetCookies([`sid=abc; Path=/x, token=${secret}; Domain=example.com`]);
+    // Precondition: the secret really is sitting in an attribute, not in `value`.
+    expect(cookies.entries[0]!.path).toContain(secret);
+
+    const { exchange: redacted, count } = redactExchange({ response: { cookies } });
+    expect(count).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(redacted)).not.toContain(secret);
+    expect(redacted.response?.cookies?.entries[0]!.path).toBe(REDACTED_VALUE);
+    // An ordinary attribute is not collateral damage.
+    expect(redacted.response?.cookies?.entries[0]!.domain).toBe("example.com");
   });
 
   it("redacts RequestPart.query the same way as the URL, independent of it", () => {
