@@ -136,7 +136,7 @@ describe("test data hygiene", () => {
     const files = scannedFiles();
     expect(files.length).toBeGreaterThan(15);
     expect(files.map((f) => f.path)).toContain("test/fixtures/transport-log-started.json");
-    expect(files.map((f) => f.path)).toContain("docs/task-specs/T1.md");
+    expect(files.map((f) => f.path)).toContain("docs/DECISIONS.md");
   });
 
   it("contains no email address outside the reserved example domains", () => {

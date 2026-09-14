@@ -51,10 +51,23 @@ describe("isSecretHeaderName", () => {
   });
 });
 
+const REALISTIC_JWT =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" +
+  ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0" +
+  ".dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+
 describe("detectCredentialShape", () => {
   it("recognises a JWT shape — three base64url segments — without decoding it", () => {
-    expect(detectCredentialShape("abc.def.ghi")).toEqual({ kind: "jwt" });
-    expect(detectCredentialShape("Bearer abc.def.ghi")).toEqual({ kind: "jwt" });
+    expect(detectCredentialShape(REALISTIC_JWT)).toEqual({ kind: "jwt" });
+    expect(detectCredentialShape(`Bearer ${REALISTIC_JWT}`)).toEqual({ kind: "jwt" });
+  });
+
+  it("does not mistake a short dotted value — a version string or filename — for a JWT", () => {
+    // JWT_SHAPE_RE requires 10+ chars per segment precisely so these do not
+    // get rewritten to [REDACTED]: over-redaction destroys data the user
+    // pasted in to inspect, which is worse than under-redaction.
+    expect(detectCredentialShape("1.2.3")).toBeNull();
+    expect(detectCredentialShape("my.file.txt")).toBeNull();
   });
 
   it("recognises sk_/pk_-prefixed keys", () => {
@@ -86,7 +99,12 @@ describe("shouldMaskHeader", () => {
   });
 
   it("masks by value shape even under an unlisted header name", () => {
-    expect(shouldMaskHeader("X-Session", "abc.def.ghi")).toBe(true);
+    expect(shouldMaskHeader("X-Session", REALISTIC_JWT)).toBe(true);
+  });
+
+  it("does not mask a header whose value merely contains dots, like a version or filename", () => {
+    expect(shouldMaskHeader("X-Session", "1.2.3")).toBe(false);
+    expect(shouldMaskHeader("X-Session", "my.file.txt")).toBe(false);
   });
 
   it("leaves an ordinary header/value pair alone", () => {
