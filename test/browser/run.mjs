@@ -351,7 +351,48 @@ try {
       `\n            top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
   );
 
-  console.log(`\n${keys.length + 1 - failed}/${keys.length + 1} passed`);
+  // Resuming a stored document from the paste view, which needs a page load of
+  // its own and so cannot be a scenario — every `SCEN.*` runs in one page
+  // context, and a load destroys it.
+  //
+  // `boot()` parses a stored document so that "Back to document" is instant but
+  // deliberately stays on the paste view, so a loaded document and an empty
+  // `#doc` is a normal state. Revealing the document view without building it
+  // first showed a blank page below the topbar, and "leave the tab, come back
+  // later, click the button" is an ordinary way to use the app.
+  await page.navigate(`${ORIGIN}/`);
+  await waitFor(
+    page,
+    "!document.getElementById('resume').hidden && !!document.querySelector('#resume button')",
+    "the resume button offering the stored document",
+  );
+  const resumed = JSON.parse(
+    await page.evaluate(`(async () => {
+      // Nothing rendered yet is the state under test: if the document view were
+      // already built, clicking would prove nothing about building it.
+      const before = document.getElementById('doc').childElementCount;
+      document.querySelector('#resume button').click();
+      await new Promise((r) => setTimeout(r, 1200));
+      const doc = document.getElementById('doc');
+      return JSON.stringify({
+        before,
+        path: location.pathname,
+        hidden: doc.hidden,
+        children: doc.childElementCount,
+        sections: document.querySelectorAll('.res').length,
+      });
+    })()`),
+  );
+  const resumeOk =
+    resumed.path === "/view" && !resumed.hidden && resumed.children > 0 && resumed.sections > 0;
+  if (!resumeOk) failed += 1;
+  console.log(
+    `${resumeOk ? "pass" : "FAIL"}  ${String(resumed.sections).padStart(6)}    resume renders the stored document` +
+      `\n            #doc children ${resumed.before}->${resumed.children} at ${resumed.path}` +
+      `${resumed.before > 0 ? " (already built before the click — this run proved nothing)" : ""}`,
+  );
+
+  console.log(`\n${keys.length + 2 - failed}/${keys.length + 2} passed`);
 } finally {
   page?.close();
   chrome.kill();
