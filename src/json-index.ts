@@ -2,7 +2,7 @@
  * Building the index for a plain-JSON (non-JSON:API) document: the inferred
  * collections the rail reads, and the identity graph — a repeated identifier
  * becomes a link, the way a `{type, id}` pointer already does in a JSON:API
- * document. See `docs/task-specs/T1.md` and `docs/DECISIONS.md` D2.
+ * document. See `docs/task-specs/T1.md` and `docs/DECISIONS.md` D3.
  *
  * Pure — no DOM, like `parse.ts#buildIndex`, which this is the plain-JSON
  * sibling of. One iterative (not recursive — a 200-level-deep document must
@@ -146,7 +146,7 @@ function isBareIdKey(key: string): boolean {
  * `valid` without a dictionary of real container names) and `uid` (the
  * bare-key set has no entry for it, and after this boundary fix it is no
  * longer read as a compound reference either, so it simply is not an
- * identity candidate — see the module header and D2 for "a wrong link is
+ * identity candidate — see the module header and D3 for "a wrong link is
  * worse than none"). `u_id`, with an explicit separator, still yields scope
  * `u`, which is correct: the separator is real evidence, however short the
  * stem either side of it.

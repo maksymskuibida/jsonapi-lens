@@ -80,7 +80,52 @@ people's browser history and in the README, for no gain over a distinct first ch
 
 ---
 
-## D2 · Identity inference is scoped by container name, and would rather miss a link than mint a wrong one
+## D2 · `Exchange` is a placeholder module, not an inline opaque type
+
+**Date:** 2026-09-03 · **Settles:** how T5's types reference a model T2 has not built yet
+
+### Why this is load-bearing
+
+T5 (storage and the share envelope) attaches an optional exchange to four different types —
+`StoredDocument`, `LibraryEntry`, `SharePayload`, `BundleEntry` — across the two files it owns that
+carry one (`store.ts`, `crypto.ts`). The real shape of a captured HTTP exchange is T2's design, built
+in a later wave, and [T5's task spec](task-specs/T5.md) is explicit that T5 must not block on it.
+
+### The choice
+
+`src/exchange.ts` is a new module exporting one interface:
+
+```ts
+export interface Exchange {
+  readonly [key: string]: unknown;
+}
+```
+
+Every type that carries an exchange imports `Exchange` from this module, rather than each declaring
+its own inline `Record<string, unknown>`.
+
+### Why not the inline alternative
+
+The task spec offered two options: declare the field inline as an opaque, structurally-typed payload
+"that T2 narrows", or import the type from a module T5 creates and T2 fills in. An inline
+`Record<string, unknown>` repeated at four call sites is equally valid TypeScript, but T2 replacing it
+later would mean editing four sites across two files in lockstep, with nothing that fails to compile
+if one is missed. A dedicated module means T2 edits **one file** — the body of `exchange.ts` — and
+every consumer that only carries the value forward, never reading a field off it, keeps compiling
+unchanged.
+
+### What T2 must do
+
+Replace the body of `src/exchange.ts` with the real interface. No other file that imports `Exchange`
+needs to change unless it starts reading a specific field off it — none of T5's code does, by design.
+
+### Rejected alternative
+
+Waiting for T2 to land before starting T5 — rejected outright, since it defeats the point of running
+T1 and T5 as a wave. `docs/STATUS.md` §1a's dependency graph (`T5 → {T2, T6, T7}`) requires T5 to ship
+first, and this module is what makes that possible without T5 guessing at T2's design.
+
+## D3 · Identity inference is scoped by container name, and would rather miss a link than mint a wrong one
 
 **Date:** 2026-09-03 · **Settles:** what makes a repeated value in plain JSON "the same identity",
 for `src/json-index.ts` and for any later task that reads or extends it (T2's request-scoped

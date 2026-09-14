@@ -2,7 +2,7 @@
  * Minimal structural types for the parts of JSON:API this viewer reads —
  * and, since T1, for a plain-JSON document too. `Lens` is the seam: the view
  * layer consumes one or the other, `DocumentIndex` unchanged and `JsonIndex`
- * new. See `docs/task-specs/T1.md` and `docs/DECISIONS.md` D2.
+ * new. See `docs/task-specs/T1.md` and `docs/DECISIONS.md` D3.
  */
 
 export type JsonValue =
