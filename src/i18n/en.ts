@@ -19,6 +19,7 @@
 
 import { el, frag } from "../dom.js";
 import { intlFor } from "./intl.js";
+import { formatBytes } from "../format.js";
 import type { Shape, ShapeEvidence } from "../types.js";
 
 const f = intlFor("en");
@@ -752,6 +753,130 @@ export const en = {
       unavailable: {
         headline: "This share link contains several documents.",
         hint: "This version of jsonapi-lens has no bundle view yet, so nothing here can display it. Ask for a single-document link instead, or try again later.",
+      },
+    },
+  },
+
+  /*
+   * ------------------------------------------------------------ import ---
+   * T3's six importers — cURL, a raw HTTP request, a raw HTTP response, a
+   * bare URL, a HAR file, and a JSON transport log. `common` holds the
+   * handful of notices more than one importer needs to say the same way;
+   * everything else is grouped under the importer that raises it. None of
+   * these are rendered by this module — they are plain strings an importer
+   * returns as `Detection.summary` or an `ImportResult.warnings` entry, or an
+   * `ImportError`'s headline/hint, for whichever view ends up showing them.
+   */
+
+  import: {
+    common: {
+      schemeAssumed: "No scheme was given, so https:// was assumed.",
+      urlUnparseable: (url: string) => `"${url}" could not be read as a URL and was kept as text.`,
+      queryUndecodable: "The query string could not be decoded and was left out.",
+      secretsMasked: (n: number) =>
+        `${f.n(n)} ${f.plural(n, { one: "secret", other: "secrets" })} masked. Redaction is offered by default on Copy, Download and Share.`,
+    },
+
+    curl: {
+      summary: (method: string, headers: number) =>
+        `cURL · ${method} · ${f.n(headers)} ${f.plural(headers, { one: "header", other: "headers" })}`,
+      fileContentUnavailable: "file content not available here",
+      warnings: {
+        unknownFlag: (flag: string) => `Unrecognised flag ${flag} was skipped.`,
+        malformedHeader: (raw: string) => `-H "${raw}" has no ":" and no trailing ";", so it was skipped.`,
+        malformedForm: (raw: string) => `-F "${raw}" is not a name=value pair, so it was skipped.`,
+        fileNotReadable: (arg: string) => `"${arg}" reads from a file, which cannot be read here, so it was skipped.`,
+        extraUrl: (token: string) => `A second URL ("${token}") was given; only the first was imported.`,
+      },
+      errors: {
+        unbalancedQuote: {
+          headline: "This command has an unterminated quote.",
+          hint: (quote: string) => `A ${quote} opened here is never closed.`,
+        },
+        notACommand: {
+          headline: "This does not start with curl.",
+          hint: "Paste the whole command, starting with curl.",
+        },
+      },
+    },
+
+    rawHttp: {
+      warnings: {
+        noBlankLine: "No blank line separated the headers from a body, so this was read as headers only.",
+        chunkedNotClean: "The chunked body did not reassemble cleanly. What could be read is shown.",
+      },
+    },
+
+    rawHttpRequest: {
+      summary: (method: string) => `Raw HTTP request · ${method}`,
+      errors: {
+        noRequestLine: {
+          headline: "This does not start with a request line.",
+          hint: "The first line should look like GET /path HTTP/1.1.",
+        },
+      },
+    },
+
+    rawHttpResponse: {
+      summary: (status: number) => `Raw HTTP response · ${f.n(status)}`,
+      errors: {
+        noStatusLine: {
+          headline: "This does not start with a status line.",
+          hint: "The first line should look like HTTP/1.1 200 OK.",
+        },
+      },
+    },
+
+    url: {
+      summary: (params: number) =>
+        params > 0 ? `URL · ${f.n(params)} ${f.plural(params, { one: "param", other: "params" })}` : "URL",
+      errors: {
+        notAUrl: {
+          headline: "This does not read as a URL.",
+          hint: "Paste a full address, such as https://api.example.com/widgets.",
+        },
+      },
+    },
+
+    har: {
+      summary: (entries: number) => `HAR · ${f.n(entries)} ${f.plural(entries, { one: "entry", other: "entries" })}`,
+      bodyPlaceholderBinary: (bytes: number) => `Binary content, ${formatBytes(bytes)} — not shown as text.`,
+      warnings: {
+        empty: "This HAR file has no entries.",
+        entrySkipped: (index: number) => `Entry ${f.n(index + 1)} could not be read and was skipped.`,
+        entryUrlUnparseable: (index: number, url: string) =>
+          `Entry ${f.n(index + 1)}'s URL ("${url}") could not be read and was kept as text.`,
+        entryQueryUndecodable: (index: number) => `Entry ${f.n(index + 1)}'s query string could not be decoded.`,
+        binaryBody: (index: number) =>
+          `Entry ${f.n(index + 1)}'s response body is binary and is shown as a size, not as text.`,
+      },
+      errors: {
+        notHar: {
+          headline: "This does not look like a HAR file.",
+          hint: 'A HAR file is a JSON object with a top-level "log" containing an "entries" array.',
+        },
+      },
+    },
+
+    transportLog: {
+      summary: (records: number, calls: number) =>
+        `JSON transport log · ${f.n(calls)} ${f.plural(calls, { one: "call", other: "calls" })} (${f.n(records)} ${f.plural(records, { one: "record", other: "records" })})`,
+      warnings: {
+        recordsSkipped: (n: number) =>
+          `${f.n(n)} ${f.plural(n, { one: "record", other: "records" })} not recognised as a transport-log entry and skipped.`,
+        malformedLines: (n: number) =>
+          `${f.n(n)} ${f.plural(n, { one: "line", other: "lines" })} did not parse as JSON and were skipped.`,
+        ambiguousKind: (n: number) =>
+          `${f.n(n)} ${f.plural(n, { one: "record's", other: "records'" })} kind (started or finished) could not be determined, so only what it plainly stated was imported.`,
+        doubleEncodedResponse:
+          "response_data was double-encoded — a JSON string containing another JSON document. It was unwrapped.",
+        requestParamsUnexpectedShape: "request_params was neither null, an object nor a string, so it was left out.",
+      },
+      errors: {
+        notATransportLog: {
+          headline: "This does not look like a JSON transport-log record.",
+          hint: 'Expected an "info" member with an HTTP method and URL, or message_type: "transport_logging".',
+        },
       },
     },
   },

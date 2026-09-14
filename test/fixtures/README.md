@@ -35,6 +35,14 @@ The two records describe **one** outbound call and pair on `context.correlation_
 the response headers, the elapsed time and the response body — which here is a JSON:API document,
 because that is the case the importer exists for.
 
+## `sample.har`
+
+A two-entry HAR (HTTP Archive) capture for the T3 HAR importer: a `GET` returning a JSON:API list
+with two `Set-Cookie` response headers (one carrying a comma inside its `Expires` attribute — the
+shape that breaks a naive comma-join of repeated headers, see `src/importers/har.ts`'s header
+comment), and a `POST` creating one resource. The `Authorization` bearer token is JWT-shaped but
+carries no real claims; it exists to exercise secret masking, not to decode.
+
 ## `share-v2-compat.json`
 
 Not synthesised in the usual sense — it is the literal output of `src/crypto.ts`'s `seal()`, from

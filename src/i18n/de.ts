@@ -13,6 +13,7 @@
 
 import { el, frag } from "../dom.js";
 import { intlFor } from "./intl.js";
+import { formatBytes } from "../format.js";
 import type { Messages } from "./en.js";
 
 const f = intlFor("de");
@@ -671,6 +672,122 @@ export const de: Messages = {
       unavailable: {
         headline: "Dieser Share-Link enthält mehrere Dokumente.",
         hint: "Diese Version von jsonapi-lens hat noch keine Bündelansicht und kann es daher nicht anzeigen. Bitten Sie um einen Link mit nur einem Dokument, oder versuchen Sie es später erneut.",
+      },
+    },
+  },
+
+  import: {
+    common: {
+      schemeAssumed: "Es wurde kein Schema angegeben, daher wurde https:// angenommen.",
+      urlUnparseable: (url) => `„${url}“ ließ sich nicht als URL lesen und wurde als Text behalten.`,
+      queryUndecodable: "Die Query-Zeichenkette ließ sich nicht dekodieren und wurde weggelassen.",
+      secretsMasked: (n) =>
+        `${f.n(n)} ${f.plural(n, { one: "Geheimnis", other: "Geheimnisse" })} geschwärzt. Schwärzung wird beim Kopieren, Herunterladen und Teilen standardmäßig angeboten.`,
+    },
+
+    curl: {
+      summary: (method, headers) =>
+        `cURL · ${method} · ${f.n(headers)} ${f.plural(headers, { one: "Header", other: "Header" })}`,
+      fileContentUnavailable: "Dateiinhalt hier nicht verfügbar",
+      warnings: {
+        unknownFlag: (flag) => `Die Option ${flag} wurde nicht erkannt und übersprungen.`,
+        malformedHeader: (raw) =>
+          `-H „${raw}“ hat weder einen Doppelpunkt noch ein abschließendes Semikolon und wurde übersprungen.`,
+        malformedForm: (raw) => `-F „${raw}“ ist kein name=value-Paar und wurde übersprungen.`,
+        fileNotReadable: (arg) => `„${arg}“ liest aus einer Datei, was hier nicht möglich ist, und wurde übersprungen.`,
+        extraUrl: (token) => `Eine zweite URL („${token}“) wurde angegeben; nur die erste wurde importiert.`,
+      },
+      errors: {
+        unbalancedQuote: {
+          headline: "Dieser Befehl enthält ein nicht geschlossenes Anführungszeichen.",
+          hint: (quote) => `Ein mit ${quote} geöffnetes Anführungszeichen wird nie wieder geschlossen.`,
+        },
+        notACommand: {
+          headline: "Das beginnt nicht mit curl.",
+          hint: "Fügen Sie den ganzen Befehl ein, beginnend mit curl.",
+        },
+      },
+    },
+
+    rawHttp: {
+      warnings: {
+        noBlankLine: "Keine Leerzeile trennte die Header vom Body, daher wurde dies nur als Header gelesen.",
+        chunkedNotClean: "Der Chunked-Body ließ sich nicht sauber zusammensetzen. Was sich lesen ließ, wird angezeigt.",
+      },
+    },
+
+    rawHttpRequest: {
+      summary: (method) => `Raw-HTTP-Request · ${method}`,
+      errors: {
+        noRequestLine: {
+          headline: "Das beginnt nicht mit einer Request-Zeile.",
+          hint: "Die erste Zeile sollte wie GET /path HTTP/1.1 aussehen.",
+        },
+      },
+    },
+
+    rawHttpResponse: {
+      summary: (status) => `Raw-HTTP-Response · ${f.n(status)}`,
+      errors: {
+        noStatusLine: {
+          headline: "Das beginnt nicht mit einer Status-Zeile.",
+          hint: "Die erste Zeile sollte wie HTTP/1.1 200 OK aussehen.",
+        },
+      },
+    },
+
+    url: {
+      summary: (params) =>
+        params > 0 ? `URL · ${f.n(params)} ${f.plural(params, { one: "Parameter", other: "Parameter" })}` : "URL",
+      errors: {
+        notAUrl: {
+          headline: "Das liest sich nicht als URL.",
+          hint: "Fügen Sie eine vollständige Adresse ein, etwa https://api.example.com/widgets.",
+        },
+      },
+    },
+
+    har: {
+      summary: (entries) => `HAR · ${f.n(entries)} ${f.plural(entries, { one: "Eintrag", other: "Einträge" })}`,
+      bodyPlaceholderBinary: (bytes) => `Binärinhalt, ${formatBytes(bytes)} — nicht als Text angezeigt.`,
+      warnings: {
+        empty: "Diese HAR-Datei enthält keine Einträge.",
+        entrySkipped: (index) => `Eintrag ${f.n(index + 1)} ließ sich nicht lesen und wurde übersprungen.`,
+        entryUrlUnparseable: (index, url) =>
+          `Die URL von Eintrag ${f.n(index + 1)} („${url}“) ließ sich nicht lesen und wurde als Text behalten.`,
+        entryQueryUndecodable: (index) =>
+          `Die Query-Zeichenkette von Eintrag ${f.n(index + 1)} ließ sich nicht dekodieren.`,
+        binaryBody: (index) =>
+          `Der Response-Body von Eintrag ${f.n(index + 1)} ist binär und wird als Größe angezeigt, nicht als Text.`,
+      },
+      errors: {
+        notHar: {
+          headline: "Das sieht nicht nach einer HAR-Datei aus.",
+          hint: `Eine HAR-Datei ist ein JSON-Objekt mit einem obersten Member „log“, das ein Array „entries“ enthält.`,
+        },
+      },
+    },
+
+    transportLog: {
+      summary: (records, calls) =>
+        `JSON-Transport-Log · ${f.n(calls)} ${f.plural(calls, { one: "Aufruf", other: "Aufrufe" })} (${f.n(records)} ${f.plural(records, { one: "Datensatz", other: "Datensätze" })})`,
+      warnings: {
+        recordsSkipped: (n) =>
+          `${f.n(n)} ${f.plural(n, { one: "Datensatz wurde", other: "Datensätze wurden" })} nicht als Transport-Log-Eintrag erkannt und übersprungen.`,
+        malformedLines: (n) =>
+          `${f.n(n)} ${f.plural(n, { one: "Zeile ließ sich nicht als JSON parsen und wurde", other: "Zeilen ließen sich nicht als JSON parsen und wurden" })} übersprungen.`,
+        ambiguousKind: (n) =>
+          `Bei ${f.n(n)} ${f.plural(n, { one: "Datensatz", other: "Datensätzen" })} ließ sich die Art (gestartet oder abgeschlossen) nicht bestimmen, daher wurde nur das eindeutig Angegebene importiert.`,
+        doubleEncodedResponse:
+          "response_data war doppelt kodiert — ein JSON-String, der ein weiteres JSON-Dokument enthielt. Er wurde ausgepackt.",
+        requestParamsUnexpectedShape:
+          "request_params war weder null noch ein Objekt noch eine Zeichenkette und wurde weggelassen.",
+      },
+      errors: {
+        notATransportLog: {
+          headline: "Das sieht nicht nach einem JSON-Transport-Log-Datensatz aus.",
+          hint: `Erwartet wurde ein Member „info“ mit einer HTTP-Methode und einer URL, oder message_type: „transport_logging“.`,
+        },
       },
     },
   },

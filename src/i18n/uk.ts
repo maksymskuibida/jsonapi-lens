@@ -15,6 +15,7 @@
 
 import { el, frag } from "../dom.js";
 import { intlFor } from "./intl.js";
+import { formatBytes } from "../format.js";
 import type { Messages } from "./en.js";
 
 const f = intlFor("uk");
@@ -682,6 +683,122 @@ export const uk: Messages = {
       unavailable: {
         headline: "Це посилання містить кілька документів.",
         hint: "Ця версія jsonapi-lens ще не має перегляду пакетів, тож не може його показати. Попросіть посилання лише на один документ або спробуйте пізніше.",
+      },
+    },
+  },
+
+  import: {
+    common: {
+      schemeAssumed: "Схему не вказано, тож припущено https://.",
+      urlUnparseable: (url) => `«${url}» не вдалося прочитати як URL, тож його залишено як текст.`,
+      queryUndecodable: "Рядок запиту не вдалося декодувати, тож його вилучено.",
+      secretsMasked: (n) =>
+        `Знайдено й можна замаскувати під час копіювання, завантаження та надсилання: ${f.n(n)} ${f.plural(n, { one: "значення, схоже на облікові дані", few: "значення, схожі на облікові дані", many: "значень, схожих на облікові дані", other: "значення, схожого на облікові дані" })}.`,
+    },
+
+    curl: {
+      summary: (method, headers) =>
+        `cURL · ${method} · ${f.n(headers)} ${f.plural(headers, { one: "заголовок", few: "заголовки", many: "заголовків", other: "заголовка" })}`,
+      fileContentUnavailable: "вміст файлу тут недоступний",
+      warnings: {
+        unknownFlag: (flag) => `Нерозпізнаний прапорець ${flag} пропущено.`,
+        malformedHeader: (raw) => `-H «${raw}» не має «:» і не закінчується на «;», тож його пропущено.`,
+        malformedForm: (raw) => `-F «${raw}» не є парою name=value, тож його пропущено.`,
+        fileNotReadable: (arg) => `«${arg}» означає читання з файлу, а це тут неможливо, тож пропущено.`,
+        extraUrl: (token) => `Указано другий URL («${token}»); імпортовано лише перший.`,
+      },
+      errors: {
+        unbalancedQuote: {
+          headline: "У цій команді лапки не закрито.",
+          hint: (quote) => `Лапки ${quote}, відкриті тут, ніколи не закрилися.`,
+        },
+        notACommand: {
+          headline: "Це не починається з curl.",
+          hint: "Вставте всю команду цілком, починаючи з curl.",
+        },
+      },
+    },
+
+    rawHttp: {
+      warnings: {
+        noBlankLine: "Порожній рядок не відокремив заголовки від тіла, тож це прочитано лише як заголовки.",
+        chunkedNotClean: "Тіло з кодуванням chunked не вдалося зібрати чисто. Показано те, що вдалося прочитати.",
+      },
+    },
+
+    rawHttpRequest: {
+      summary: (method) => `Сирий HTTP-запит · ${method}`,
+      errors: {
+        noRequestLine: {
+          headline: "Це не починається з рядка запиту.",
+          hint: "Перший рядок має виглядати як GET /path HTTP/1.1.",
+        },
+      },
+    },
+
+    rawHttpResponse: {
+      summary: (status) => `Сира HTTP-відповідь · ${f.n(status)}`,
+      errors: {
+        noStatusLine: {
+          headline: "Це не починається з рядка статусу.",
+          hint: "Перший рядок має виглядати як HTTP/1.1 200 OK.",
+        },
+      },
+    },
+
+    url: {
+      summary: (params) =>
+        params > 0
+          ? `URL · ${f.n(params)} ${f.plural(params, { one: "параметр", few: "параметри", many: "параметрів", other: "параметра" })}`
+          : "URL",
+      errors: {
+        notAUrl: {
+          headline: "Це не читається як URL.",
+          hint: "Вставте повну адресу, наприклад https://api.example.com/widgets.",
+        },
+      },
+    },
+
+    har: {
+      summary: (entries) =>
+        `HAR · ${f.n(entries)} ${f.plural(entries, { one: "запис", few: "записи", many: "записів", other: "запису" })}`,
+      bodyPlaceholderBinary: (bytes) => `Двійковий вміст, ${formatBytes(bytes)} — не показано як текст.`,
+      warnings: {
+        empty: "Цей файл HAR не містить записів.",
+        entrySkipped: (index) => `Запис ${f.n(index + 1)} не вдалося прочитати, тож його пропущено.`,
+        entryUrlUnparseable: (index, url) =>
+          `URL запису ${f.n(index + 1)} («${url}») не вдалося прочитати, тож його залишено як текст.`,
+        entryQueryUndecodable: (index) => `Рядок запиту запису ${f.n(index + 1)} не вдалося декодувати.`,
+        binaryBody: (index) =>
+          `Тіло відповіді запису ${f.n(index + 1)} двійкове, тож показано лише його розмір, а не текст.`,
+      },
+      errors: {
+        notHar: {
+          headline: "Це не схоже на файл HAR.",
+          hint: "Файл HAR — це об'єкт JSON із верхнім членом «log», що містить масив «entries».",
+        },
+      },
+    },
+
+    transportLog: {
+      summary: (records, calls) =>
+        `JSON transport log · ${f.n(calls)} ${f.plural(calls, { one: "виклик", few: "виклики", many: "викликів", other: "виклику" })} (${f.n(records)} ${f.plural(records, { one: "запис", few: "записи", many: "записів", other: "запису" })})`,
+      warnings: {
+        recordsSkipped: (n) =>
+          `Не розпізнано як запис transport-log і пропущено: ${f.n(n)} ${f.plural(n, { one: "запис", few: "записи", many: "записів", other: "запису" })}.`,
+        malformedLines: (n) =>
+          `Не розібрано як JSON і пропущено: ${f.n(n)} ${f.plural(n, { one: "рядок", few: "рядки", many: "рядків", other: "рядка" })}.`,
+        ambiguousKind: (n) =>
+          `Не вдалося визначити вид (розпочато чи завершено) для: ${f.n(n)} ${f.plural(n, { one: "запис", few: "записи", many: "записів", other: "запису" })}. Імпортовано лише те, що було вказано прямо.`,
+        doubleEncodedResponse:
+          "response_data було закодовано двічі — рядок JSON містив інший документ JSON. Його розпаковано.",
+        requestParamsUnexpectedShape: "request_params не було ні null, ні об'єктом, ні рядком, тож його вилучено.",
+      },
+      errors: {
+        notATransportLog: {
+          headline: "Це не схоже на запис JSON transport-log.",
+          hint: "Очікувано член «info» з методом HTTP і URL, або message_type: «transport_logging».",
+        },
       },
     },
   },
