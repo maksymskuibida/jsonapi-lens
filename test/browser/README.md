@@ -77,7 +77,7 @@ If you write your own, two rules matter more than the rest:
 
 ## What is covered
 
-24 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
+23 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
 unwound one Back at a time, Back-then-Forward, rapid double Backs, Back/Forward hammering, returning
 to the very top and the very bottom, a type filter active, "Expand all" on a 36-row group, a position
 deep inside a tall expanded row, a reverse pointer out of "Referenced by", the jump modal, collapsing
@@ -89,7 +89,7 @@ it landed on is open, because a position-only assertion cannot see that failing 
 exactly the right place whether or not the row expanded, and a regression there is unmissable in use
 and invisible in the numbers.
 
-Every one of them runs at whatever `--width` is given, so narrow layouts are the same 22 scenarios
+Every one of them runs at whatever `--width` is given, so narrow layouts are the same 23 scenarios
 rather than a separate list. 390, 768 and 1512 are the widths worth trying; fractional row heights at
 390 are what caught the rounding fault.
 
@@ -106,8 +106,10 @@ destroys the context every `SCEN.*` runs in, which is why they cannot be scenari
   resume button is instant but stays on the paste view — so a loaded document and an empty `#doc` is
   a normal state, and every path that reveals the document view has to build it rather than assume
   someone else did. Revealing it unbuilt gave a blank page below the topbar, with the right URL and
-  the right title and no console error. The line prints `#doc children 0->2`; a run that starts at
-  anything but 0 says so, because then the click proved nothing.
+  the right title and no console error. It also clicks from a scrolled paste view and asserts the
+  landing is at the top, because a built document that inherits the previous view's offset drops you
+  into the middle of one you have not seen. The line prints `#doc children 0->2`; starting at
+  anything but 0 is a *failure*, not a note — the click would have proved nothing.
 
 Two are still by hand, both needing a second page load mid-scenario: Back *after* a reload-restored
 position, and a cold deep link followed out and then back. Drive them from the console in two steps,
