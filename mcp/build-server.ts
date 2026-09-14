@@ -26,6 +26,8 @@ import { z } from "zod";
 
 import { isBundlePayload, MAX_BUNDLE_BYTES, open, seal, sealBundle } from "../src/crypto.js";
 import type { BundleEntry, BundlePayload, SharePayload } from "../src/crypto.js";
+import type { Exchange } from "../src/exchange.js";
+import { redactExchange } from "../src/secrets.js";
 
 import { READ_DESCRIPTION, SHARE_DESCRIPTION } from "./descriptions.js";
 import { fetchShareBlob, uploadShare } from "./transport.js";
@@ -164,23 +166,46 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
       let blob: Bytes;
       let kind: "document" | "bundle";
 
+      // A caller-supplied `exchange` is untrusted payload data, exactly like
+      // one built by the browser's own request form — it may carry a live
+      // `Authorization` header or session cookie an assistant captured
+      // verbatim. `redactExchange` (`src/secrets.ts`) is the one function
+      // this codebase trusts to strip that before anything leaves the
+      // process; every document's exchange goes through it here, on both
+      // the single-document and bundle paths, before `seal`/`sealBundle`
+      // ever sees it. Tallied across all documents so the tool result can
+      // say what it dropped.
+      let redactedCount = 0;
+      let bodyMayContainSecret = false;
+      const redactDocumentExchange = (exchange: Exchange | undefined): Exchange | undefined => {
+        if (exchange === undefined) return undefined;
+        const result = redactExchange(exchange);
+        redactedCount += result.count;
+        if (result.bodyMayContainSecret) bodyMayContainSecret = true;
+        return result.exchange;
+      };
+
       if (documents.length === 1) {
         const [doc] = documents as [(typeof documents)[number]];
+        const exchange = redactDocumentExchange(doc.exchange as Exchange | undefined);
         const payload: SharePayload = {
           text: doc.text,
           label: doc.label,
           savedAt,
-          ...(doc.exchange !== undefined ? { exchange: doc.exchange } : {}),
+          ...(exchange !== undefined ? { exchange } : {}),
         };
         blob = await seal(payload, secret);
         assertSingleDocumentWithinCap(blob, doc.label);
         kind = "document";
       } else {
-        const entries: BundleEntry[] = documents.map((doc) => ({
-          label: doc.label,
-          text: doc.text,
-          ...(doc.exchange !== undefined ? { exchange: doc.exchange } : {}),
-        }));
+        const entries: BundleEntry[] = documents.map((doc) => {
+          const exchange = redactDocumentExchange(doc.exchange as Exchange | undefined);
+          return {
+            label: doc.label,
+            text: doc.text,
+            ...(exchange !== undefined ? { exchange } : {}),
+          };
+        });
         const payload: BundlePayload = { kind: "bundle", savedAt, documents: entries };
         // sealBundle refuses an empty bundle/empty document itself too, but
         // assertShareableDocuments above already ran, before any crypto work.
@@ -211,7 +236,14 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
             text:
               `Shared ${documents.length === 1 ? "1 document" : `${documents.length} documents`} ` +
               `as a ${kind} link (id ${created.id}, ${blob.byteLength} bytes). ` +
-              "The link, with the secret, is in this result's `url` field.",
+              "The link, with the secret, is in this result's `url` field." +
+              (redactedCount > 0
+                ? ` Redacted ${redactedCount} secret-shaped value${redactedCount === 1 ? "" : "s"} ` +
+                  "from the attached exchange data before sealing."
+                : "") +
+              (bodyMayContainSecret
+                ? " Warning: a request or response body may still contain an unredacted secret."
+                : ""),
           },
         ],
       };
