@@ -4,7 +4,7 @@ How a change gets from a task to production in this repository. The configuratio
 branch names, labels, environments — is in [DELIVERY.md](DELIVERY.md). Binding design decisions are
 in [DECISIONS.md](DECISIONS.md). What is actually on `main` is in [STATUS.md](STATUS.md).
 
-Profile: **`local-qa`**. Three roles, and QA runs before merge because merging is what deploys.
+Profile: **`local+prod-qa`**. Three roles. QA runs before merge, because merging is what deploys — and again on production afterwards, because a build is what sits between the two.
 
 ## 1 · The lifecycle
 
@@ -37,6 +37,11 @@ IMPLEMENTER  branch <type>/<task-id>-<slug>
     │ ✓
     ▼
 implementer squash-merges  ──►  push to main  ──►  CI  ──►  DEPLOY  ──►  PRODUCTION
+                                                                            │
+                                                                            ▼
+                                              QA-WEB again, on jsonapi.mstool.dev:
+                                              the full regression checklist, then
+                                              every new feature.  ✗ → fix forward
 ```
 
 **QA is batched per wave, not run per change.** One browser pass covering several features is
@@ -54,6 +59,13 @@ shared is the setup, not the coverage.
 assets and any D1 migration to `https://jsonapi.mstool.dev`. Review and QA as though what you pass
 is live in three minutes, because it is. Every pull request body says plainly what was **not**
 verified.
+
+**The production pass is not a formality.** What it catches is the class of defect that only exists
+after a build: a layout that shifted under minification, a `content-visibility` measurement that
+differs from the dev server's, an asset path that resolves locally and not behind the Worker, a D1
+migration that ran differently against the real database. `docs/qa-checklists/REGRESSION.md` is run
+in full both times for exactly that reason — and it grows a permanent row for every defect that ever
+reached production.
 
 ## 2 · Roles
 
@@ -115,6 +127,16 @@ that lives only here is invisible to the agent that has to satisfy it.
 8. **A `DECISIONS.md` entry** if the task settled something future work must respect. If it
    contradicts an existing decision, amend that decision in the same PR with reasoning.
 9. **The `STATUS.md` row** for this unit, updated in the same PR.
+
+**Items 4–6 have one exception, and `scripts/review-preflight.sh` already enforces it mechanically**
+rather than this list describing something the gate does not check: a change touching neither `src/`
+nor `index.html` has no observable surface, so QA notes and an evidence file are not produced for
+it — a fabricated browser-run record for a change nobody runs in a browser is worse than an honest
+absence. State the omission and why in the pull request body rather than leaving it silent, so it
+reads as a decision rather than a miss. A test plan is still expected even here, in whatever form the
+change's own verification actually takes — a tooling change's edge-case table, verified against its
+own test suite, rather than a browser walkthrough. `docs/test-plans/T9.md` and this pull request's
+body are a worked example of both halves of this.
 
 ## 4 · The highest-severity failure mode: a payload that executes
 
@@ -198,7 +220,7 @@ is what keeps a label from being mistaken for a guarantee.
 | Gate | Held by | To make it real |
 |---|---|---|
 | CI must pass before **deploy** | **Platform ✅** — `deploy` declares `needs: check`, and `workflow_dispatch` enters the same job graph, so there is no trigger that skips it | — |
-| CI **runs** on a pull request | **Platform ✅** — the `check` job now triggers on `pull_request`. Before this change the workflow fired only on push to `main`, so a pull request got **no checks at all** | — |
+| CI **runs** on a pull request | **Platform ✅ — for a pull request whose own merge ref carries this trigger.** GitHub reads the workflow for a `pull_request` event from the PR's **merge ref** (head merged into base), never from the base branch alone — so removing the `branches: [main]` filter (T9, 2026-09) does not by itself give an already-open stacked pull request any checks: nothing about the fix enters that PR's merge ref until it reaches that PR's own head or base. Until T9 the trigger also carried `branches: [main]`, filtering on the base rather than the content, which was this exact row overclaiming in a narrower and quieter way — before the trigger existed at all, the workflow fired only on push to `main`, so *every* pull request got no checks | Un-stack (`DELIVERY.md` §"Release sequence" 3a), or merge/rebase updated `main` into a still-stacked branch, before relying on this row for it |
 | CI must **pass** before merge | **Nothing** — the check runs, but nothing requires it to be green, and `main` is unprotected so the merge cannot be blocked. Running is not enforcing | Protect the branch and make `check` a required status context |
 | No direct push to `main` | **Nothing** — `main` is unprotected (`GET /branches/main/protection` → 404) | Protect the branch: require a PR, require the `check` context. Free on a public repo; the repository owner has to do it |
 | Deploy requires a human | **Nothing** — the `production` environment exists but has `protection_rules: []` | Add a required reviewer to the environment. Deliberately not done: this is a single-maintainer project and a self-approved deploy gate is theatre |
