@@ -111,6 +111,8 @@ export const STATIC_BINDINGS: [selector: string, apply: Apply][] = [
   ["#input", attr("aria-label", (m) => m.paste.inputLabel)],
   ["#parse", text((m) => m.paste.read)],
   ["#open-file", text((m) => m.paste.openFile)],
+  ["#shape-offer-plain", text((m) => m.shape.readAsPlain)],
+  ["#shape-offer-jsonapi", text((m) => m.shape.readAsJsonApi)],
   // The only binding whose output depends on the machine rather than the
   // language: the markup ships the Mac spelling, and everywhere else it becomes
   // Ctrl. The message owns both the key and the words around it, because in

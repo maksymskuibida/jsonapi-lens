@@ -64,7 +64,7 @@ export async function mintShareEnvelope(
     // this is the line that goes live the moment T2 starts populating it.
     // Redaction has to run *before* this call once that happens; it does not
     // exist anywhere in this codebase yet, which is exactly why it cannot
-    // happen here. See docs/DECISIONS.md D3.
+    // happen here. See docs/DECISIONS.md D5.
     return seal(
       { text: only!.text, label: only!.label, savedAt: Date.now(), exchange: only!.exchange },
       secret,
