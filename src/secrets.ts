@@ -61,11 +61,11 @@
  * Pure data and pure functions — no DOM, no `t()`, no network.
  */
 
-import type { Exchange, BodyPart } from "./exchange.js";
+import type { Exchange, BodyPart, OriginMeta } from "./exchange.js";
 import type { HeaderSet } from "./headers.js";
 import type { CookieSet, SetCookieSet } from "./cookies.js";
 import type { JsonObject } from "./types.js";
-import { base64UrlToBytes, decodeParams, encodeParams } from "./params.js";
+import { base64UrlToBytes, decodeParams, encodeParams, isUnsafeObjectKey, safeObject } from "./params.js";
 import type { ParamEntry, ParamSet, ParamValue } from "./params.js";
 
 /**
@@ -93,7 +93,13 @@ export type CredentialShape =
   | { kind: "hex"; length: number }
   | { kind: "base64"; length: number };
 
-const JWT_SHAPE_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+// `{10,}` per segment, matching `JWT_ANYWHERE_RE` below — without a floor
+// this matched `1.2.3`, `my.file.txt`, `en.US.utf8` and any other ordinary
+// three-part dotted value, which `redactExchange` then rewrote out of a
+// URL as `[REDACTED]` with nothing wrong to report. A real JWT segment is
+// never this short (even the minimal `{"alg":"none"}` header is 20+
+// base64url characters), so the floor costs no real detection.
+const JWT_SHAPE_RE = /^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/;
 const STRIPE_KEY_RE = /^(sk|pk)_[A-Za-z0-9_]{6,}$/i;
 const HEX_RE = /^[0-9a-fA-F]+$/;
 const BASE64_RE = /^[A-Za-z0-9+/_-]+={0,2}$/;
@@ -221,7 +227,7 @@ export interface RedactionResult {
   bodyMayContainSecret: boolean;
 }
 
-function redactHeaderSet(headers: HeaderSet | undefined, tally: { count: number }): HeaderSet | undefined {
+function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally): HeaderSet | undefined {
   if (!headers) return headers;
   let changed = false;
   const entries = headers.entries.map((entry) => {
@@ -233,16 +239,57 @@ function redactHeaderSet(headers: HeaderSet | undefined, tally: { count: number 
   return changed ? { entries } : headers;
 }
 
-function redactCookieSet(cookies: CookieSet | undefined, tally: { count: number }): CookieSet | undefined {
+function redactCookieSet(cookies: CookieSet | undefined, tally: RedactionTally): CookieSet | undefined {
   if (!cookies || cookies.entries.length === 0) return cookies;
   tally.count += cookies.entries.length;
   return { entries: cookies.entries.map((cookie) => ({ name: cookie.name, value: REDACTED_VALUE })) };
 }
 
-function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: { count: number }): SetCookieSet | undefined {
+/**
+ * `Domain`/`Path`/`Expires`/`SameSite` never legitimately contain an `=` —
+ * a hostname, a URL path, an RFC 1123 date and the three `SameSite` tokens
+ * none of them do. Its presence is exactly the signature of the failure
+ * `cookies.ts`'s own header comment warns about: a naive upstream comma-join
+ * of several `Set-Cookie` lines smuggles a second cookie's `name=value` into
+ * the first one's attribute text (`Path=/x, token=SECRET` parses as one
+ * `path` of `"/x, token=SECRET"`, verbatim, by design — see that file's
+ * "never comma-split" comment). `detectCredentialShape` is checked too, for
+ * a value that is itself credential-shaped without any smuggled `=` at all.
+ * Gated rather than blanket-redacted, so an ordinary `Expires`/`SameSite`
+ * value stays readable — the spec's "expiry shown relative to now" needs it.
+ */
+function attributeLooksUnsafe(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  return value.includes("=") || detectCredentialShape(value) !== null;
+}
+
+/**
+ * Redacts `value` unconditionally (as before), and — the review-round-two
+ * fix — every other field capable of holding wire text verbatim:
+ * `domain`/`path`/`expires`/`sameSite` when `attributeLooksUnsafe`, and
+ * `unrecognized[].value` unconditionally, since `unrecognized` is by
+ * definition this parser's designated holding pen for arbitrary attribute
+ * text it did not recognise (`cookies.ts`'s "Malformed Set-Cookie" row).
+ * Attribute *names* and the flags (`secure`/`httpOnly`) are never secrets
+ * and are left alone.
+ */
+function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: RedactionTally): SetCookieSet | undefined {
   if (!cookies || cookies.entries.length === 0) return cookies;
   tally.count += cookies.entries.length;
-  return { entries: cookies.entries.map((cookie) => ({ ...cookie, value: REDACTED_VALUE })) };
+  return {
+    entries: cookies.entries.map((cookie) => ({
+      ...cookie,
+      value: REDACTED_VALUE,
+      domain: attributeLooksUnsafe(cookie.domain) ? REDACTED_VALUE : cookie.domain,
+      path: attributeLooksUnsafe(cookie.path) ? REDACTED_VALUE : cookie.path,
+      expires: attributeLooksUnsafe(cookie.expires) ? REDACTED_VALUE : cookie.expires,
+      sameSite: attributeLooksUnsafe(cookie.sameSite) ? REDACTED_VALUE : cookie.sameSite,
+      unrecognized: cookie.unrecognized?.map((attribute) => ({
+        name: attribute.name,
+        value: attribute.value !== undefined ? REDACTED_VALUE : undefined,
+      })),
+    })),
+  };
 }
 
 /* --------------------------------------------------- URL/query redaction --- */
@@ -329,25 +376,53 @@ function redactParamEntry(entry: ParamEntry): ParamEntry {
   return redacted;
 }
 
+/** Per-request accumulator threaded through every param-redacting call so `count` reports honestly — see `redactEntries`. */
+interface RedactionTally {
+  count: number;
+  /**
+   * Parameter names already counted for *this request* — `url` and `query`
+   * are two representations of the same table (`docs/task-specs/T2.md`: "the
+   * table is the truth; the URL is a rendering of it"), so redacting the same
+   * name in both must not report two drops for what a user experiences as
+   * one. Not shared between the request and the response, and not shared
+   * with a body — those are genuinely independent surfaces.
+   */
+  countedNames: Set<string>;
+}
+
+function freshTally(): RedactionTally {
+  return { count: 0, countedNames: new Set() };
+}
+
+/** Is this decoded value actually *something* — not the absence of a value, and not an empty string? Redacting either removes nothing, so it must not be counted as a drop. */
+function isEmptyParamValue(value: ParamValue | undefined): boolean {
+  return value === undefined || value === null || value === "";
+}
+
 /**
  * `shouldRedactParam` + `redactParamEntry`, applied across a list of entries —
  * reused by `query`, a form body, and a URL's decoded query string alike.
+ * Every entry that matches is still rewritten to `REDACTED_VALUE` (a
+ * valueless or empty parameter is redacted the same as any other, so its
+ * *shape* on the wire does not change), but `tally.count` only grows for a
+ * name that (a) had something in it to remove and (b) has not already been
+ * counted for this request — see `RedactionTally`.
  */
-function redactEntries(
-  entries: ParamEntry[],
-  tally: { count: number },
-): { entries: ParamEntry[]; changed: boolean } {
+function redactEntries(entries: ParamEntry[], tally: RedactionTally): { entries: ParamEntry[]; changed: boolean } {
   let changed = false;
   const result = entries.map((entry) => {
     if (!shouldRedactParam(entry)) return entry;
     changed = true;
-    tally.count++;
+    if (!isEmptyParamValue(entry.value) && !tally.countedNames.has(entry.name)) {
+      tally.count++;
+      tally.countedNames.add(entry.name);
+    }
     return redactParamEntry(entry);
   });
   return { entries: result, changed };
 }
 
-function redactParamSet(params: ParamSet | undefined, tally: { count: number }): ParamSet | undefined {
+function redactParamSet(params: ParamSet | undefined, tally: RedactionTally): ParamSet | undefined {
   if (!params) return params;
   const { entries, changed } = redactEntries(params.entries, tally);
   return changed ? { entries } : params;
@@ -356,36 +431,59 @@ function redactParamSet(params: ParamSet | undefined, tally: { count: number }):
 /**
  * Split a URL into everything before its query string, the query string
  * itself (no leading `?`), and everything from a `#` fragment onward — so the
- * query can be decoded, redacted and re-encoded without disturbing the
- * origin, path or fragment. Not a general URL parser: it only ever looks for
- * the first `?` and the first `#`, which is all `redactUrl` needs.
+ * query and the fragment can each be decoded, redacted and re-encoded
+ * without disturbing the origin or path. Not a general URL parser: it only
+ * ever looks for the first `?` and the first `#`, which is all `redactUrl`
+ * needs.
  */
-function splitUrl(url: string): { prefix: string; query: string; suffix: string } {
+function splitUrl(url: string): { prefix: string; query: string; fragment: string } {
   const hashAt = url.indexOf("#");
   const withoutFragment = hashAt < 0 ? url : url.slice(0, hashAt);
-  const fragment = hashAt < 0 ? "" : url.slice(hashAt);
+  const fragment = hashAt < 0 ? "" : url.slice(hashAt + 1); // without the leading `#`
   const queryAt = withoutFragment.indexOf("?");
-  if (queryAt < 0) return { prefix: withoutFragment, query: "", suffix: fragment };
-  return { prefix: withoutFragment.slice(0, queryAt), query: withoutFragment.slice(queryAt + 1), suffix: fragment };
+  if (queryAt < 0) return { prefix: withoutFragment, query: "", fragment };
+  return { prefix: withoutFragment.slice(0, queryAt), query: withoutFragment.slice(queryAt + 1), fragment };
 }
 
 /**
- * Redact credential-shaped query parameters from a URL, **rewriting the URL
- * string itself** from the redacted parameters — see this module's header
- * comment for why leaving the original text next to a scrubbed copy would be
- * worse than not scrubbing at all. Out of scope: a credential embedded in the
- * path rather than the query string.
+ * Redact a query-string-shaped piece of a URL (the query itself, or the
+ * fragment) through the normal decode/redact/encode pipeline. Returns the
+ * original text, byte for byte, when nothing in it needed redacting — an
+ * ordinary anchor like `#section` decodes to one harmless valueless
+ * parameter and re-encodes to exactly itself, so this never rewrites a
+ * fragment that was not carrying parameters at all.
  */
-function redactUrl(url: string | undefined, tally: { count: number }): string | undefined {
+function redactQueryShapedText(text: string, tally: RedactionTally): string {
+  if (text === "") return text;
+  const { entries, changed } = redactEntries(decodeParams(text).entries, tally);
+  if (!changed) return text;
+  return encodeParams({ entries });
+}
+
+/**
+ * Redact credential-shaped parameters from a URL's query string **and its
+ * fragment**, rewriting the URL string itself — see this module's header
+ * comment for why leaving the original text next to a scrubbed copy would be
+ * worse than not scrubbing at all. The fragment matters as much as the query:
+ * `#access_token=…` is where the OAuth 2.0 implicit flow returns a bearer
+ * token, at least as common a place for a real credential as `?api_key=`,
+ * and it is exactly as query-shaped. Out of scope: a credential embedded in
+ * the URL's path.
+ */
+function redactUrl(url: string | undefined, tally: RedactionTally): string | undefined {
   if (!url) return url;
-  const { prefix, query, suffix } = splitUrl(url);
-  if (query === "") return url;
+  const { prefix, query, fragment } = splitUrl(url);
+  const redactedQuery = redactQueryShapedText(query, tally);
+  const redactedFragment = redactQueryShapedText(fragment, tally);
+  if (redactedQuery === query && redactedFragment === fragment) return url;
 
-  const { entries, changed } = redactEntries(decodeParams(query).entries, tally);
-  if (!changed) return url;
-
-  const redactedQuery = encodeParams({ entries });
-  return redactedQuery ? `${prefix}?${redactedQuery}${suffix}` : `${prefix}${suffix}`;
+  // `||`, not a plain truthiness check on the redacted text alone: an
+  // originally-present-but-now-empty query/fragment (only reachable via a
+  // degenerate empty-name valueless entry) must still keep its `?`/`#`
+  // marker rather than silently disappearing.
+  const queryPart = redactedQuery || query !== "" ? `?${redactedQuery}` : "";
+  const fragmentPart = redactedFragment || fragment !== "" ? `#${redactedFragment}` : "";
+  return `${prefix}${queryPart}${fragmentPart}`;
 }
 
 /* -------------------------------------------------------- body detection --- */
@@ -402,6 +500,16 @@ const STRIPE_KEY_ANYWHERE_RE = /\b(?:sk|pk)_[A-Za-z0-9_]{6,}\b/i;
  */
 const CREDENTIAL_KEY_VALUE_RE =
   /["']?[\w-]*(?:token|secret|password|signature|api[-_]?key)[\w-]*["']?\s*[:=]\s*["']?[^"'\s,}&]{4,}/i;
+// Bare long hex/base64 runs, at the same length floors `detectCredentialShape`
+// uses — a value that function would itself call a credential (a 64-hex
+// session id, a long base64 token) must not read as "clean" here just
+// because it arrived inside a body instead of a header. Not anchored to a
+// word boundary: `+`/`/` in the base64 alphabet are not `\w` characters, so a
+// boundary check would be unreliable right at those characters, and a match
+// that happens to be a substring of a longer run still correctly says "there
+// is credential-shaped text here".
+const HEX_ANYWHERE_RE = new RegExp(`[0-9a-fA-F]{${MIN_HEX_LENGTH},}`);
+const BASE64_ANYWHERE_RE = new RegExp(`[A-Za-z0-9+/_-]{${MIN_BASE64_LENGTH},}`);
 
 /**
  * Sniff `raw` body text for a credential-shaped substring, without altering
@@ -412,7 +520,13 @@ const CREDENTIAL_KEY_VALUE_RE =
  * structured data with a credential embedded in it, not a bare token.
  */
 function bodyMightContainCredential(raw: string): boolean {
-  return JWT_ANYWHERE_RE.test(raw) || STRIPE_KEY_ANYWHERE_RE.test(raw) || CREDENTIAL_KEY_VALUE_RE.test(raw);
+  return (
+    JWT_ANYWHERE_RE.test(raw) ||
+    STRIPE_KEY_ANYWHERE_RE.test(raw) ||
+    CREDENTIAL_KEY_VALUE_RE.test(raw) ||
+    HEX_ANYWHERE_RE.test(raw) ||
+    BASE64_ANYWHERE_RE.test(raw)
+  );
 }
 
 /**
@@ -425,7 +539,7 @@ function bodyMightContainCredential(raw: string): boolean {
  */
 function redactBodyPart(
   body: BodyPart | undefined,
-  tally: { count: number },
+  tally: RedactionTally,
 ): { body: BodyPart | undefined; mayContainSecret: boolean } {
   if (!body) return { body, mayContainSecret: false };
 
@@ -441,31 +555,106 @@ function redactBodyPart(
 }
 
 /**
+ * Walk an arbitrary value from `OriginMeta` — still T3's opaque placeholder
+ * (see `exchange.ts`'s header comment) — redacting a string leaf that is
+ * itself credential-shaped, or that sits under a credential-ish key name
+ * (`isSecretParamName`, the same substring match a query parameter's name
+ * gets: an origin field name is exactly as author-chosen). Nothing writes
+ * `origin` today, but T3 is being built against this branch right now, and
+ * the natural thing for a cURL/HAR importer to keep there is the source
+ * text it parsed — which is exactly where an `Authorization` header would
+ * still be sitting.
+ *
+ * Built on `safeObject()` and rejects `__proto__`/`constructor`/`prototype`
+ * exactly as `params.ts` does, for the identical reason: copying an
+ * arbitrary object's keys onto a `{}` one at a time is the same
+ * prototype-pollution shape, and `origin` is exactly as attacker-controlled
+ * as a query string once an importer starts keeping raw source text in it.
+ */
+function redactUnknown(
+  value: unknown,
+  keyLooksSecret: boolean,
+  tally: RedactionTally,
+): { value: unknown; changed: boolean } {
+  if (typeof value === "string") {
+    if (keyLooksSecret || detectCredentialShape(value) !== null) {
+      tally.count++;
+      return { value: REDACTED_VALUE, changed: true };
+    }
+    return { value, changed: false };
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const mapped = value.map((item) => {
+      const result = redactUnknown(item, keyLooksSecret, tally);
+      if (result.changed) changed = true;
+      return result.value;
+    });
+    return changed ? { value: mapped, changed: true } : { value, changed: false };
+  }
+
+  if (value !== null && typeof value === "object") {
+    let changed = false;
+    const out = safeObject<unknown>();
+    for (const [key, item] of Object.entries(value)) {
+      if (isUnsafeObjectKey(key)) {
+        changed = true; // rejected, not copied — see params.ts's "tree building" header
+        continue;
+      }
+      const result = redactUnknown(item, isSecretParamName(key), tally);
+      if (result.changed) changed = true;
+      out[key] = result.value;
+    }
+    return changed ? { value: out, changed: true } : { value, changed: false };
+  }
+
+  return { value, changed: false }; // number, boolean, null, undefined
+}
+
+function redactOrigin(origin: OriginMeta | undefined, tally: RedactionTally): OriginMeta | undefined {
+  if (!origin) return origin;
+  const result = redactUnknown(origin, false, tally);
+  return result.changed ? (result.value as OriginMeta) : origin;
+}
+
+/**
  * A copy of `exchange` with every secret-bearing value replaced, a count of
  * how many were, and a flag for the one thing this function detects but
  * cannot safely rewrite. See this module's header comment for the exact
- * scope: headers, cookies, the URL, `query`, and a form body are fully
- * redacted (the URL and a form body's `raw` are rewritten, not left stale
- * beside a redacted copy); any other body is flagged, not altered.
+ * scope: headers, cookies, the URL, `query`, `origin`, and a form body are
+ * fully redacted (the URL and a form body's `raw` are rewritten, not left
+ * stale beside a redacted copy); any other body is flagged, not altered.
+ *
+ * `count` is tallied per surface, not with one shared counter, because `url`
+ * and `query` are two representations of the same table and redacting the
+ * same parameter in both must report one drop, not two — see
+ * `RedactionTally` — while a request body, a response body, and each side's
+ * headers/cookies are independent surfaces whose counts simply add.
  *
  * T2b's Copy/Download and T6's Share call this before writing an `exchange`
  * anywhere that leaves the browser — see this module's header comment for
  * why that has to be possible starting now, not added later.
  */
 export function redactExchange(exchange: Exchange): RedactionResult {
-  const tally = { count: 0 };
+  const requestUrlQueryTally = freshTally();
+  const requestHeaderCookieTally = freshTally();
+  const requestBodyTally = freshTally();
+  const responseHeaderCookieTally = freshTally();
+  const responseBodyTally = freshTally();
+  const originTally = freshTally();
 
-  const requestBody = redactBodyPart(exchange.request?.body, tally);
-  const responseBody = redactBodyPart(exchange.response?.body, tally);
+  const requestBody = redactBodyPart(exchange.request?.body, requestBodyTally);
+  const responseBody = redactBodyPart(exchange.response?.body, responseBodyTally);
   const bodyMayContainSecret = requestBody.mayContainSecret || responseBody.mayContainSecret;
 
   const request = exchange.request
     ? {
         ...exchange.request,
-        headers: redactHeaderSet(exchange.request.headers, tally),
-        cookies: redactCookieSet(exchange.request.cookies, tally),
-        url: redactUrl(exchange.request.url, tally),
-        query: redactParamSet(exchange.request.query, tally),
+        headers: redactHeaderSet(exchange.request.headers, requestHeaderCookieTally),
+        cookies: redactCookieSet(exchange.request.cookies, requestHeaderCookieTally),
+        url: redactUrl(exchange.request.url, requestUrlQueryTally),
+        query: redactParamSet(exchange.request.query, requestUrlQueryTally),
         body: requestBody.body,
       }
     : exchange.request;
@@ -473,15 +662,26 @@ export function redactExchange(exchange: Exchange): RedactionResult {
   const response = exchange.response
     ? {
         ...exchange.response,
-        headers: redactHeaderSet(exchange.response.headers, tally),
-        cookies: redactSetCookieSet(exchange.response.cookies, tally),
+        headers: redactHeaderSet(exchange.response.headers, responseHeaderCookieTally),
+        cookies: redactSetCookieSet(exchange.response.cookies, responseHeaderCookieTally),
         body: responseBody.body,
       }
     : exchange.response;
 
+  const origin = redactOrigin(exchange.origin, originTally);
+
   const redacted: Exchange = { ...exchange };
   if (request !== undefined) redacted.request = request;
   if (response !== undefined) redacted.response = response;
+  if (origin !== undefined) redacted.origin = origin;
 
-  return { exchange: redacted, count: tally.count, bodyMayContainSecret };
+  const count =
+    requestUrlQueryTally.count +
+    requestHeaderCookieTally.count +
+    requestBodyTally.count +
+    responseHeaderCookieTally.count +
+    responseBodyTally.count +
+    originTally.count;
+
+  return { exchange: redacted, count, bodyMayContainSecret };
 }

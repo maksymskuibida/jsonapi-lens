@@ -128,14 +128,26 @@ const MAX_PARAM_DEPTH = 32;
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
+ * Exported so `secrets.ts#redactOrigin` — which walks `OriginMeta`, an
+ * object this module has no other reason to know about — can reject the
+ * same three names when copying an arbitrary object key by key, rather than
+ * keeping a second copy of `UNSAFE_KEYS` in sync by hand.
+ */
+export function isUnsafeObjectKey(key: string): boolean {
+  return UNSAFE_KEYS.has(key);
+}
+
+/**
  * A plain object with **no prototype at all** — `obj[key] = value` on one of
  * these is an ordinary own-property write for *any* string `key`, including
  * `__proto__`/`constructor`/`prototype`, because there is no inherited
  * accessor or non-writable built-in property for those names to collide
  * with. Every object this module builds from a dynamic, wire-controlled key
- * uses this instead of a `{}` literal.
+ * uses this instead of a `{}` literal. Exported for the same reason
+ * `isUnsafeObjectKey` is: `secrets.ts#redactOrigin` needs the identical
+ * guarantee when it copies an arbitrary `OriginMeta` key by key.
  */
-function safeObject<T>(): Record<string, T> {
+export function safeObject<T>(): Record<string, T> {
   return Object.create(null) as Record<string, T>;
 }
 
