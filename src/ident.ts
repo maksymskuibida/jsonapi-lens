@@ -209,6 +209,58 @@ export function nodeHref(pointer: string): string {
   return "#" + nodeDomId(pointer);
 }
 
+/**
+ * The DOM id for one request field — a query parameter, a header, a cookie, a
+ * URL part — under the `q_` scope from DECISIONS.md D1. `kind` names which
+ * group the field belongs to (`"param"`, `"header"`, `"cookie"`, `"url"`, ...)
+ * so that a header and a query parameter that happen to share a name never
+ * collide, and `name` is the field's own name.
+ */
+export function requestFieldDomId(kind: string, name: string): string {
+  return mintAnchorId("requestField", [kind, name]);
+}
+
+/** `href` value pointing at a request field. */
+export function requestFieldHref(kind: string, name: string): string {
+  return "#" + requestFieldDomId(kind, name);
+}
+
+/**
+ * The DOM id for a resource in a **request body** JSON:API document, under
+ * the `b_` scope. `mintAnchorId`'s cross-scope guarantee is what lets a
+ * request body and the response share every `type`/`id` pair with no
+ * collision — see DECISIONS.md D1, "the case D1 exists for".
+ */
+export function requestResourceDomId(type: string, id: string): string {
+  return mintAnchorId("requestResource", [type, id]);
+}
+
+/** `href` value pointing at a resource inside the request body. */
+export function requestResourceHref(type: string, id: string): string {
+  return "#" + requestResourceDomId(type, id);
+}
+
+/** Inverse of `requestResourceDomId`. Returns `null` for anything this module did not produce in this scope. */
+export function parseRequestResourceId(value: string): { type: string; id: string } | null {
+  const segments = parseAnchorId("requestResource", value);
+  if (!segments || segments.length !== 2) return null;
+  return { type: segments[0]!, id: segments[1]! };
+}
+
+/**
+ * The DOM id for a node in a plain-JSON **request body**, under the `d_`
+ * scope — the request-side sibling of `nodeDomId`. One segment: the whole
+ * JSON Pointer, exactly as `nodeDomId` treats it.
+ */
+export function requestNodeDomId(pointer: string): string {
+  return mintAnchorId("requestNode", [pointer]);
+}
+
+/** `href` value pointing at a plain-JSON node inside the request body. */
+export function requestNodeHref(pointer: string): string {
+  return "#" + requestNodeDomId(pointer);
+}
+
 /** Inverse of `domId`. Returns `null` for anything this module did not produce. */
 export function parseDomId(value: string): { type: string; id: string } | null {
   if (!value.startsWith(PREFIX)) return null;

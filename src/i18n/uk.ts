@@ -686,6 +686,218 @@ export const uk: Messages = {
     },
   },
 
+  request: {
+    band: {
+      attach: "Додати запит",
+      attachTitle: "Додати запит, який спричинив цю відповідь",
+      edit: "Редагувати запит",
+      editTitle: "Редагувати дані доданого запиту та відповіді",
+      copyTitle: "Скопіювати запит і відповідь як JSON",
+      download: "Завантажити",
+      downloadTitle: "Завантажити запит і відповідь як файл JSON",
+      share: "Поділитися",
+      shareTitle: "Поділитися цим документом",
+      copyKind: "обмін",
+      copyKindRedacted: (n) => `обмін — ${f.n(n)} приховано`,
+      redactedCount: (n) =>
+        f.plural(n, {
+          one: "1 значення знайдено й приховано перед завантаженням.",
+          few: `${f.n(n)} значення знайдено й приховано перед завантаженням.`,
+          many: `${f.n(n)} значень знайдено й приховано перед завантаженням.`,
+          other: `${f.n(n)} значення знайдено й приховано перед завантаженням.`,
+        }),
+      redactionCaveat:
+        "Приховування стосується значень заголовків і кук, схожих на облікові дані. Тіло запиту та URL не перевіряються — перегляньте їх самостійно перед тим, як ділитися.",
+      saved: "Запит збережено.",
+      modeResponse: "Відповідь",
+      modeRequest: "Запит",
+      modeBoth: "Обидва",
+      modeGroupLabel: "Яку сторону переглядати",
+      summaryParams: (n) =>
+        f.plural(n, {
+          one: "1 параметр",
+          few: `${f.n(n)} параметри`,
+          many: `${f.n(n)} параметрів`,
+          other: `${f.n(n)} параметра`,
+        }),
+      summaryHeaders: (n) =>
+        f.plural(n, {
+          one: "1 заголовок",
+          few: `${f.n(n)} заголовки`,
+          many: `${f.n(n)} заголовків`,
+          other: `${f.n(n)} заголовка`,
+        }),
+      summaryCookies: (n) =>
+        f.plural(n, { one: "1 кука", few: `${f.n(n)} куки`, many: `${f.n(n)} кук`, other: `${f.n(n)} куки` }),
+      responseOnly: "Лише відповідь",
+    },
+
+    review: {
+      noMethod: "без методу",
+      noUrl: "URL не вказано.",
+      urlUnparseable: "Це не читається як URL і показано як текст.",
+      assumedScheme: (scheme) => `Схему не вказано — прийнято ${scheme}.`,
+      noStatus: "без статусу",
+      elapsed: (ms) => `${f.n(ms)} мс`,
+      queryTitle: "Параметри запиту",
+      headersTitle: "Заголовки",
+      cookiesTitle: "Куки",
+      bodyTitle: "Тіло",
+      headersEmpty: "Немає заголовків.",
+      cookiesEmpty: "Немає кук.",
+      duplicateHeader: (n) => `надіслано ${f.n(n)} разів`,
+      unnamedCookie: (n) => `кука ${f.n(n)}`,
+      noResponse: "Відповідь не вказано.",
+      reveal: "показати",
+      revealLabel: "Показати це значення",
+      revealTitle: "Приховано, бо схоже на облікові дані — натисніть, щоб показати",
+
+      jwt: {
+        title: "Розкодований JWT (підпис не перевірено)",
+        sub: "sub",
+        iss: "iss",
+        scope: "scope",
+        exp: "exp",
+        notAJwt: "Схоже на bearer-токен, але це не три сегменти base64url — не розкодовано.",
+      },
+
+      cookieAttrs: {
+        domain: (v) => `Domain=${v}`,
+        path: (v) => `Path=${v}`,
+        maxAge: (n) => `Max-Age=${f.n(n)}`,
+        sameSite: (v) => `SameSite=${v}`,
+        secure: "Secure",
+        httpOnly: "HttpOnly",
+        unrecognizedTitle: "Цей атрибут не розпізнано — показано без змін.",
+      },
+
+      params: {
+        convention: (c) => {
+          switch (c) {
+            case "plain":
+              return "звичайний текст";
+            case "valueless":
+              return "без значення";
+            case "repeated-key":
+              return "повторюваний ключ";
+            case "bracket-list":
+              return "список у дужках";
+            case "indexed":
+              return "індексований список";
+            case "comma":
+              return "список через кому";
+            case "space-delimited":
+              return "список через пробіл";
+            case "pipe-delimited":
+              return "список через риску";
+            case "bracket-object":
+              return "об'єкт у дужках";
+            case "dot-path":
+              return "шлях через крапку";
+            case "json-value":
+              return "значення JSON";
+            case "base64url-json":
+              return "JSON у base64url";
+          }
+        },
+        alternatives: "Інші прочитання",
+        rawWire: "як передано:",
+        conflict: "Суперечливі кодування для цієї назви — жодне не обрано:",
+        empty: "Немає параметрів запиту.",
+        emptyValue: "(порожньо)",
+        novalue: "(без значення)",
+      },
+
+      body: {
+        noContentType: "тип вмісту не вказано",
+        copyObjectTitle: "Скопіювати цей ресурс як JSON",
+        copyPointerTitle: (pointer) => `Скопіювати JSON Pointer до цього ресурсу (${pointer})`,
+      },
+
+      responseBody: {
+        none: "Немає тіла відповіді.",
+        jsonApiSummary: (resources, types) =>
+          `Документ JSON:API · ${f.n(resources)} ${f.plural(resources, { one: "ресурс", few: "ресурси", many: "ресурсів", other: "ресурсу" })}, ${f.n(types)} ${f.plural(types, { one: "тип", few: "типи", many: "типів", other: "типу" })}`,
+        plainSummary: (shapeName, count) =>
+          `${shapeName} · ${f.n(count)} ${f.plural(count, { one: "елемент", few: "елементи", many: "елементів", other: "елемента" })}`,
+        jumpLink: "перейти до документа нижче",
+      },
+    },
+
+    relative: {
+      now: "щойно",
+      atCallTime: "на момент цього виклику",
+      unit: (value, unit) => {
+        const forms: Record<typeof unit, { one: string; few: string; many: string; other: string }> = {
+          second: {
+            one: "1 секунда",
+            few: `${f.n(value)} секунди`,
+            many: `${f.n(value)} секунд`,
+            other: `${f.n(value)} секунди`,
+          },
+          minute: {
+            one: "1 хвилина",
+            few: `${f.n(value)} хвилини`,
+            many: `${f.n(value)} хвилин`,
+            other: `${f.n(value)} хвилини`,
+          },
+          hour: {
+            one: "1 година",
+            few: `${f.n(value)} години`,
+            many: `${f.n(value)} годин`,
+            other: `${f.n(value)} години`,
+          },
+          day: { one: "1 день", few: `${f.n(value)} дні`, many: `${f.n(value)} днів`, other: `${f.n(value)} дня` },
+        };
+        return f.plural(value, forms[unit]);
+      },
+      inFuture: (duration) => `через ${duration}`,
+      inPast: (duration) => `${duration} тому`,
+      beforeCall: (duration) => `${duration} до цього виклику`,
+      afterCall: (duration) => `${duration} після цього виклику`,
+    },
+
+    form: {
+      title: "Запит і відповідь",
+      subtitle: "Додайте запит, який спричинив цей документ, і будь-які дані відповіді.",
+      save: "Зберегти",
+      requestTitle: "Запит",
+      responseTitle: "Відповідь",
+      methodLabel: "Метод",
+      methodUnset: "— не вказано —",
+      methodOther: "Інший…",
+      methodOtherLabel: "Власний метод",
+      urlLabel: "URL",
+      urlPlaceholder: "https://api.example.com/trips",
+      urlSyncHint: "Таблиця параметрів нижче синхронізована з цим URL — редагуйте будь-яке поле.",
+      queryLabel: "Параметри запиту",
+      paramName: "Назва параметра",
+      headersLabel: "Заголовки",
+      headerName: "Назва заголовка",
+      cookiesLabel: "Куки",
+      cookieName: "Назва куки",
+      setCookieHint: "Кожен рядок — це повне значення Set-Cookie, точно як його надіслав сервер.",
+      setCookiePlaceholder: "назва=значення; Path=/; HttpOnly",
+      setCookieAria: "Значення Set-Cookie",
+      statusLabel: "Статус",
+      statusPlaceholder: "200",
+      statusTextLabel: "Текст статусу",
+      statusTextPlaceholder: "OK",
+      elapsedLabel: "Тривалість (мс)",
+      elapsedPlaceholder: "мілісекунди",
+      contentTypeLabel: "Content-Type",
+      contentTypePlaceholder: "application/json",
+      bodyLabel: "Тіло",
+      addRow: "Додати рядок",
+      removeRow: "Видалити цей рядок",
+      disableRowLabel: "вимкнено",
+      disableRowTitle: "Не враховувати цей рядок, не видаляючи його",
+      rowName: "Назва поля",
+      rowValue: "Значення поля",
+      rowValuePlaceholder: "значення",
+    },
+  },
+
   labels: {
     pastedDocument: "вставлений документ",
     storedDocument: "збережений документ",

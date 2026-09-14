@@ -357,6 +357,62 @@
       const drift = N.top(watch) - before;
       return { name: '21 jump modal navigation, Back', ok: Math.abs(drift) <= TOL, driftPx: drift, detail: `top ${before}->${N.top(watch)}` };
     },
+
+    /* 27/28 T2b: the exchange band sits above the overview, so opening or
+       closing it changes the offset of everything below — exactly the case
+       "layout is the thing this project gets wrong" exists to catch. Fills
+       the request form by hand (the same way a person would), saves it, sets
+       the band open or closed, then runs the ordinary follow() traversal:
+       if the band's own height mattered to the restoration, this is where it
+       would show up as drift. */
+    async attachMinimalExchange(N) {
+      // Every visible label and button on this form is translated (this app
+      // runs in whatever the browser's own language negotiates to — see
+      // `src/i18n/index.ts`), so this reaches fields by the stable, locale-
+      // independent hooks `request-form.ts` provides (`#edit-request`,
+      // `.xform__url-input`/`.xform__status-input`, `.modal__actions button`
+      // for the single-button footer `openModal` always renders) rather than
+      // by any English label text.
+      const editButton = document.getElementById('edit-request');
+      if (!editButton) throw new Error('no #edit-request button on the overview');
+      editButton.click();
+      await N.settle(300);
+
+      const urlInput = document.querySelector('.modal .xform__url-input');
+      if (!urlInput) throw new Error('request form did not open (no URL field found)');
+      urlInput.value = 'https://api.example.com/connections';
+      urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+      const statusInput = document.querySelector('.modal .xform__status-input');
+      if (statusInput) {
+        statusInput.value = '200';
+        statusInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      const saveButton = document.querySelector('.modal .modal__actions button');
+      if (!saveButton) throw new Error('no Save button in the request form');
+      saveButton.click();
+      await N.settle(400);
+
+      const band = document.getElementById('exchange-band');
+      if (!band) throw new Error('the exchange band did not render after saving the form');
+      return band;
+    },
+
+    async bandScenario(N, label, openBand) {
+      await N.fresh();
+      const band = await SCEN.attachMinimalExchange(N);
+      band.open = !!openBand;
+      await N.settle(250);
+      const result = await follow(N, `${label} (band ${openBand ? 'open' : 'closed'})`, 'c0', 'fare15');
+      // `follow()`'s own name already carries which case this is; the band's
+      // open/closed state is not itself part of what is asserted — the point
+      // is that `ok`/`driftPx` come out the same either way.
+      return result;
+    },
+
+    s27: (N) => SCEN.bandScenario(N, '27 exchange attached, following a relationship, Back', true),
+    s28: (N) => SCEN.bandScenario(N, '28 exchange attached, band collapsed, following a relationship, Back', false),
   };
 
   window.SCEN = SCEN;

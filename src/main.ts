@@ -18,7 +18,7 @@ import {
 import type { Locale } from "./i18n/index.js";
 import { localiseStaticDom } from "./i18n/static-dom.js";
 import { legal } from "./legal/index.js";
-import { domId, parseDomId, resourceKey } from "./ident.js";
+import { domId, parseDomId, parseRequestResourceId, resourceKey } from "./ident.js";
 import { openJumpModal } from "./jump.js";
 import { openLibraryModal, openRawModal, openSaveModal, openShortcutsModal } from "./panels.js";
 import { DocumentError, readAny, readDocument } from "./parse.js";
@@ -40,6 +40,22 @@ import {
 } from "./render-document.js";
 import { buildAnnotations, renderJsonGroups, renderJsonLeftover } from "./render-json.js";
 import { buildResourceBody } from "./render-resource.js";
+import {
+  BAND_ACTION_ATTR,
+  REQ_OBJECT_ACTION_ATTR,
+  REQ_ROOT_ATTR,
+  REVEAL_ATTR,
+  parseReqResourceMarker,
+  renderExchangeBand,
+  requestBodyJsonApiIndex,
+  requestBodyRoot,
+} from "./render-request.js";
+import type { ReviewMode } from "./render-request.js";
+import { openRequestForm } from "./request-form.js";
+import type { RequestFormResult } from "./request-form.js";
+import { mergeExchange } from "./exchange.js";
+import type { Exchange } from "./exchange.js";
+import { redactExchange } from "./secrets.js";
 import { currentRoute, navigate, parseRoute, PASTE_PATH, VIEW_PATH } from "./router.js";
 import type { LegalRoute, Route } from "./router.js";
 import { applyPageMeta, applyRouteMeta, documentMeta, metaForRoute } from "./seo.js";
@@ -178,10 +194,163 @@ interface Loaded {
   label: string;
   bytes: number;
   text: string;
+  /** The request/response context attached to this document, when any has been entered. Never `undefined` itself — `hasExchangeContent` (render-request.ts) is how "nothing entered" is tested, not this field's presence. */
+  exchange: Exchange;
 }
 
 let current: Loaded | null = null;
 let soloType: string | null = null;
+
+/* -------------------------------------------------------------- exchange -- */
+
+/**
+ * Which mode the review's segmented control last chose. Module-level rather
+ * than per-document: there is nothing document-specific about "I prefer to
+ * see both sides at once", and resetting it on every document load would
+ * undo a choice made moments ago for no reason. Only meaningful when both
+ * parts exist — `effectiveMode` (`render-request.ts`) is what actually
+ * decides what renders when only one does.
+ */
+let exchangeMode: ReviewMode = "both";
+
+/**
+ * The persistent slot the band renders into, inside `.main` — set fresh by
+ * `renderDocumentView`/`renderJsonView` on every document load, and reused by
+ * `refreshExchangeBand` afterwards so that editing the exchange or switching
+ * modes replaces only the band, never the surrounding document, its scroll
+ * position, or its fold state.
+ */
+let bandSlot: HTMLElement | null = null;
+
+/** Rebuild the band from `current.exchange`/`exchangeMode` and swap it into `bandSlot`. A no-op before a document has rendered once. */
+function refreshExchangeBand(): void {
+  if (!bandSlot || !current) return;
+  const band = renderExchangeBand({
+    exchange: current.exchange,
+    mode: exchangeMode,
+    currentDocument: { lens: current.lens, bytes: current.bytes },
+  });
+  bandSlot.replaceChildren(...(band ? [band] : []));
+}
+
+/** Persist `current.exchange` the same way the document itself is persisted — a convenience over duplicating the `saveDocument` call at every edit site. */
+function persistCurrentExchange(): void {
+  if (!current) return;
+  void saveDocument({
+    text: current.text,
+    savedAt: Date.now(),
+    label: current.label,
+    ...(Object.keys(current.exchange).length > 0 ? { exchange: current.exchange } : {}),
+  });
+}
+
+/** Open the form, pre-filled from whatever is already attached, and fold whatever comes back into `current.exchange`. */
+function openExchangeEditor(): void {
+  if (!current) return;
+  openRequestForm(current.exchange, (result: RequestFormResult) => {
+    if (!current) return;
+    current.exchange = mergeExchange(current.exchange, { request: result.request, response: result.response });
+    refreshExchangeBand();
+    persistCurrentExchange();
+    toast(t().request.band.saved);
+  });
+}
+
+/** `Copy`/`Download` for the exchange: redacted by default, the count always stated — never a silent mask. */
+function redactedExchangeText(): { text: string; count: number } {
+  const { exchange, count } = redactExchange(current?.exchange ?? {});
+  return { text: JSON.stringify(exchange, null, 2), count };
+}
+
+function copyExchange(): void {
+  if (!current) return;
+  const { text, count } = redactedExchangeText();
+  const what = count > 0 ? t().request.band.copyKindRedacted(count) : t().request.band.copyKind;
+  void copyBlob(text, what);
+}
+
+function downloadExchange(): void {
+  if (!current) return;
+  const { text, count } = redactedExchangeText();
+  const filename = safeFilename(`${current.label}-exchange`);
+  downloadText(text, filename);
+  toast(count > 0 ? t().request.band.redactedCount(count) : t().toast.downloading(filename));
+}
+
+/**
+ * `Share`, for now: the existing single-document link — see the PR body for
+ * why this does not yet carry `current.exchange` into the sealed payload.
+ * `openShareModal` (`share.ts`) has no parameter for one, and `share.ts` is
+ * outside this task's assigned files; wiring it through needs a small,
+ * additive change there (an optional `exchange` parameter, redacted before
+ * `seal`), left for that file's owner or a follow-up rather than done here.
+ * Nothing here regresses: a document with no exchange shares exactly as it
+ * always has, and one *with* an exchange simply does not leak it via this
+ * button either, because nothing about it is sent yet.
+ */
+function shareExchange(): void {
+  shareDocument();
+}
+
+/** Toggle one masked value's reveal state — "click to reveal, one at a time": every value has its own toggle, independent of every other. */
+function toggleReveal(button: HTMLElement): void {
+  const wrap = button.closest<HTMLElement>(".xmask");
+  if (!wrap) return;
+  wrap.setAttribute(REVEAL_ATTR, wrap.getAttribute(REVEAL_ATTR) === "true" ? "false" : "true");
+}
+
+function handleBandAction(button: HTMLElement): void {
+  switch (button.dataset["xAction"]) {
+    case "edit":
+      openExchangeEditor();
+      return;
+    case "reveal":
+      toggleReveal(button);
+      return;
+    case "mode": {
+      const mode = button.dataset["xMode"];
+      if (mode === "response" || mode === "request" || mode === "both") {
+        exchangeMode = mode;
+        refreshExchangeBand();
+      }
+      return;
+    }
+    case "copy":
+      copyExchange();
+      return;
+    case "download":
+      downloadExchange();
+      return;
+    case "share":
+      shareExchange();
+      return;
+  }
+}
+
+/**
+ * A resource inside the request body, from a `REQ_OBJECT_ACTION_ATTR`
+ * button's nearest `data-req-resource` marker — the request-side sibling of
+ * `resourceOf`, reading `current.exchange.request?.body` instead of the
+ * response's own index.
+ */
+function handleRequestObjectAction(button: HTMLElement): void {
+  if (!current) return;
+  const marker = button.closest<HTMLElement>("[data-req-resource]")?.dataset["reqResource"];
+  const identity = marker ? parseReqResourceMarker(marker) : null;
+  if (!identity) return;
+  const index = requestBodyJsonApiIndex(current.exchange.request?.body);
+  const resource = index?.byKey.get(resourceKey(identity.type, identity.id));
+  if (!resource) return;
+
+  switch (button.dataset["reqObjectAction"]) {
+    case "copy-object":
+      void copyBlob(JSON.stringify(resource.raw, null, 2), t().copyKinds.resource(resource.type, resource.id));
+      break;
+    case "copy-pointer":
+      void copyText(resource.pointer, t().copyKinds.pointer);
+      break;
+  }
+}
 
 /* ---------------------------------------------------------------- theme --- */
 
@@ -417,7 +586,12 @@ function resolveHash(restore: EntryState | null = null): void {
 
   const target = document.getElementById(fragment);
   if (!target) {
-    const identity = parseDomId(fragment);
+    // `r_` (a response resource) and `b_` (a resource in the request body)
+    // are the two scopes a stale or hand-edited fragment plausibly names —
+    // `parseRequestResourceId` only recognises `b_`, so trying it after
+    // `parseDomId` finds nothing is safe: a well-formed id in any other scope
+    // is rejected by both, per D1.
+    const identity = parseDomId(fragment) ?? parseRequestResourceId(fragment);
     if (identity) toast(t().toast.noResource(identity.type, identity.id));
     if (position) restorePosition(position);
     return;
@@ -912,11 +1086,12 @@ function resourceOf(node: Element): Resource | null {
 
 /** Actions that operate on the whole document, shown in the overview card. */
 function documentActions(): HTMLElement {
-  const button = (label: string, title: string, onClick: () => void, primary = false) => {
+  const button = (label: string, title: string, onClick: () => void, primary = false, id?: string) => {
     const node = el("button", {
       class: `btn${primary ? " btn--primary" : ""} btn--sm`,
       type: "button",
       title,
+      id,
       text: label,
     });
     node.addEventListener("click", onClick);
@@ -924,11 +1099,20 @@ function documentActions(): HTMLElement {
   };
 
   const m = t().overview;
+  const rm = t().request.band;
+  const attached = current ? Object.keys(current.exchange).length > 0 : false;
 
   return el(
     "div",
     { class: "overview__actions" },
     button(m.shareLink, m.shareLinkTitle, () => shareDocument(), true),
+    button(
+      attached ? rm.edit : rm.attach,
+      attached ? rm.editTitle : rm.attachTitle,
+      () => openExchangeEditor(),
+      false,
+      "edit-request",
+    ),
     button(m.save, m.saveTitle, () => saveCurrent()),
     button(m.export, m.exportTitle, () => exportCurrent()),
     button(m.raw, m.rawTitle, () => rawDocument()),
@@ -956,6 +1140,12 @@ function renderDocumentView(loaded: LoadedView<DocumentIndex>, parseMs: number):
   const started = performance.now();
 
   const main = el("div", { class: "main" });
+
+  // The band's own slot, above the overview — see `refreshExchangeBand`'s
+  // header for why this is a stable container rather than something rebuilt
+  // by hand at every edit.
+  bandSlot = el("div", { class: "xband-slot" });
+  main.append(bandSlot);
 
   const overview = renderOverview(index, { bytes: loaded.bytes, parseMs });
   overview.append(documentActions());
@@ -1026,6 +1216,7 @@ function renderDocumentView(loaded: LoadedView<DocumentIndex>, parseMs: number):
   // `/view` shows a document held in this browser alone, so the head stops
   // claiming to be an indexable page for as long as one is open.
   applyPageMeta(documentMeta(loaded.label));
+  refreshExchangeBand();
 }
 
 /**
@@ -1039,6 +1230,9 @@ function renderJsonView(loaded: LoadedView<JsonIndex>, parseMs: number): void {
   const started = performance.now();
 
   const main = el("div", { class: "main" });
+
+  bandSlot = el("div", { class: "xband-slot" });
+  main.append(bandSlot);
 
   const overview = renderJsonOverview(index, { bytes: loaded.bytes, parseMs });
   overview.append(documentActions());
@@ -1081,6 +1275,7 @@ function renderJsonView(loaded: LoadedView<JsonIndex>, parseMs: number): void {
   });
 
   applyPageMeta(documentMeta(loaded.label));
+  refreshExchangeBand();
 }
 
 /** Dispatches on which half of `Lens` was read, so every other call site just calls this. */
@@ -1113,6 +1308,15 @@ function valueForClipboard(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/**
+ * `render-value.ts#rowActions` is reused verbatim for the request body's own
+ * attribute rows (see `render-request.ts`'s header comment), so it still
+ * emits exactly the `data-copy`/`data-pointer` this function has always
+ * read — what changes here is *which document* the pointer resolves
+ * against. A `[REQ_ROOT_ATTR]` ancestor means the click originated inside
+ * the request body's own tree, so the pointer is resolved against
+ * `requestBodyRoot()` instead of the response's `current.lens.index.root`.
+ */
 function handleValueCopy(button: HTMLElement): void {
   if (!current) return;
   const row = button.closest<HTMLElement>("[data-pointer]");
@@ -1124,7 +1328,9 @@ function handleValueCopy(button: HTMLElement): void {
     return;
   }
 
-  const value = resolvePointer(current.lens.index.root, pointer);
+  const requestScoped = button.closest(`[${REQ_ROOT_ATTR}]`) !== null;
+  const root = requestScoped ? requestBodyRoot(current.exchange.request?.body) : current.lens.index.root;
+  const value = resolvePointer(root, pointer);
   if (value === undefined) {
     toast(t().toast.pointerGone(pointer), "error");
     return;
@@ -1168,6 +1374,26 @@ function handleObjectAction(button: HTMLElement): void {
 docEl.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+
+  // The band's own actions (edit/copy/download/share/reveal/mode) — checked
+  // first since a reveal toggle or a mode button can sit inside the band's
+  // own `<summary>`/`<details>`, the same "would also toggle a disclosure"
+  // hazard the response's own copy buttons already guard against below.
+  const bandButton = target.closest<HTMLElement>(`[${BAND_ACTION_ATTR}]`);
+  if (bandButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    handleBandAction(bandButton);
+    return;
+  }
+
+  const reqObjectButton = target.closest<HTMLElement>(`[${REQ_OBJECT_ACTION_ATTR}]`);
+  if (reqObjectButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    handleRequestObjectAction(reqObjectButton);
+    return;
+  }
 
   // These buttons can sit inside a `<summary>`, where a bubbling click would
   // toggle the disclosure as well as copying.
@@ -1271,6 +1497,7 @@ function saveCurrent(): void {
       savedAt: Date.now(),
       bytes: loaded.bytes,
       ...librarySummary(loaded.lens),
+      ...(Object.keys(loaded.exchange).length > 0 ? { exchange: loaded.exchange } : {}),
     };
     const id = await saveToLibrary(entry);
     if (id === null) {
@@ -1289,7 +1516,7 @@ function openLibrary(): void {
   void openLibraryModal(
     (entry) => {
       closeModal();
-      void load(entry.text, entry.label, { persist: true, push: true });
+      void load(entry.text, entry.label, { persist: true, push: true, exchange: entry.exchange });
     },
     // Renames and deletes happen inside the modal, so the badge is refreshed
     // from there rather than guessed at here.
@@ -1352,6 +1579,8 @@ interface LoadOptions {
    * the offer never means classifying the document a second time.
    */
   lens?: Lens;
+  /** The exchange already attached to this document, when it arrived with one — a library entry, a v2+ share payload, a stored document. Absent for a fresh paste, sample or file. */
+  exchange?: Exchange;
 }
 
 async function load(text: string, label: string, options: LoadOptions): Promise<boolean> {
@@ -1371,7 +1600,11 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   }
 
   const parseMs = performance.now() - started;
-  current = { lens, label, bytes, text };
+  const exchange = options.exchange ?? {};
+  current = { lens, label, bytes, text, exchange };
+  // A fresh document's exchange starts back at the default mode — nothing
+  // about a preference formed for the last document should carry over.
+  exchangeMode = "both";
 
   if (options.persist) {
     // A fresh document invalidates any fragment from the previous one, and the
@@ -1388,7 +1621,12 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
 
   if (options.persist) {
     window.scrollTo(0, 0);
-    const saved = await saveDocument({ text, savedAt: Date.now(), label });
+    const saved = await saveDocument({
+      text,
+      savedAt: Date.now(),
+      label,
+      ...(Object.keys(exchange).length > 0 ? { exchange } : {}),
+    });
     if (!saved) toast(t().toast.notStored);
   }
 
@@ -1669,6 +1907,7 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
     navigate(VIEW_PATH, { replace: true });
     await load(payload.text, payload.label || t().labels.sharedDocument(route.id), {
       persist: true,
+      exchange: payload.exchange,
     });
     toast(t().share.opened);
   } catch (error) {
@@ -1721,6 +1960,7 @@ async function applyRoute(): Promise<void> {
       updateDropMeta();
       const ok = await load(stored.text, stored.label ?? t().labels.storedDocument, {
         persist: false,
+        exchange: stored.exchange,
       });
       // The browser tried to scroll to the fragment before any of this existed,
       // so that attempt hit nothing. Now the sections are in the DOM.
@@ -1813,7 +2053,9 @@ async function boot(): Promise<void> {
       label: stored.label ?? t().labels.storedDocument,
       bytes: new TextEncoder().encode(stored.text).byteLength,
       text: stored.text,
+      exchange: stored.exchange ?? {},
     };
+    exchangeMode = "both";
     renderLoadedView(current, parseMs);
     showView("paste");
     applyRouteMeta({ kind: "paste" });

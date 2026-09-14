@@ -267,3 +267,57 @@ release has already shipped two defects that were exactly one unread edge case a
 caught. Making `alternatives`/`conflict` first-class, typed members of `ParamEntry` — not an optional
 afterthought — is what makes it possible for T2b to render "read as a list, click to read as text"
 as a normal interaction rather than a debugging feature, and for T4 to check them at all.
+
+---
+
+## D6 · The review shows the response body as a summary and a jump link, never a second full render
+
+**Date:** 2026-09-03 · **Settles:** what "each body as its own lens" (`docs/task-specs/T2.md`'s
+review section) means for the *response* body specifically, for `src/render-request.ts` and any
+later task that touches the band.
+
+### Why this is load-bearing
+
+The spec's review section says the open band shows "the parameter table, headers, cookies, and each
+body as its own lens" — read literally and applied evenly to both sides, that would mean re-running
+the full JSON:API/plain-JSON resource tree a second time for the response body, immediately above the
+exact same tree already rendered as "the document" below it.
+
+### The choice
+
+For the **response** body only, the review shows a one-line summary (shape, resource/type or item
+count, byte size) and a link that jumps to the existing document view below — the same content,
+never duplicated. For the **request** body, this does not apply: there is no other rendering of it
+anywhere on the page, so it gets the full anchored treatment (`b_`/`d_`-scoped resources or tree) the
+spec asks for, unabridged.
+
+### Why not render it twice
+
+Three reasons, any one of which would be enough on its own:
+
+- **Anchors.** The response's resource tree already mints every `r_`/`n_` id it needs. Rendering the
+  same document a second time inside the band would need either a *third* anchor scope for "the
+  response, rendered again" — which D1 does not define and nothing needs — or silently duplicate ids,
+  which is the exact failure D1 exists to prevent.
+- **Cost.** `render-resource.ts`'s own header explains why the response path builds HTML strings
+  rather than DOM nodes: at 50,000 resources, per-node creation is measurably too slow. A response
+  that size would pay that cost twice for a band whose whole premise is a **collapsed-by-default
+  summary** — the opposite of what a full tree is for.
+- **There is nowhere for it to disagree.** The document below is already the authoritative, complete
+  rendering of the response body; a second copy inside the band cannot show anything the first does
+  not, so duplicating it buys nothing a link does not already give for free.
+
+### What this means for later tasks
+
+T4's cross-checks (request vs. response) do not need a second set of response anchors to link
+findings to — they link to the ones the document already has. A future task that wants the response
+body *editable* from within the review (there is no such requirement today) would need to revisit
+this decision explicitly rather than assume the summary can simply grow into a tree.
+
+### Rejected alternative
+
+Rendering the response body's tree inside the band too, gated behind a size threshold (full tree
+under some resource count, summary above it) — rejected for being two behaviours where one is
+simpler and neither loses anything a user needs: below the threshold the "second tree" is small
+enough to be cheap but is still a duplicate of what is already on screen one scroll away, so the
+threshold buys safety at large sizes without buying anything at small ones.

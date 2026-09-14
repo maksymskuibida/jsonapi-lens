@@ -3445,3 +3445,628 @@ body.has-modal {
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
 }
+
+/* ==========================================================================
+   The exchange — T2b: the band, the three-mode review, and the form.
+
+   `x` is this feature's own class prefix throughout (`.xband`, `.xrow`,
+   `.xform`, …), deliberately disjoint from `.res`/`.group`/`.res__d` and
+   friends: `main.ts`'s scroll-restoration and fold-state code (`indexSections`,
+   `openRowIds`, `applyFilter`) all query those classes specifically, and reusing
+   them here would silently fold the request band into machinery built for the
+   response's own 50,000-resource tree. See `render-request.ts`'s header for the
+   fuller version of this reasoning.
+   ========================================================================== */
+
+.xband-slot:empty {
+  display: none;
+}
+
+.xband {
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.xband__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-5) var(--sp-6);
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.xband__summary::-webkit-details-marker {
+  display: none;
+}
+
+.xband__caret {
+  flex: none;
+  width: 0.3rem;
+  height: 0.3rem;
+  box-sizing: content-box;
+  border-right: 1.5px solid var(--text-3);
+  border-bottom: 1.5px solid var(--text-3);
+  rotate: 45deg;
+  translate: 0 -0.15rem;
+  transition: rotate 140ms var(--ease), translate 140ms var(--ease);
+}
+
+.xband[open] > .xband__summary .xband__caret {
+  rotate: -135deg;
+  translate: 0 0.15rem;
+}
+
+.xband__method {
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: var(--fs-2xs);
+}
+
+.xband__url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+.xband__hint {
+  color: var(--text-3);
+  font-family: var(--font-body);
+}
+
+.xband__status {
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  font-weight: 700;
+  font-size: var(--fs-2xs);
+}
+
+.xband__status--error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.xband__counts {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.xband__body {
+  padding: 0 var(--sp-6) var(--sp-6);
+  display: grid;
+  gap: var(--sp-6);
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-6);
+}
+
+.xband__actions {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------- mode switch */
+
+.xmodes {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.xmodes__choice {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  transition: border-color 110ms var(--ease), color 110ms var(--ease), background 110ms var(--ease);
+}
+
+.xmodes__choice:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+
+.xmodes__choice[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ review */
+
+.xreview {
+  display: grid;
+  gap: var(--sp-6);
+}
+
+.xreview__line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+}
+
+.xreview__method {
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: var(--fs-xs);
+}
+
+.xreview__status {
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  font-weight: 700;
+  font-size: var(--fs-xs);
+}
+
+.xreview__status--error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.xreview__status-text,
+.xreview__elapsed {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.xsection {
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-5);
+}
+
+.xsection__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  font-family: var(--font-display);
+  font-size: var(--fs-3xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.xsection__count {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-3);
+}
+
+/* URL block: origin + path split out, per the spec's "origin and path split out". */
+
+.xurl {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.xurl__origin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  word-break: break-all;
+}
+
+.xurl__origin a {
+  color: var(--accent);
+}
+
+.xurl__path {
+  color: var(--text-2);
+}
+
+.xurl__raw {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  word-break: break-all;
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------------- rows */
+
+.xtable {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.xtable__empty {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.xrow {
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  display: grid;
+  gap: var(--sp-2);
+  scroll-margin-top: calc(var(--header-h) + var(--sp-5));
+}
+
+.xrow:target {
+  border-color: var(--accent);
+  background: var(--target-flash);
+}
+
+.xrow__name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.xrow__value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.xrow__badge {
+  justify-self: start;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius);
+  background: var(--absent-soft);
+  color: var(--absent-text);
+  font-size: var(--fs-3xs);
+}
+
+.xrow__note {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.xrow__note--conflict {
+  color: var(--danger);
+}
+
+.xrow__note--expired {
+  color: var(--absent-text);
+}
+
+.xrow__attrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.xattr {
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-3xs);
+  color: var(--text-2);
+}
+
+.xattr--unknown {
+  background: var(--absent-soft);
+  color: var(--absent-text);
+}
+
+/* -------------------------------------------------------------- masking */
+
+.xmask {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.xmask__dots {
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+}
+
+.xmask__toggle {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--font-body);
+  font-size: var(--fs-3xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Reveal is `false` by default (`render-request.ts#maskableValue`): the dots
+   and the toggle show, the real value is hidden. `[data-x-reveal="true"]`
+   flips which of the two is visible — never a re-render, just a class check. */
+.xmask:not([data-x-reveal="true"]) .xmask__value {
+  display: none;
+}
+
+.xmask[data-x-reveal="true"] .xmask__dots,
+.xmask[data-x-reveal="true"] .xmask__toggle {
+  display: none;
+}
+
+/* ----------------------------------------------------------------- jwt --- */
+
+.xjwt {
+  margin-top: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-left: 2px solid var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.xjwt__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-3xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.xjwt__claims {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.xjwt__claim {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.xjwt__claim-key {
+  font-family: var(--font-display);
+  font-size: var(--fs-3xs);
+  font-weight: 600;
+  color: var(--text-2);
+  min-width: 3.5rem;
+}
+
+.xjwt__claim-val {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  word-break: break-all;
+}
+
+.xjwt__claim-val--expired {
+  color: var(--absent-text);
+}
+
+/* -------------------------------------------------------------- params --- */
+
+.xrow--param .xparam__body,
+.xrow--param .xparam__conflict {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.xparam__reading code {
+  font-size: var(--fs-xs);
+}
+
+.xparam__alts-label {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-3xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.xparam__alts {
+  display: grid;
+  gap: var(--sp-1);
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+  padding-left: var(--sp-5);
+}
+
+.xparam__raw {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.xparam__raw-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: var(--sp-3);
+}
+
+/* -------------------------------------------------------------- body --- */
+
+.xbody {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.xbody__meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.xbody__meta a {
+  color: var(--accent);
+}
+
+.xreqbody {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.xreqbody__pre {
+  max-height: 24rem;
+}
+
+.xreqgroup {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.xreqgroup__label {
+  font-family: var(--font-display);
+  font-size: var(--fs-3xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.xreqgroup__count {
+  margin-left: var(--sp-2);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.xreqres {
+  padding: var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  scroll-margin-top: calc(var(--header-h) + var(--sp-5));
+}
+
+.xreqres:target {
+  border-color: var(--accent);
+  background: var(--target-flash);
+}
+
+.xreqres__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+
+/* ================================================================== form */
+
+.xform {
+  display: grid;
+  gap: var(--sp-6);
+}
+
+.xform__section-title {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.xform__row-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--sp-4);
+}
+
+.xform__label {
+  display: grid;
+  gap: var(--sp-2);
+  font-family: var(--font-display);
+  font-size: var(--fs-3xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.xform__hint {
+  margin-top: calc(-1 * var(--sp-3));
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.xform__body {
+  min-height: 6rem;
+  font-family: var(--font-mono);
+  resize: vertical;
+}
+
+.xform-rowlist {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.xform-rows {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.xform-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.xform-row--raw {
+  grid-template-columns: 1fr auto;
+}
+
+.xform-row--disabled .xform__name,
+.xform-row--disabled .xform__value,
+.xform-row--disabled .xform__raw {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.xform-row__disable {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-3xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .xform-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .xform-row__disable,
+  .xform-row > .act {
+    grid-column: span 1;
+  }
+
+  .xband__counts {
+    margin-left: 0;
+    width: 100%;
+  }
+}

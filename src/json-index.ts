@@ -10,6 +10,13 @@
  * finding collections and collecting identity candidates share the same
  * traversal, so a 50 MB document is not walked twice.
  *
+ * `buildJsonIndex`'s trailing `mintDomId` parameter is T2b's seam: the
+ * response reading always mints `n_` ids (the default, `nodeDomId`), and a
+ * request body's own plain-JSON reading — a separate `JsonIndex`, never
+ * merged into the response's per D4 below — mints `d_` ids instead, so the
+ * two can never collide even when built from identical JSON Pointers. See
+ * `src/render-request.ts`.
+ *
  * ## Collections
  *
  * An array of two or more objects "sharing a majority of their key names"
@@ -407,14 +414,14 @@ function walk(root: JsonValue): WalkResult {
   return { collections: [...collectionsByPointer.values()], occurrences, budgetExceeded };
 }
 
-function buildCollections(drafts: CollectionDraft[]): JsonCollection[] {
+function buildCollections(drafts: CollectionDraft[], mintDomId: (pointer: string) => string): JsonCollection[] {
   return drafts.map((draft) => {
     const topLevel = !drafts.some((other) => isAncestorPointer(other.pointer, draft.pointer));
     return {
       pointer: draft.pointer,
       label: draft.label,
       memberPointers: draft.memberPointers,
-      domId: nodeDomId(draft.pointer),
+      domId: mintDomId(draft.pointer),
       hue: typeHue(draft.label),
       sigil: typeSigil(draft.label || "?"),
       topLevel,
@@ -422,7 +429,10 @@ function buildCollections(drafts: CollectionDraft[]): JsonCollection[] {
   });
 }
 
-function buildIdentities(occurrences: Occurrence[]): {
+function buildIdentities(
+  occurrences: Occurrence[],
+  mintDomId: (pointer: string) => string,
+): {
   identities: IdentityCluster[];
   referenceAt: Map<string, IdentityReferenceInfo>;
   definitionAt: Map<string, IdentityDefinitionInfo>;
@@ -475,7 +485,7 @@ function buildIdentities(occurrences: Occurrence[]): {
     const ambiguous = definitionTargets.length > 1;
     for (const target of definitionTargets) {
       definitionAt.set(target, {
-        domId: nodeDomId(target),
+        domId: mintDomId(target),
         referenceCount: referenceOccurrences.length,
         ambiguous,
       });
@@ -487,7 +497,7 @@ function buildIdentities(occurrences: Occurrence[]): {
       }
     } else {
       const target = definitionTargets[0]!;
-      const targetDomId = nodeDomId(target);
+      const targetDomId = mintDomId(target);
       for (const ref of referenceOccurrences) {
         referenceAt.set(ref.pointer, { resolution: "resolved", targetPointer: target, targetDomId });
       }
@@ -505,14 +515,30 @@ function buildIdentities(occurrences: Occurrence[]): {
   return { identities, referenceAt, definitionAt, dangling };
 }
 
-/** Build the index for a document `detectShape` classified as anything other than `jsonapi`. */
-export function buildJsonIndex(value: JsonValue, shape: Shape, evidence: ShapeEvidence): JsonIndex {
+/**
+ * Build the index for a document `detectShape` classified as anything other
+ * than `jsonapi`.
+ *
+ * `mintDomId` defaults to the response scope (`n_`, via `nodeDomId`) so every
+ * existing caller — there is exactly one, `parse.ts#readAny` — keeps minting
+ * exactly the ids it always has. T2b's request-body rendering is the one
+ * caller that overrides it, with `requestNodeDomId` (`d_`), so that a plain-
+ * JSON request body's collections and identity definitions anchor under their
+ * own scope instead of colliding with the response's — see DECISIONS.md D1
+ * and `src/render-request.ts`.
+ */
+export function buildJsonIndex(
+  value: JsonValue,
+  shape: Shape,
+  evidence: ShapeEvidence,
+  mintDomId: (pointer: string) => string = nodeDomId,
+): JsonIndex {
   const walked = walk(value);
-  const collections = buildCollections(walked.collections);
+  const collections = buildCollections(walked.collections, mintDomId);
 
   const { identities, referenceAt, definitionAt, dangling } = walked.budgetExceeded
     ? { identities: [], referenceAt: new Map(), definitionAt: new Map(), dangling: [] }
-    : buildIdentities(walked.occurrences);
+    : buildIdentities(walked.occurrences, mintDomId);
 
   const topLevelCollections = collections.filter((c) => c.topLevel);
   const danglingTotal = dangling.reduce((sum, d) => sum + d.count, 0);
