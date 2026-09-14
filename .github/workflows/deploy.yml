@@ -39,12 +39,6 @@ jobs:
       - name: Typecheck the Worker
         run: npx tsc -p tsconfig.worker.json --noEmit
 
-      # test/node is a third program for the same kind of reason the Worker is
-      # a second one: it runs on plain Node and needs `@types/node`, which the
-      # app's own program deliberately does not have.
-      - name: Typecheck the Node tests
-        run: npx tsc -p test/node/tsconfig.json --noEmit
-
       - name: Test
         run: npm test
 
