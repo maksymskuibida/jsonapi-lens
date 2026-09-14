@@ -179,6 +179,22 @@ const chrome = spawn(
 
 let page;
 let failed = 0;
+let total = 0;
+
+/**
+ * One result line, and the two counters the summary is built from.
+ *
+ * Every check goes through this rather than a hand-maintained denominator: the
+ * runner-level checks around the scenarios are exactly the ones an addition
+ * forgets to count, and an under-counted total is invisible in a green run.
+ */
+function report(ok, metric, name, detail) {
+  total += 1;
+  if (!ok) failed += 1;
+  let line = `${ok ? "pass" : "FAIL"}  ${String(metric).padStart(8)}  ${name}`;
+  if (detail) line += `\n            ${detail}`;
+  console.log(line);
+}
 
 try {
   page = await connect(port);
@@ -293,63 +309,69 @@ try {
   console.log(`running ${keys.length} scenarios\n`);
 
   for (const key of keys) {
-    let line;
     try {
       const raw = await page.evaluate(
         `(async () => JSON.stringify(await SCEN[${JSON.stringify(key)}](NAV)))()`,
       );
       const result = JSON.parse(raw);
-      if (!result.ok) failed += 1;
-      line = `${result.ok ? "pass" : "FAIL"}  ${String(result.driftPx ?? "?").padStart(6)}px  ${result.name ?? key}`;
-      if (!result.ok) line += `\n            ${result.detail ?? ""}`;
+      // Detail on failures only: on 23 passing scenarios it is just noise.
+      report(
+        result.ok,
+        `${result.driftPx ?? "?"}px`,
+        result.name ?? key,
+        result.ok ? null : (result.detail ?? ""),
+      );
     } catch (error) {
-      failed += 1;
-      line = `FAIL       err  ${key}\n            ${error.message}`;
+      report(false, "err", key, error.message);
     }
-    console.log(line);
   }
 
-  // Reload, last, because it destroys the page context the scenarios run in.
+  // Reload, first of the two checks that need a page load, because it destroys
+  // the page context the scenarios run in.
   //
   // This is the case the old absolute-offset restoration got most wrong — -1215px
   // — and the reason is worth keeping in front of whoever changes this next: on a
   // fresh load nothing has been measured yet, so the page is at its shortest and
   // a saved pixel offset means the least it will ever mean. Restoring a place
   // instead survives it, and the restored offset is expected to differ.
-  const probe = await page.evaluate(`(async () => {
-    await NAV.fresh();
-    await NAV.open(...SCEN.ID.mc);
-    await NAV.open(...SCEN.ID.c5);
-    await NAV.scrollToFraction(0.55);
-    const watch = NAV.topmostVisible();
-    return JSON.stringify({ id: watch.id, top: NAV.top(watch), y: Math.round(scrollY), h: NAV.height() });
-  })()`);
-  const saved = JSON.parse(probe);
+  try {
+    const probe = await page.evaluate(`(async () => {
+      await NAV.fresh();
+      await NAV.open(...SCEN.ID.mc);
+      await NAV.open(...SCEN.ID.c5);
+      await NAV.scrollToFraction(0.55);
+      const watch = NAV.topmostVisible();
+      return JSON.stringify({ id: watch.id, top: NAV.top(watch), y: Math.round(scrollY), h: NAV.height() });
+    })()`);
+    const saved = JSON.parse(probe);
 
-  await page.evaluate("location.reload(); undefined").catch(() => {});
-  await waitFor(
-    page,
-    "document.querySelectorAll('.res').length > 0 && !document.getElementById('doc').hidden",
-    "the document to come back after a reload",
-  );
-  const landed = JSON.parse(
-    await page.evaluate(`(async () => {
-      await new Promise((r) => setTimeout(r, 1200));
-      const el = document.getElementById(${JSON.stringify(saved.id)});
-      return JSON.stringify({
-        top: el ? Math.round(el.getBoundingClientRect().top) : null,
-        y: Math.round(scrollY),
-        h: document.documentElement.scrollHeight,
-      });
-    })()`),
-  );
-  const reloadDrift = landed.top === null ? NaN : landed.top - saved.top;
-  const reloadOk = Math.abs(reloadDrift) <= 2;
-  if (!reloadOk) failed += 1;
-  console.log(
-    `${reloadOk ? "pass" : "FAIL"}  ${String(reloadDrift).padStart(6)}px  reload restores the same place` +
-      `\n            top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
-  );
+    await page.evaluate("location.reload(); undefined").catch(() => {});
+    await waitFor(
+      page,
+      "document.querySelectorAll('.res').length > 0 && !document.getElementById('doc').hidden",
+      "the document to come back after a reload",
+    );
+    const landed = JSON.parse(
+      await page.evaluate(`(async () => {
+        await new Promise((r) => setTimeout(r, 1200));
+        const el = document.getElementById(${JSON.stringify(saved.id)});
+        return JSON.stringify({
+          top: el ? Math.round(el.getBoundingClientRect().top) : null,
+          y: Math.round(scrollY),
+          h: document.documentElement.scrollHeight,
+        });
+      })()`),
+    );
+    const reloadDrift = landed.top === null ? NaN : landed.top - saved.top;
+    report(
+      Math.abs(reloadDrift) <= 2,
+      `${reloadDrift}px`,
+      "reload restores the same place",
+      `top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
+    );
+  } catch (error) {
+    report(false, "err", "reload restores the same place", error.message);
+  }
 
   // Resuming a stored document from the paste view, which needs a page load of
   // its own and so cannot be a scenario — every `SCEN.*` runs in one page
@@ -360,39 +382,70 @@ try {
   // `#doc` is a normal state. Revealing the document view without building it
   // first showed a blank page below the topbar, and "leave the tab, come back
   // later, click the button" is an ordinary way to use the app.
-  await page.navigate(`${ORIGIN}/`);
-  await waitFor(
-    page,
-    "!document.getElementById('resume').hidden && !!document.querySelector('#resume button')",
-    "the resume button offering the stored document",
-  );
-  const resumed = JSON.parse(
-    await page.evaluate(`(async () => {
-      // Nothing rendered yet is the state under test: if the document view were
-      // already built, clicking would prove nothing about building it.
-      const before = document.getElementById('doc').childElementCount;
-      document.querySelector('#resume button').click();
-      await new Promise((r) => setTimeout(r, 1200));
-      const doc = document.getElementById('doc');
-      return JSON.stringify({
-        before,
-        path: location.pathname,
-        hidden: doc.hidden,
-        children: doc.childElementCount,
-        sections: document.querySelectorAll('.res').length,
-      });
-    })()`),
-  );
-  const resumeOk =
-    resumed.path === "/view" && !resumed.hidden && resumed.children > 0 && resumed.sections > 0;
-  if (!resumeOk) failed += 1;
-  console.log(
-    `${resumeOk ? "pass" : "FAIL"}  ${String(resumed.sections).padStart(6)}    resume renders the stored document` +
-      `\n            #doc children ${resumed.before}->${resumed.children} at ${resumed.path}` +
-      `${resumed.before > 0 ? " (already built before the click — this run proved nothing)" : ""}`,
-  );
+  try {
+    await page.navigate(`${ORIGIN}/`);
+    // The button clause first: `Page.navigate` resolves at navigation commit,
+    // when the parser may not have reached `#resume` yet, and reading `.hidden`
+    // off the null that gets you throws out of the run instead of polling again.
+    await waitFor(
+      page,
+      "!!document.querySelector('#resume button') && !document.getElementById('resume').hidden",
+      "the resume button offering the stored document",
+    );
+    const resumed = JSON.parse(
+      await page.evaluate(`(async () => {
+        const doc = document.getElementById('doc');
+        // Nothing built yet is the state under test: if the document view were
+        // already there, clicking would prove nothing about building it.
+        const before = doc.childElementCount;
+        // Reaching this button often means scrolling the paste view, and the
+        // built document inherits whatever offset that left behind — so the
+        // click has to be made from somewhere other than the top.
+        window.scrollTo(0, 400);
+        await new Promise((r) => setTimeout(r, 250));
+        const beforeY = Math.round(scrollY);
+        document.querySelector('#resume button').click();
+        // Polled rather than slept: the handler is synchronous today, so this
+        // returns at once, and a fixed wait would quietly become the assertion
+        // if that ever changed.
+        for (let i = 0; i < 50 && doc.childElementCount === 0; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return JSON.stringify({
+          before,
+          beforeY,
+          path: location.pathname,
+          hidden: doc.hidden,
+          children: doc.childElementCount,
+          sections: document.querySelectorAll('.res').length,
+          y: Math.round(scrollY),
+        });
+      })()`),
+    );
+    // `before === 0` is load-bearing, not commentary: if some later change
+    // builds `#doc` at boot, this check would pass while proving nothing, and
+    // the fix it guards could be reverted under a green run.
+    const resumeOk =
+      resumed.before === 0 &&
+      resumed.path === "/view" &&
+      !resumed.hidden &&
+      resumed.children > 0 &&
+      resumed.sections > 0 &&
+      // Built and revealed is not enough: inheriting the paste view's offset
+      // drops you into the middle of a document you have not seen yet.
+      resumed.y === 0;
+    report(
+      resumeOk,
+      resumed.sections,
+      "resume renders the stored document",
+      `#doc children ${resumed.before}->${resumed.children} at ${resumed.path}, y ${resumed.beforeY}->${resumed.y}` +
+        (resumed.before > 0 ? " — already built before the click, so this proved nothing" : ""),
+    );
+  } catch (error) {
+    report(false, "err", "resume renders the stored document", error.message);
+  }
 
-  console.log(`\n${keys.length + 2 - failed}/${keys.length + 2} passed`);
+  console.log(`\n${total - failed}/${total} passed`);
 } finally {
   page?.close();
   chrome.kill();

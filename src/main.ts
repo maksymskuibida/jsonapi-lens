@@ -168,7 +168,7 @@ interface Loaded {
   bytes: number;
   text: string;
   /**
-   * How long `readDocument` took, in milliseconds.
+   * How long `readDocument` took, in milliseconds — see `readLoaded`.
    *
    * Carried on the document rather than passed to the render, because a
    * document parsed at boot is rendered later — or not at all, if the paste
@@ -866,6 +866,7 @@ function documentActions(): HTMLElement {
   );
 }
 
+/** Build the document view. Revealing it is `showDocument`'s job. */
 function renderDocumentView(loaded: Loaded): void {
   const { index, parseMs } = loaded;
   const started = performance.now();
@@ -917,7 +918,6 @@ function renderDocumentView(loaded: Loaded): void {
 
   const renderMs = performance.now() - started;
 
-  showView("doc");
   soloType = null;
   applyFilter();
 
@@ -937,14 +937,11 @@ function renderDocumentView(loaded: Loaded): void {
     render: formatDuration(renderMs),
     bodies: eager ? "eager" : "lazy (on expand)",
   });
-
-  // `/view` shows a document held in this browser alone, so the head stops
-  // claiming to be an indexable page for as long as one is open.
-  applyPageMeta(documentMeta(loaded.label));
 }
 
 /**
- * Reveal the document view, building it first if it is not built yet.
+ * Reveal the document view, building it first if it is not built yet. The only
+ * way `#doc` is ever shown, so that "built" cannot be forgotten again.
  *
  * A loaded document and an empty `#doc` is a normal state, not a broken one:
  * `boot()` parses a stored document so that "Back to document" is instant, but
@@ -953,15 +950,21 @@ function renderDocumentView(loaded: Loaded): void {
  * has to be able to build it rather than assume something else already did —
  * an empty `#doc` behind a visible topbar looks exactly like the app having
  * lost the document.
+ *
+ * The other branch rests on an invariant worth stating plainly: a non-empty
+ * `#doc` always holds `current`'s own render. That holds because the one
+ * assignment which leaves a document unrendered is `boot()`, and it runs while
+ * `#doc` is still the empty element `index.html` ships. A future path that
+ * parses a *different* document without rendering it would break the invariant
+ * rather than this function, and the symptom would be the previous document's
+ * rows under the new one's label.
  */
 function showDocument(): void {
   if (!current) return;
-  // Rendering ends in `showView("doc")` and the document's page meta itself.
-  if (docEl.childElementCount === 0) {
-    renderDocumentView(current);
-    return;
-  }
+  if (docEl.childElementCount === 0) renderDocumentView(current);
   showView("doc");
+  // `/view` shows a document held in this browser alone, so the head stops
+  // claiming to be an indexable page for as long as one is open.
   applyPageMeta(documentMeta(current.label));
 }
 
@@ -1215,23 +1218,32 @@ interface LoadOptions {
   push?: boolean;
 }
 
+/**
+ * Parse a document into the shape the rest of the app holds it in.
+ *
+ * One function because the timing window is easy to get subtly wrong: `parseMs`
+ * has to be taken before the byte count, or a `TextEncoder` pass over the whole
+ * text is folded into the figure the overview reports — which is how the same
+ * document came to report two different numbers depending on the route taken to
+ * it. Throws `DocumentError`; what to do about that differs by caller.
+ */
+function readLoaded(text: string, label: string): Loaded {
+  const started = performance.now();
+  const index = readDocument(text);
+  const parseMs = performance.now() - started;
+  return { index, label, bytes: new TextEncoder().encode(text).byteLength, text, parseMs };
+}
+
 async function load(text: string, label: string, options: LoadOptions): Promise<boolean> {
   hideError();
 
-  const bytes = new TextEncoder().encode(text).byteLength;
-  const started = performance.now();
-
-  let index: DocumentIndex;
   try {
-    index = readDocument(text);
+    current = readLoaded(text, label);
   } catch (error) {
     showView("paste");
     showError(error);
     return false;
   }
-
-  const parseMs = performance.now() - started;
-  current = { index, label, bytes, text, parseMs };
 
   if (options.persist) {
     // A fresh document invalidates any fragment from the previous one, and the
@@ -1244,7 +1256,10 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   // its remembered rows and its anchor belong to the document being replaced.
   dropPendingRestore();
 
+  // A new document replaces whatever is built, so it is rendered outright
+  // rather than through `showDocument`, whose job is only to fill an empty one.
   renderDocumentView(current);
+  showDocument();
 
   if (options.persist) {
     window.scrollTo(0, 0);
@@ -1395,6 +1410,12 @@ function offerResume(): void {
       button.addEventListener("click", () => {
         navigate(VIEW_PATH);
         showDocument();
+        // The paste view may have been scrolled well down to reach this button,
+        // and nothing was carrying a place inside the document to return to —
+        // so without this you arrive somewhere in the middle of it. A traversal
+        // is different: that has a remembered position, and `scheduleSettle`
+        // puts it back.
+        window.scrollTo(0, 0);
       });
       return button;
     })(),
@@ -1600,15 +1621,7 @@ async function boot(): Promise<void> {
 
   // Parse it so "Back to document" is instant, but stay on the paste view.
   try {
-    const started = performance.now();
-    const index = readDocument(stored.text);
-    current = {
-      index,
-      label: stored.label ?? t().labels.storedDocument,
-      bytes: new TextEncoder().encode(stored.text).byteLength,
-      text: stored.text,
-      parseMs: performance.now() - started,
-    };
+    current = readLoaded(stored.text, stored.label ?? t().labels.storedDocument);
     offerResume();
   } catch {
     // A stored document that no longer parses is not worth blocking the paste
