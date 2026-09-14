@@ -39,8 +39,25 @@ jobs:
       - name: Typecheck the Worker
         run: npx tsc -p tsconfig.worker.json --noEmit
 
+      # test/node is a third program for the same kind of reason the Worker is
+      # a second one: it runs on plain Node and needs `@types/node`, which the
+      # app's own program deliberately does not have.
+      - name: Typecheck the Node tests
+        run: npx tsc -p test/node/tsconfig.json --noEmit
+
       - name: Test
         run: npm test
+
+      # The same suite again under a host language the app itself ships. Node's
+      # built-in `navigator.language` follows `LANG`, and `src/crypto.ts` reads
+      # its refusals through `t()`, so before `test/setup.ts` pinned the
+      # catalogue this run would have failed while the one above passed — which
+      # is exactly the failure a green CI on an English runner used to hide.
+      - name: Test under a non-English host language
+        run: npm test
+        env:
+          LANG: de_DE.UTF-8
+          LC_ALL: de_DE.UTF-8
 
       - name: Build
         run: npx vite build

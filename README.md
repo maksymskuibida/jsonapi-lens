@@ -321,8 +321,21 @@ npm run build
 npm run fixtures
 ```
 
-`npm test` runs 117 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
+`npm test` runs 193 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
 the encryption round trip and the bulk-render escaping.
+
+It pins the catalogue to English before any of them run, in
+[`test/setup.ts`](test/setup.ts). Node has had a built-in `navigator` since v21 whose `language`
+reflects the host's `LANG`, so `src/crypto.ts` — which reads its refusals through `t()` — used to
+answer in German on a German machine, and the suite's result depended on who ran it rather than on
+the code. [`test/node/locale-pin.test.ts`](test/node/locale-pin.test.ts) holds that pin in place,
+and proves the hazard is real by reading `navigator.language` out of a bare Node subprocess started
+under `LANG=de_DE.UTF-8`. Spawning one is why it is the one test that needs Node's own types, and so
+the one typechecked separately:
+
+```bash
+npx tsc -p test/node/tsconfig.json --noEmit
+```
 
 History restoration is deliberately *not* among them. What it promises — Back puts the same content
 back in the same place on screen — depends on `content-visibility` and on real layout, and jsdom has
@@ -343,7 +356,8 @@ Headless rather than a real window on purpose. A headed tab only renders while i
 non-occluded tab of a non-minimised window; anywhere else it stops running `requestAnimationFrame`
 and stops updating `content-visibility`, and the measurements come out quietly wrong rather than
 failing. Headless always renders, needs nobody's screen, and several copies can run at once. `npm run build` typechecks app and Worker
-separately (they have incompatible globals) and builds to `dist/`. `npm run fixtures` writes
+separately (they have incompatible globals) and builds to `dist/`; `test/node` is the third such
+program, for the reason above. `npm run fixtures` writes
 `fixtures/large-50k.json`; it takes an optional count and path.
 
 ## Deploying

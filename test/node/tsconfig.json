@@ -1,0 +1,41 @@
+{
+  // A separate program from the root tsconfig.json for the same reason
+  // tsconfig.worker.json is: this code runs on plain Node rather than in a
+  // browser, so `process` and `node:child_process` come from `@types/node`,
+  // and its imports resolve the Node way rather than the bundler way.
+  //
+  // Keeping it out of the root program is the point, not an inconvenience.
+  // That program has `types: ["vite/client"]` and no Node types at all, which
+  // is what stops anything under `src/` from reaching for a Node API and
+  // still typechecking — the same guarantee the i18n suite relies on when it
+  // reads `index.html` through Vite rather than `node:fs`.
+  //
+  // `lib` matches the root's exactly, "DOM" included, even though nothing
+  // here touches a document. `src/crypto.ts` pulls in `src/i18n/index.ts` for
+  // `t()` and, through it, all three catalogues and `src/dom.ts`, and
+  // `i18n/index.ts` itself references `location`, `history` and `Storage` in
+  // branches guarded at runtime but not in the types. One `tsc` program
+  // typechecks a file's whole import graph under one `lib` set, so there is
+  // no way to typecheck this file's imports without satisfying those. And
+  // matching rather than minimising matters: both programs now typecheck that
+  // graph, so if the two `lib` sets diverged, a later `src/` change could
+  // pass `npx tsc --noEmit` and fail this one for reasons having nothing to
+  // do with tests.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}
