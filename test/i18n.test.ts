@@ -84,6 +84,37 @@ describe("catalogues", () => {
   });
 });
 
+// D2 (docs/qa-reports/prod-baseline-2026-09-02.md): a path shaped like a
+// broken share link gets a message that says so, but that message must not
+// become a second oracle alongside the crypto one — see `crypto.test.ts`'s
+// "no oracle" describe block for the existing guarantee this extends to the
+// router layer, which never even gets as far as asking whether an id exists.
+describe("the damaged share-link message", () => {
+  const ALL: [name: string, messages: Messages][] = [["en", en], ["de", de], ["uk", uk]];
+
+  it.each(ALL)("%s says nothing that depends on which id was attempted", (_name, messages) => {
+    const first = messages.toast.noPage("/d/1:short");
+    const second = messages.toast.noPage("/d/999999999:short");
+    // Same message shape for two different ids: the router never queries
+    // anything to produce it, so it cannot know — and must not read as if
+    // it does.
+    expect(first).toBe(second);
+  });
+
+  it.each(ALL)("%s names the expected shape and does not claim the page does not exist", (_name, messages) => {
+    const damaged = messages.toast.noPage("/d/1:short");
+    expect(damaged).toContain("/d/<id>:<secret>");
+    expect(damaged).toContain("8");
+    expect(damaged).toContain("64");
+  });
+
+  it.each(ALL)("%s still gives the ordinary message for a path that is not share-shaped", (_name, messages) => {
+    const ordinary = messages.toast.noPage("/d/notanumber:secret");
+    expect(ordinary).toContain("/d/notanumber:secret");
+    expect(ordinary).not.toContain("/d/<id>:<secret>");
+  });
+});
+
 describe("plurals", () => {
   it("uses all four Ukrainian forms rather than an n === 1 check", () => {
     // 1 ресурс / 2 ресурси / 5 ресурсів — a two-form language's rule gets the

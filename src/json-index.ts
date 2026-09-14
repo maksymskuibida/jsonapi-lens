@@ -119,20 +119,32 @@ function isBareIdKey(key: string): boolean {
  *
  * Tested against the key **as written**, before any normalising — a compound
  * reference needs a separator (`_`/`-`) or a case boundary (a lower-case
- * letter or digit immediately before `Id`/`ID`) right in front of the
- * suffix. Stripping `_`/`-` first, the way a bare key is matched, destroys
- * exactly the evidence this test needs: `valid`, `is_valid`, `paid` and
- * `grid` all end in the letters `id` once normalised, but none of them has a
- * separator or a case change in front of it, so none of them is a reference —
- * `valid` stays an ordinary value instead of linking into a `vals`
- * collection, and `is_valid` stays out of the dangling panel instead of
- * appearing there as a phantom scope `isval`.
+ * letter, a digit, or a letter from a caseless script — `\p{Lo}`: CJK, Kana,
+ * Hebrew, Arabic, Thai and the like — immediately before `Id`/`ID`) right in
+ * front of the suffix. Stripping `_`/`-` first, the way a bare key is
+ * matched, destroys exactly the evidence this test needs: `valid`,
+ * `is_valid`, `paid` and `grid` all end in the letters `id` once normalised,
+ * but none of them has a separator or a case change in front of it, so none
+ * of them is a reference — `valid` stays an ordinary value instead of
+ * linking into a `vals` collection, and `is_valid` stays out of the dangling
+ * panel instead of appearing there as a phantom scope `isval`.
+ *
+ * `\p{Lo}` is deliberately not `\p{L}`: `顧客Id` needs its `客` (`\p{Lo}`,
+ * a script with no case at all) to count, but `Ä` must not, because it is
+ * `\p{Lu}` — uppercase — and admitting it would let an upper-case letter
+ * satisfy a boundary whose whole point is that it is *not* upper-case. Using
+ * the broader `\p{L}` would have quietly re-admitted every `\p{Lu}` letter
+ * along with the caseless scripts this exists to reach, which is exactly the
+ * over-match `docs/DECISIONS.md` D4 was written against — see the "any key
+ * ending in the letters `id` is a reference" defect it names. `userid` must
+ * stay unmatched by this rule for the same reason: lower-case `id`, not
+ * `Id`/`ID`, is not a case boundary at all.
  */
 function referenceContainerName(key: string): string | null {
   if (isBareIdKey(key)) return null;
   const snake = /^(.*)[_-]ids?$/i.exec(key);
   if (snake && snake[1]!.length > 0) return normalizeKey(snake[1]!);
-  const camel = /^(.*[a-z0-9])(?:Id|ID)s?$/.exec(key);
+  const camel = /^(.*[a-z0-9\p{Lo}])(?:Id|ID)s?$/u.exec(key);
   if (camel && camel[1]!.length > 0) return normalizeKey(camel[1]!);
   return null;
 }

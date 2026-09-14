@@ -218,6 +218,49 @@ describe("buildJsonIndex — identity: a compound reference key needs a real bou
     );
     expect(index.referenceAt.get("/refs/0/widget_id")).toMatchObject({ targetPointer: "/widgets/0" });
   });
+
+  // D7 (docs/qa-reports/prod-baseline-2026-09-02.md): the camelCase boundary
+  // only ever admitted `[a-z0-9]`, so a compound key in a script with no case
+  // distinction at all — CJK, Kana, Hebrew, Arabic, Thai, `\p{Lo}` — could
+  // never satisfy it, however naturally it reads as "customerId" to someone
+  // who writes that script. See `docs/DECISIONS.md` D4 for why the fix is
+  // `\p{Lo}` specifically and not the broader `\p{L}`.
+  it("recognises a compound reference key whose boundary letter is from a caseless script", () => {
+    const index = buildJsonIndex(
+      {
+        顧客: [{ id: 1, name: "a" }],
+        orders: [{ 顧客Id: 1 }],
+      } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/orders/0/顧客Id")).toMatchObject({ resolution: "resolved" });
+  });
+
+  it("does not let an upper-case letter satisfy the boundary — Ä stays excluded", () => {
+    // `Ä` is `\p{Lu}` (upper-case), not `\p{Lo}`. Admitting it would readmit
+    // every `\p{Lu}` letter along with the caseless scripts this exists to
+    // reach, which defeats the whole point of a boundary that means "not
+    // upper-case".
+    const index = buildJsonIndex(
+      { cafes: [{ id: 1 }], a: [{ cafÄId: 1 }] } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/a/0/cafÄId")).toBeUndefined();
+  });
+
+  it("still leaves a bare userid — lower-case id, not Id/ID — unmatched", () => {
+    // Regression guard for D4: "any key ending in the letters id is a
+    // reference" was a real shipped defect. `\p{Lo}` must not reopen it —
+    // this has no separator and no `Id`/`ID` case boundary at all.
+    const index = buildJsonIndex(
+      { users: [{ id: 1 }], a: [{ userid: 1 }] } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    expect(index.referenceAt.get("/a/0/userid")).toBeUndefined();
+  });
 });
 
 describe("buildJsonIndex — identity: no references means no identity, however many definitions", () => {

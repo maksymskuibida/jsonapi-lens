@@ -349,6 +349,7 @@ function renderReferencedBy(resource: Resource, index: DocumentIndex): HTMLEleme
  * section's id. Nothing here needs to know which resource it belongs to.
  */
 function objectActions(resource: Resource): HTMLElement {
+  const m = t().resource.objectActions;
   const button = (action: string, label: string, title: string, extra = ""): HTMLElement =>
     el("button", {
       class: `act${extra ? ` ${extra}` : ""}`,
@@ -362,10 +363,10 @@ function objectActions(resource: Resource): HTMLElement {
   return el(
     "div",
     { class: "res__actions" },
-    button("raw", "raw", "Show this resource as raw JSON", "act--accent"),
-    button("copy-object", "copy", "Copy this resource as JSON"),
-    button("copy-pointer", "path", `Copy the JSON Pointer to this resource (${resource.pointer})`),
-    button("copy-link", "link", "Copy a deep link to this resource"),
+    button("raw", m.raw, m.rawTitle, "act--accent"),
+    button("copy-object", m.copy, m.copyTitle),
+    button("copy-pointer", m.path, m.pathTitle(resource.pointer)),
+    button("copy-link", m.link, m.linkTitle),
   );
 }
 

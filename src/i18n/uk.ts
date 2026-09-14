@@ -15,6 +15,7 @@
 
 import { el, frag } from "../dom.js";
 import { intlFor } from "./intl.js";
+import { looksLikeShareAttempt } from "../router.js";
 import type { Messages } from "./en.js";
 
 const f = intlFor("uk");
@@ -190,7 +191,7 @@ export const uk: Messages = {
     shape: "Форма",
     resources: "Ресурси",
     types: "Типи",
-    included: "Included",
+    included: "Включені",
     relationships: "Зв’язки",
     unresolvedPointers: (n) =>
       f.plural(n, {
@@ -366,6 +367,16 @@ export const uk: Messages = {
     absentChipTitle: (type, id) =>
       `У цьому документі немає ресурсу з type «${type}» та id «${id}»`,
     showMore: (n) => `Показати ще ${f.n(n)}`,
+    objectActions: {
+      raw: "сирий",
+      rawTitle: "Показати цей ресурс як сирий JSON",
+      copy: "копіювати",
+      copyTitle: "Скопіювати цей ресурс як JSON",
+      path: "шлях",
+      pathTitle: (pointer) => `Скопіювати JSON Pointer на цей ресурс (${pointer})`,
+      link: "посилання",
+      linkTitle: "Скопіювати глибоке посилання на цей ресурс",
+    },
   },
 
   relationships: {
@@ -548,7 +559,10 @@ export const uk: Messages = {
     filterCleared: (type) => `Показано всі типи, щоб дістатися до ${type}.`,
     pointerGone: (pointer) => `За ${pointer} більше нічого немає.`,
     notStored: "Цей документ не вдалося зберегти, тож перезавантаження його втратить.",
-    noPage: (pathname) => `За адресою ${pathname} сторінки немає.`,
+    noPage: (pathname) =>
+      looksLikeShareAttempt(pathname)
+        ? "Це спільне посилання виглядає пошкодженим. Посилання має вигляд /d/<id>:<secret>, з ключем від 8 до 64 символів — перевірте, чи не обрізалося воно."
+        : `За адресою ${pathname} сторінки немає.`,
     noDocument: "Жодного документа не завантажено. Вставте документ, щоб почати.",
   },
 

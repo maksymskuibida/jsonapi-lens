@@ -48,9 +48,22 @@ const OG_LOCALES: Record<Locale, string> = {
 };
 
 export interface PageMeta {
-  /** `<title>`, and the Open Graph and Twitter title. */
-  title: string;
-  description: string;
+  /**
+   * `<title>`, and the Open Graph and Twitter title — or `null` to leave
+   * whatever is already there alone.
+   *
+   * `null` is for `/view` and a share link: neither is a route with a title
+   * of its own, and the *real* title (`documentMeta` below) is set once the
+   * document that is actually showing is known — see `metaForRoute`'s "view"
+   * branch. Returning a generic placeholder here instead, the way this used
+   * to, meant every fragment traversal of an already-open document clobbered
+   * a correct title with that placeholder and nothing ever set it back: a
+   * chip click or a cold reload of `/view#r_…` left the tab titled for the
+   * paste view forever after. See D3 in
+   * `docs/qa-reports/prod-baseline-2026-09-02.md`.
+   */
+  title: string | null;
+  description: string | null;
   /**
    * The path this page declares as canonical — no query, no fragment — or `null`
    * for a page that must not be indexed.
@@ -82,9 +95,10 @@ export function metaForRoute(route: Route): PageMeta {
     };
   }
 
-  // Both of these render somebody's own document, or nothing at all.
+  // Both of these render somebody's own document, or nothing at all — and
+  // whichever it is is not this function's to say. See `PageMeta.title`.
   if (route.kind === "view" || route.kind === "share") {
-    return { title: m.meta.title, description: m.meta.description, path: null };
+    return { title: null, description: null, path: null };
   }
 
   return { title: m.meta.title, description: m.meta.description, path: PASTE_PATH };
@@ -132,13 +146,19 @@ export function canonicalUrl(path: string): string {
 
 /** Put a resolved `PageMeta` on the document. */
 export function applyPageMeta(page: PageMeta): void {
-  document.title = page.title;
-
-  meta("name", "description", page.description);
-  meta("property", "og:title", page.title);
-  meta("property", "og:description", page.description);
-  meta("name", "twitter:title", page.title);
-  meta("name", "twitter:description", page.description);
+  // `null` means "not this function's to say" — see `PageMeta.title` — so the
+  // title and description already on the page, set by whoever actually knows
+  // them, are left exactly as they are.
+  if (page.title !== null) {
+    document.title = page.title;
+    meta("property", "og:title", page.title);
+    meta("name", "twitter:title", page.title);
+  }
+  if (page.description !== null) {
+    meta("name", "description", page.description);
+    meta("property", "og:description", page.description);
+    meta("name", "twitter:description", page.description);
+  }
   meta("property", "og:locale", OG_LOCALES[locale()]);
 
   if (page.path === null) {

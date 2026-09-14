@@ -2,7 +2,7 @@ import { el } from "./dom.js";
 import { classify, formatDate, formatNumber, humanizeKey, previewValue } from "./format.js";
 import { join as pointerJoin } from "./pointer.js";
 import type { JsonObject, JsonValue } from "./types.js";
-import { t } from "./i18n/index.js";
+import { locale, t } from "./i18n/index.js";
 
 /** Nested structures past this depth stay collapsed, to keep expansion cheap. */
 const AUTO_OPEN_DEPTH = 1;
@@ -63,12 +63,12 @@ function renderScalar(value: JsonValue): HTMLElement {
     case "number":
       return el("span", {
         class: "v v--num",
-        text: formatNumber(value as number),
+        text: formatNumber(value as number, locale()),
         title: String(value),
       });
 
     case "date": {
-      const formatted = formatDate(value as string);
+      const formatted = formatDate(value as string, locale());
       if (!formatted) return el("span", { class: "v v--str", text: String(value) });
       return el(
         "span",
@@ -148,7 +148,7 @@ export function rowActions(): HTMLElement {
       type: "button",
       "data-copy": "path",
       title: t().value.copyPointerTitle,
-      "aria-label": "Copy JSON Pointer to this value",
+      "aria-label": t().value.copyPointerTitle,
       text: t().value.copyPointerLabel,
     }),
     el("button", {
@@ -156,7 +156,7 @@ export function rowActions(): HTMLElement {
       type: "button",
       "data-copy": "value",
       title: t().value.copyValueTitle,
-      "aria-label": "Copy this value",
+      "aria-label": t().value.copyValueTitle,
       text: t().value.copyValueLabel,
     }),
   );

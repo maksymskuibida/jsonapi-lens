@@ -19,6 +19,7 @@
 
 import { el, frag } from "../dom.js";
 import { intlFor } from "./intl.js";
+import { looksLikeShareAttempt } from "../router.js";
 import type { Shape, ShapeEvidence } from "../types.js";
 
 const f = intlFor("en");
@@ -404,6 +405,19 @@ export const en = {
     absentChipTitle: (type: string, id: string) =>
       `No resource with type "${type}" and id "${id}" appears in this document`,
     showMore: (n: number) => `Show ${f.n(n)} more`,
+    /** The raw/copy/path/link row on an expanded resource. Short labels to
+     * match the mini-button row `value.copyPointerLabel`/`copyValueLabel`
+     * use; the titles double as the `aria-label`, same as those. */
+    objectActions: {
+      raw: "raw",
+      rawTitle: "Show this resource as raw JSON",
+      copy: "copy",
+      copyTitle: "Copy this resource as JSON",
+      path: "path",
+      pathTitle: (pointer: string) => `Copy the JSON Pointer to this resource (${pointer})`,
+      link: "link",
+      linkTitle: "Copy a deep link to this resource",
+    },
   },
 
   relationships: {
@@ -604,7 +618,10 @@ export const en = {
     filterCleared: (type: string) => `Showing all types so ${type} could be reached.`,
     pointerGone: (pointer: string) => `Nothing resolves at ${pointer} any more.`,
     notStored: "This document could not be stored, so a reload will lose it.",
-    noPage: (pathname: string) => `No page at ${pathname}.`,
+    noPage: (pathname: string) =>
+      looksLikeShareAttempt(pathname)
+        ? "That share link looks damaged. A share link looks like /d/<id>:<secret>, with a secret between 8 and 64 characters — check whether it got cut short."
+        : `No page at ${pathname}.`,
     noDocument: "No document is loaded. Paste one to get started.",
   },
 

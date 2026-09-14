@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { IMPRESSUM_PATH, parseRoute, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
+import {
+  IMPRESSUM_PATH,
+  looksLikeShareAttempt,
+  parseRoute,
+  PASTE_PATH,
+  PRIVACY_PATH,
+  VIEW_PATH,
+} from "../src/router.js";
 import { escapeToken, join, parse, resolve, unescapeToken } from "../src/pointer.js";
 
 describe("parseRoute", () => {
@@ -75,6 +82,44 @@ describe("parseRoute", () => {
   it("exports the paths the app navigates between", () => {
     expect(PASTE_PATH).toBe("/");
     expect(VIEW_PATH).toBe("/view");
+  });
+});
+
+// D2 (docs/qa-reports/prod-baseline-2026-09-02.md): a path shaped like a share
+// link, with a secret too broken to parse, must be told apart from an
+// ordinary unmatched path — `parseRoute` itself is unchanged (both still come
+// back `unknown`), but `looksLikeShareAttempt` is what `t().toast.noPage`
+// checks to pick the right message. Nothing here changes what makes a secret
+// valid; T5's 64-character upper bound stands.
+describe("looksLikeShareAttempt", () => {
+  it("a numeric id with an implausibly short secret still looks like an attempt", () => {
+    expect(parseRoute("/d/1:short").kind).toBe("unknown");
+    expect(looksLikeShareAttempt("/d/1:short")).toBe(true);
+  });
+
+  it("a numeric id with no secret at all is the same", () => {
+    expect(parseRoute("/d/1").kind).toBe("unknown");
+    expect(looksLikeShareAttempt("/d/1")).toBe(true);
+  });
+
+  it("a numeric id with an empty secret after the separator is the same", () => {
+    expect(parseRoute("/d/1:").kind).toBe("unknown");
+    expect(looksLikeShareAttempt("/d/1:")).toBe(true);
+  });
+
+  it("a 64-character secret is still accepted as a real share link — T5 depends on this", () => {
+    const secret = "a".repeat(64);
+    expect(parseRoute(`/d/1:${secret}`)).toEqual({ kind: "share", id: 1, secret });
+  });
+
+  it("a non-numeric id is not a share attempt at all — the ordinary message is correct here", () => {
+    expect(parseRoute("/d/notanumber:secret").kind).toBe("unknown");
+    expect(looksLikeShareAttempt("/d/notanumber:secret")).toBe(false);
+  });
+
+  it("an ordinary unmatched path is not a share attempt", () => {
+    expect(looksLikeShareAttempt("/nope")).toBe(false);
+    expect(looksLikeShareAttempt("/")).toBe(false);
   });
 });
 

@@ -20,7 +20,14 @@ import { LOCALES } from "../src/i18n/index.js";
 import { legalEn } from "../src/legal/en.js";
 import { IDENTITY } from "../src/legal/identity.js";
 import { IMPRESSUM_PATH, LEGAL_PATHS, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
-import { INDEXABLE, NOT_INDEXABLE, SITE_ORIGIN } from "../src/seo.js";
+import {
+  applyPageMeta,
+  documentMeta,
+  INDEXABLE,
+  metaForRoute,
+  NOT_INDEXABLE,
+  SITE_ORIGIN,
+} from "../src/seo.js";
 import type { Messages } from "../src/i18n/en.js";
 import type { LegalPage } from "../src/legal/types.js";
 
@@ -416,6 +423,57 @@ describe("the prerendered legal pages", () => {
       expect(page.title, page.path).toBe(`${source?.title} — jsonapi-lens`);
       expect(page.description, page.path).toBe(`${source?.lede} ${en.footer.tagline}`);
     }
+  });
+});
+
+// D3 (docs/qa-reports/prod-baseline-2026-09-02.md): following a resolving
+// chip, or a cold reload of `/view#r_…`, used to revert `<title>`/`og:title`
+// to the paste view's — the fragment itself was never inspected; it was that
+// `applyRoute` calls `applyRouteMeta` unconditionally, `metaForRoute` used to
+// answer with a generic placeholder for "view"/"share", and nothing set the
+// real title back on the idempotent path (a document already showing, only
+// the fragment changing) that a chip click and a fragment reload both take.
+describe("a document's title survives a route re-entry, hash or no hash", () => {
+  it("/view with nothing open yet does not overwrite whatever title is already on the page", () => {
+    document.title = "Whatever was there before";
+    applyPageMeta(metaForRoute({ kind: "view" }));
+    expect(document.title).toBe("Whatever was there before");
+  });
+
+  it("a share route is the same — it renders somebody's document or nothing, never a route of its own", () => {
+    document.title = "Whatever was there before";
+    applyPageMeta(metaForRoute({ kind: "share", id: 1, secret: "a".repeat(10) }));
+    expect(document.title).toBe("Whatever was there before");
+  });
+
+  it("re-entering /view while a document is already showing keeps the document's own title", () => {
+    // This is the exact idempotent path a fragment traversal takes: the
+    // document is already open, so nothing re-renders — but `applyRouteMeta`
+    // still runs, which is precisely what used to clobber the title.
+    applyPageMeta(documentMeta("articles.json"));
+    const withDocument = document.title;
+    expect(withDocument).not.toBe(metaForRoute({ kind: "paste" }).title);
+
+    applyPageMeta(metaForRoute({ kind: "view" }));
+    expect(document.title).toBe(withDocument);
+
+    // A second re-entry (Forward, then Back again) must not drift either.
+    applyPageMeta(metaForRoute({ kind: "view" }));
+    expect(document.title).toBe(withDocument);
+  });
+
+  it("robots and canonical are unaffected — this was never an indexability bug", () => {
+    document.head.querySelectorAll('meta[name="robots"], link[rel="canonical"]').forEach((n) => n.remove());
+    applyPageMeta(documentMeta("articles.json"));
+    applyPageMeta(metaForRoute({ kind: "view" }));
+    expect(document.querySelector('meta[name="robots"]')?.getAttribute("content")).toBe(NOT_INDEXABLE);
+    expect(document.querySelector('link[rel="canonical"]')).toBeNull();
+  });
+
+  it("a real route change (e.g. to the paste view) still sets its own title, not null", () => {
+    applyPageMeta(documentMeta("articles.json"));
+    applyPageMeta(metaForRoute({ kind: "paste" }));
+    expect(document.title).toBe(metaForRoute({ kind: "paste" }).title);
   });
 });
 

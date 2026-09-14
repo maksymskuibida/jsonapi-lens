@@ -27,6 +27,7 @@ blocker) · **🔒 not built** (deliberate — reason in §3) · **📋 queued**
 | T7 · MCP server | 📋 | [T7](task-specs/T7.md) | `share` takes a document list and an AI-supplied `openssl rand -hex 32` secret, seals one document or a bundle, returns the id, and documents how to build the URL. `read` takes an id and a secret and returns the document. |
 | T3 · Importers | 📋 | [T3](task-specs/T3.md) | cURL, raw HTTP request, raw HTTP response, bare URL, HAR, and **JSON transport logs** — a serialised Python `logging` record with HTTP transport fields, where two records correlate on a shared id and merge in either order. |
 | T4 · Diagnostics | 📋 | [T4](task-specs/T4.md) | The request-vs-response cross-checks, linked at both ends and surfaced inline on the rows they explain. |
+| T8 · Pre-existing defects (production baseline) | 🔨 | [T8](task-specs/T8.md) | Seven pre-existing defects, five from the production baseline and two found while fixing them: locale-dependent document values, a wrong "no page here" on a damaged share link, a document title reverting on a fragment traversal, a stale saved-count on delete, five untranslated strings, `npm test` depending on the machine's locale, and a Unicode gap in the reference-key boundary — see the task spec's D1–D7 for each. Branch `fix/T8-preexisting-defects`, based on `integration/wave1` (needs T1). Adds [D6](DECISIONS.md) to `DECISIONS.md` — unrelated numbering to this row's own D1–D7, which live only in the task spec. |
 
 ## 1a · Waves
 

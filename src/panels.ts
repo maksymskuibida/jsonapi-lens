@@ -7,6 +7,7 @@ import type { KeyHint } from "./platform.js";
 import { deleteFromLibrary, listLibrary, renameInLibrary } from "./store.js";
 import type { LibraryEntry } from "./store.js";
 import { openModal, toast } from "./ui.js";
+import type { ModalHandle } from "./ui.js";
 
 /* ------------------------------------------------------------- raw view --- */
 
@@ -71,7 +72,26 @@ export async function openLibraryModal(
 
   const body = el("div", { class: "library" });
 
+  // Set once `openModal` below has run; `render`'s own first call happens
+  // before that, to build the body `openModal` is given, so it checks for
+  // this rather than assuming it exists.
+  let handle: ModalHandle | null = null;
+
+  /**
+   * The subtitle is derived here, from `list`, every time this runs — not
+   * computed once when the modal opens and left alone. A subtitle computed
+   * once was stale the moment a delete changed the count while the modal
+   * stayed open: the list emptied but "1 in this browser" kept showing. See
+   * D4 in `docs/qa-reports/prod-baseline-2026-09-02.md`.
+   */
   const render = (list: LibraryEntry[]): void => {
+    const subtitleEl = handle?.root.querySelector<HTMLElement>(".modal__subtitle");
+    if (subtitleEl) {
+      subtitleEl.textContent = list.length
+        ? t().library.countInBrowser(list.length)
+        : t().library.storedLocally;
+    }
+
     if (!list.length) {
       body.replaceChildren(
         el(
@@ -162,7 +182,7 @@ export async function openLibraryModal(
 
   render(entries);
 
-  openModal({
+  handle = openModal({
     title: t().library.title,
     subtitle: entries.length
       ? t().library.countInBrowser(entries.length)

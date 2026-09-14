@@ -1,3 +1,19 @@
+/**
+ * Pure, presentation-adjacent helpers for a document *value* — classifying it,
+ * formatting it, previewing it, picking a summary attribute. Per
+ * `docs/PROCESS.md` §5 this module is pure and depends on nothing in the app,
+ * which is what keeps it unit-testable in milliseconds: no DOM, no `history`,
+ * no reading the app's chosen language off `navigator`/`localStorage` itself.
+ *
+ * `formatDate`/`formatNumber` take `locale` as a plain string argument for
+ * exactly that reason — the caller (a render module, which already reads
+ * `t()`/`locale()`) supplies the app's active language; this module never
+ * imports `src/i18n/index.ts`. `intlFor` from `src/i18n/intl.ts` is fair game
+ * to import, because it is itself pure — a plain string in, formatters out,
+ * no browser globals touched — unlike `locale()`, which is not.
+ */
+
+import { intlFor } from "./i18n/intl.js";
 import type { JsonValue } from "./types.js";
 
 export type ValueKind =
@@ -29,29 +45,32 @@ export function classify(value: JsonValue): ValueKind {
   return "string";
 }
 
-const NUMBER_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 });
-
 /**
  * Render a date-ish string as both the local reading and the raw value.
  *
  * Timezone bugs are a big share of what the user is looking for in these
  * payloads, so the original string is never replaced — only annotated.
+ *
+ * `locale` is the app's own chosen language (`en`/`de`/`uk`), supplied by the
+ * caller rather than read from the browser here — see this module's header
+ * and `src/i18n/intl.ts`'s. This function stays pure and depends on nothing
+ * beyond its arguments, exactly like `classify`/`previewValue` below it.
  */
-export function formatDate(raw: string): { display: string; title: string } | null {
+export function formatDate(raw: string, locale: string): { display: string; title: string } | null {
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return null;
 
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
-  const display = dateOnly
-    ? parsed.toLocaleDateString(undefined, { dateStyle: "medium", timeZone: "UTC" })
-    : parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
+  const f = intlFor(locale);
+  const display = dateOnly ? f.valueDateOnly(parsed.getTime()) : f.valueDateTime(parsed.getTime());
 
   return { display, title: `${raw}${dateOnly ? "" : `  ·  ${parsed.toISOString()}`}` };
 }
 
-export function formatNumber(value: number): string {
+/** See `formatDate` above for why `locale` is a parameter rather than read here. */
+export function formatNumber(value: number, locale: string): string {
   if (!Number.isFinite(value)) return String(value);
-  return NUMBER_FORMAT.format(value);
+  return intlFor(locale).valueNumber(value);
 }
 
 /** One-line preview of a nested value, for a collapsed row. */

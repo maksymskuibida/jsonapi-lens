@@ -13,6 +13,7 @@
 
 import { el, frag } from "../dom.js";
 import { intlFor } from "./intl.js";
+import { looksLikeShareAttempt } from "../router.js";
 import type { Messages } from "./en.js";
 
 const f = intlFor("de");
@@ -187,7 +188,7 @@ export const de: Messages = {
     shape: "Form",
     resources: "Ressourcen",
     types: "Typen",
-    included: "Included",
+    included: "Enthalten",
     relationships: "Beziehungen",
     unresolvedPointers: (n) =>
       f.plural(n, { one: "Offener Pointer", other: "Offene Pointer" }),
@@ -356,6 +357,16 @@ export const de: Messages = {
     absentChipTitle: (type, id) =>
       `Im Dokument gibt es keine Ressource mit type „${type}“ und id „${id}“`,
     showMore: (n) => `${f.n(n)} weitere zeigen`,
+    objectActions: {
+      raw: "Roh",
+      rawTitle: "Diese Ressource als rohes JSON zeigen",
+      copy: "Kopieren",
+      copyTitle: "Diese Ressource als JSON kopieren",
+      path: "Pfad",
+      pathTitle: (pointer) => `Den JSON Pointer auf diese Ressource kopieren (${pointer})`,
+      link: "Link",
+      linkTitle: "Einen Deep Link zu dieser Ressource kopieren",
+    },
   },
 
   relationships: {
@@ -536,7 +547,10 @@ export const de: Messages = {
     pointerGone: (pointer) => `Bei ${pointer} geht nichts mehr auf.`,
     notStored:
       "Dieses Dokument konnte nicht gespeichert werden; ein Neuladen verliert es also.",
-    noPage: (pathname) => `Unter ${pathname} gibt es keine Seite.`,
+    noPage: (pathname) =>
+      looksLikeShareAttempt(pathname)
+        ? "Dieser Share-Link sieht beschädigt aus. Ein Share-Link hat die Form /d/<id>:<secret>, mit einem Schlüssel zwischen 8 und 64 Zeichen — prüfen Sie, ob er beim Kopieren gekürzt wurde."
+        : `Unter ${pathname} gibt es keine Seite.`,
     noDocument: "Es ist kein Dokument geladen. Fügen Sie eines ein, um loszulegen.",
   },
 

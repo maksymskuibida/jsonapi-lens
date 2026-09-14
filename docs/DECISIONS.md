@@ -194,3 +194,62 @@ no container-name logic at all and would catch more real links. It was rejected 
 above: on a real payload it produces enough wrong links (via nothing more than two unrelated `1`s)
 that the feature would train people to distrust every link it draws, which defeats the point of
 drawing any.
+
+---
+
+## D6 · A pure module that formats a locale-dependent value takes the locale as a parameter — it never reads the app's chosen language itself
+
+**Date:** 2026-09-03 · **Settles:** how `src/format.ts` (and anything later like it) gets the
+language to format in, for `T8` and for any later task that formats a locale-dependent value outside
+a render module — T2's request/response values among them
+
+### Why this is load-bearing
+
+T8 fixed a high-severity defect: `formatDate`/`formatNumber` called `toLocaleDateString`/
+`toLocaleString`/`Intl.NumberFormat` with no locale, which reads the browser's own setting rather
+than the language the app is actually showing — so a document's dates and numbers never followed a
+language switch at all. `src/i18n/intl.ts#intlFor` already existed to solve exactly this for the
+catalogues, so the obvious fix is `format.ts` calling `locale()` from `src/i18n/index.ts` itself,
+the same way every render module does.
+
+That obvious fix is wrong, because `docs/PROCESS.md` §5 is explicit that `format.ts` (with
+`ident.ts`/`pointer.ts`) is **pure and depends on nothing in the app** — no DOM, no `history`, and
+`locale()` reads `navigator`/`localStorage`/`location`, all guarded but all real dependencies on a
+host environment. Reaching for `locale()` from `format.ts` would not have broken anything today
+(every guard already tolerates a hostless environment), but it would have quietly ended the property
+that lets this module be unit-tested in milliseconds with nothing set up — the same property
+`ident.ts` and `pointer.ts` still have, and the reason `format.test.ts`'s date/number assertions
+below can pass a plain locale string and assert without touching `navigator` at all.
+
+### The rule
+
+A module in the pure layer (`format.ts`, `ident.ts`, `pointer.ts`, and `intl.ts` itself) that needs a
+locale to do its job takes it as a plain string **parameter**, supplied by whichever caller already
+sits in the impure layer and has one — a `render-*.ts` module, which `docs/PROCESS.md` §5 already
+says "reads `t()` and the DOM helpers." `format.ts`'s two exports,
+`formatDate(raw, locale)`/`formatNumber(value, locale)`, are the concrete shape: `src/render-value.ts`
+is their one caller, and it already imports `locale` from `src/i18n/index.ts` for exactly this.
+
+Importing `intlFor` itself into a pure module is fine and is not an exception to the rule:
+`intlFor(locale: string): Intlish` is itself pure — a plain string in, formatters out, no browser
+global touched — which is what makes it safe to sit in the same layer as `format.ts` rather than
+across the boundary from it.
+
+### What this means for later tasks
+
+T2's request/response model will render dates and numbers that live in headers, parameters and
+bodies — the identical shape of problem D1 fixed for a JSON:API/plain-JSON document's own values. If
+that rendering reuses `formatDate`/`formatNumber` (likely, since the values are the same kinds of
+scalars), the call site is a render module and already has a `locale()` available; nothing here
+requires `format.ts` to grow a second, request-shaped entry point. If a later task instead needs a
+*new* pure, locale-dependent helper, this decision is the answer to "does it read `locale()` itself"
+before that question gets re-litigated: no.
+
+### Rejected alternative
+
+Reading `locale()` directly inside `format.ts` was the first fix attempted and is functionally
+indistinguishable from the chosen one in every test this task added — every guard in
+`src/i18n/index.ts` already tolerates a Node/vitest environment, so nothing would have thrown. It was
+rejected anyway, on the module-boundary rule alone: the moment `format.ts` imports anything from
+`src/i18n/index.ts`, "pure, depends on nothing in the app" stops being true of it, whether or not
+today's tests happen to notice.

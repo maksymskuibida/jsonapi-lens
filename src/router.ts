@@ -63,6 +63,22 @@ export const LEGAL_PATHS: Record<string, LegalRoute> = {
 /** `/d/<id>:<secret>`, tolerating a trailing slash and a `#` separator. */
 const SHARE_PATTERN = /^\/d\/(\d{1,18})[:.]([A-Za-z0-9_-]{8,64})\/?$/;
 
+/**
+ * Does this path *look like* someone tried a share link, even a broken one?
+ *
+ * Only the shape matters — a numeric id, optionally followed by a separator
+ * and anything at all (a too-short secret, no secret, an empty one). This
+ * never says whether the id exists or the secret is right: it exists purely
+ * to pick a "nothing here" message, at `t().toast.noPage`, that tells a
+ * truncated share link apart from an ordinary mistyped URL — see D2 in
+ * `docs/qa-reports/prod-baseline-2026-09-02.md`. A non-numeric id (e.g.
+ * `/d/notanumber:secret`) is deliberately *not* a match: at that point
+ * nothing distinguishes it from any other unmatched route.
+ */
+export function looksLikeShareAttempt(pathname: string): boolean {
+  return /^\/d\/\d{1,18}(?:[:.#].*)?\/?$/.test(pathname);
+}
+
 export function parseRoute(rawPathname: string, hash = ""): Route {
   // Cloudflare's asset router normalises `/d/1:KEY` to `/d/1%3AKEY` with a 307,
   // so by the time this runs the colon may be percent-encoded. Decode first —

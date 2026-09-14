@@ -443,6 +443,21 @@ Driven in a real browser, not asserted:
   width, the topbar keeps all four controls by shrinking their labels, the rail becomes a card below
   60rem, and past 100rem the column is capped and centred rather than stretched — a resource row
   spread across 1,800 px puts a hand's width between an id and the tags describing it.
+- A resource attribute's date and number render in the app's own language, not the browser's:
+  checked with the app set to English, German and Ukrainian in turn while the browser itself
+  negotiated Ukrainian (`navigator.languages` starting `["uk", …]`) — `published_at` read
+  `Sep 14, 2026, 7:34:00 AM` in English, `14.09.2026, 07:34:00` in German and
+  `14 вер. 2026 р., 07:34:00` in Ukrainian, and `word_count` read `2,480` / `2.480` / a
+  space-grouped `2 480`, regardless of the browser's own setting. Top-level `meta` and an error's
+  `meta` do the same.
+- `/d/1` and `/d/1:short` both report the link as damaged, naming the expected `/d/<id>:<secret>`
+  shape; `/d/notanumber:secret` gets the ordinary "no page here" instead, since it is not shaped
+  like a share link at all.
+- Following a relationship chip keeps the browser tab titled for the open document the whole time,
+  including on a cold reload of a deep link (`/view#r_…`) — it does not revert to the landing
+  page's title.
+- Deleting the last entry from "Saved documents" with the dialog open updates its subtitle
+  immediately, without closing and reopening it.
 
 One caveat on find-in-page: text that exists **only inside a collapsed `<details>`** is located but
 not revealed by the legacy `window.find` API used for testing. Whether a browser's own find bar
