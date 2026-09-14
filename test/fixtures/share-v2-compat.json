@@ -1,0 +1,28 @@
+{
+  "//": [
+    "A version-2 share envelope, sealed by the crypto.ts that shipped in commit",
+    "12d01fc4d790c4f10252cc1034d722113cdf891b — the pre-T5 implementation, before",
+    "any bundle/exchange support existed. This is the one fixture in this repo",
+    "that a code change cannot regenerate: it exists to prove the T5 build can",
+    "still open a share link minted by every version-2 client already in the",
+    "wild, which unit tests sealed with the *new* code cannot prove on their own.",
+    "",
+    "Generated with `npx tsx` running that exact checked-out crypto.ts (plus its",
+    "i18n dependency chain) against the payload and secret below — see the T5 PR",
+    "description for the generator script. `blobBase64` is the literal output of",
+    "`seal(payload, secret)`; nothing here was touched by hand afterwards.",
+    "",
+    "If this file is ever lost, it is NOT safe to regenerate from a later commit:",
+    "regenerating with the current crypto.ts would only prove the new code agrees",
+    "with itself. A fixture that cannot be regenerated is still a valid fixture;",
+    "one generated after the change it is meant to guard against is worthless."
+  ],
+  "sealedByCommit": "12d01fc4d790c4f10252cc1034d722113cdf891b",
+  "secret": "fixtureT5x",
+  "payload": {
+    "text": "{\"data\":{\"type\":\"articles\",\"id\":\"1\",\"attributes\":{\"title\":\"Fixture\"}}}",
+    "label": "fixture.json",
+    "savedAt": 1704067200000
+  },
+  "blobBase64": "AvytmIN5Fd6sxw34VklFRR6W3m8pBM0tuKsIX2RFKImJUts6GzJhQKvvad28Wt/WYxUDX+YLfzWdh8ZXtZnUeyaBfq/1lyrzhWzwlfQF5V13UbgP1eFYWsOwZKR5Af1MBEM0LWx0zrhFtSTCXokVMiAhKlK5sKT8fbhPV/JYBbDkzzrDqiL71536bPzIf/xp3BT3ZmQu6H6hY7RawjkKQabDi2Q1mcMVqHx1DnJ/"
+}
