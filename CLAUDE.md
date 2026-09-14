@@ -4,33 +4,24 @@ A single-page JSON:API document viewer. Paste a payload and every relationship b
 can click. `README.md` explains the architecture at length — read its *How it works* section before
 changing anything about rendering, anchors or persistence.
 
-## The flow
+## How this repo is worked
 
-Work ships through the delivery loop in [docs/PROCESS.md](docs/PROCESS.md). In short:
+Development runs through a delivery process — task specs, an implementer/reviewer/QA loop, a review
+preflight and its attack suite. **Those files are deliberately not in the repository**: they are how
+the work is done, not what the product is, and they are ignored in `.gitignore`.
 
-```
-task in docs/STATUS.md → task spec → implementer (PR) → CI → reviewer → qa-web → squash-merge → PRODUCTION
-```
+What *is* here, because the code depends on it:
+[docs/DECISIONS.md](docs/DECISIONS.md) — decisions later work must respect. `src/ident.ts` and
+`src/exchange.ts` cite D1 and D2 in their header comments, and **D1 carries the proof that no two
+anchor scopes can mint the same DOM id**, which the entire navigation model rests on.
 
-| | |
-|---|---|
-| What ships how | [docs/PROCESS.md](docs/PROCESS.md) |
-| Commands, branches, labels, environments | [docs/DELIVERY.md](docs/DELIVERY.md) |
-| What is on `main`, and what is queued | [docs/STATUS.md](docs/STATUS.md) |
-| Decisions later work must respect | [docs/DECISIONS.md](docs/DECISIONS.md) |
-
-**A squash-merge to `main` deploys to `https://jsonapi.mstool.dev`.** There is no pre-production
-environment. Say plainly in every pull request what was *not* verified.
-
-**Most of these gates are agent discipline, not platform enforcement.** `main` is not
-branch-protected, and every role acts through one `gh` token, so `reviewed:approved` is a label
-rather than an approval. [docs/PROCESS.md §8](docs/PROCESS.md) is the single source of truth on what
-is actually enforced — nothing in this repository may contradict that table.
+**A merge to `main` deploys to `https://jsonapi.mstool.dev`.** There is no pre-production
+environment, and `main` is not branch-protected.
 
 ## Verify before you open anything
 
 ```bash
-npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npx tsc -p mcp/tsconfig.json --noEmit && npm test && npx vite build && scripts/attack-preflight.sh
+npx wrangler types && npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit && npx tsc -p mcp/tsconfig.json --noEmit && npm test && npx vite build
 ```
 
 `npx wrangler types` first is not optional — `worker-configuration.d.ts` is generated rather than

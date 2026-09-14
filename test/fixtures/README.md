@@ -14,6 +14,24 @@ The synthetic conventions, so a new fixture is obviously synthetic at a glance:
 | Service, host and instance names | invented, generic (`gateway`, `edge`, `example-provider`) |
 | Ids | the right *shape*, invented value |
 
+## GitHub's push protection is a third gate, and it is stricter than ours
+
+Found the hard way during T2a: a test fixture using `sk_test_` with a plausible 24-character suffix
+**was rejected by GitHub's own secret scanning on push**, twice, under different labels. Two things
+follow that are worth knowing before you write a fixture:
+
+- **It catches a class `test/hygiene.test.ts` cannot.** Ours checks addresses and IP literals only,
+  by design — a denylist of provider key formats would be endless and would date. GitHub's scanner
+  knows the real prefixes.
+- **A rejected push is the good outcome.** The fix is to rewrite the offending commits *before*
+  they reach the remote — `git reset --soft` and re-commit — not to add a follow-up "redact"
+  commit, which leaves the real-looking value sitting in history forever.
+
+So when a fixture needs a credential-shaped value, use one that is **famously** synthetic rather
+than merely invented. T2a settled on `sk_test_4242424242424242`: it satisfies a shape detector while
+being unmistakable to any human and to the scanner, because `4242…` is the most published test
+number in payments.
+
 **What is mechanical, and what is not.** `test/hygiene.test.ts` fails the build on exactly two
 things: an email address whose domain is not one of the reserved example domains, and an IP literal
 outside the RFC 5737 documentation ranges. That is all it checks.
