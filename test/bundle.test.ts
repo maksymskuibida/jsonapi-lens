@@ -95,13 +95,13 @@ describe("mintShareEnvelope", () => {
   it("carries an exchange through the single-document path, unwrapped from a bundle", async () => {
     const secret = generateSecret();
     const blob = await mintShareEnvelope(
-      [{ label: "a.json", text: "{}", exchange: { method: "GET" } }],
+      [{ label: "a.json", text: "{}", exchange: { request: { method: "GET" } } }],
       secret,
     );
     expect(blob[0]).toBe(2);
     const opened = await openSealed(blob, secret);
     expect(isBundlePayload(opened)).toBe(false);
-    if (!isBundlePayload(opened)) expect(opened.exchange).toEqual({ method: "GET" });
+    if (!isBundlePayload(opened)) expect(opened.exchange).toEqual({ request: { method: "GET" } });
   });
 
   it("round-trips several documents as a bundle, each entry intact", async () => {
@@ -258,13 +258,20 @@ describe("importDocuments", () => {
   it("writes exactly the given entries, carrying the optional summary fields through", async () => {
     const documents: BundleEntry[] = [
       { label: "a.json", text: '{"a":1}' },
-      { label: "b.json", text: "[]", resources: 0, types: 0, shape: "data[0]", exchange: { status: 200 } },
+      {
+        label: "b.json",
+        text: "[]",
+        resources: 0,
+        types: 0,
+        shape: "data[0]",
+        exchange: { response: { status: 200 } },
+      },
     ];
     const outcome = await importDocuments(documents);
 
     expect(outcome.failedCount).toBe(0);
     expect(outcome.saved.map((e) => e.label)).toEqual(["a.json", "b.json"]);
-    expect(outcome.saved[1]!.exchange).toEqual({ status: 200 });
+    expect(outcome.saved[1]!.exchange).toEqual({ response: { status: 200 } });
     expect(outcome.saved[1]!.shape).toBe("data[0]");
     // Nothing extra landed in the library beyond these two.
     expect((await listLibrary()).length).toBe(2);
@@ -317,14 +324,14 @@ describe("importDocuments", () => {
         resources: 3,
         types: 1,
         shape: "A".repeat(200),
-        exchange: { method: "GET" },
+        exchange: { request: { method: "GET" } },
       },
     ];
     const outcome = await importDocuments(documents);
     expect(outcome.saved[0]!.resources).toBe(3);
     expect(outcome.saved[0]!.types).toBe(1);
     expect(outcome.saved[0]!.shape).toBe("A".repeat(200));
-    expect(outcome.saved[0]!.exchange).toEqual({ method: "GET" });
+    expect(outcome.saved[0]!.exchange).toEqual({ request: { method: "GET" } });
   });
 
   it("writes nothing when storage rejects every write, and reports the failure count honestly", async () => {
