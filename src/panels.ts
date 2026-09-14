@@ -96,9 +96,16 @@ export async function openLibraryModal(
         el(
           "span",
           { class: "library__meta" },
-          el("code", { class: "library__shape", text: entry.shape }),
-          el("span", { text: t().library.resources(entry.resources) }),
-          el("span", { text: t().library.types(entry.types) }),
+          // All three of shape/resources/types are absent for a document
+          // whose lens has no resource/type concept — a plain-JSON reading,
+          // or a v2 entry from before that lens existed. Each is omitted
+          // rather than shown empty or as zero: `el`'s `text` silently skips
+          // `undefined`, which for `shape` alone would still emit an empty
+          // `<code>` — a stray flex child, not "nothing to report" the way
+          // omitting the element entirely is.
+          entry.shape !== undefined ? el("code", { class: "library__shape", text: entry.shape }) : null,
+          entry.resources !== undefined ? el("span", { text: t().library.resources(entry.resources) }) : null,
+          entry.types !== undefined ? el("span", { text: t().library.types(entry.types) }) : null,
           el("span", { text: formatBytes(entry.bytes) }),
           el("span", { class: "library__when", text: relativeTime(entry.savedAt) }),
         ),
