@@ -207,6 +207,149 @@ describe("share", () => {
     expect(uploaded[0]).toBe(3);
   });
 
+  it("redacts a live-looking Authorization header from an attached exchange before sealing, on the single-document path", async () => {
+    const backend = createStubBackend(ORIGIN);
+    const client = await connectedClient(backend);
+
+    const liveAuthorization = "Bearer live-9f2c6a1d4e7b8035c9a1f6e2b7d4890a";
+    const result = asToolResult(
+      await client.callTool({
+        name: "share",
+        arguments: {
+          documents: [
+            {
+              label: "a.json",
+              text: "{}",
+              exchange: {
+                request: { headers: { entries: [{ name: "Authorization", value: liveAuthorization }] } },
+              },
+            },
+          ],
+          secret: SECRET_A,
+        },
+      }),
+    );
+    expect(result.isError).not.toBe(true);
+
+    // Assert against the actual sealed-and-reopened bytes, not against the
+    // tool's own reported redaction count — a count can be wrong or
+    // meaningless in ways a byte-level check of what actually left the
+    // process cannot be.
+    const uploaded = backend.calls.find((c) => c.init?.method === "POST")!.init!.body!;
+    const opened = await open(uploaded, SECRET_A);
+    const openedText = new TextDecoder().decode(new TextEncoder().encode(JSON.stringify(opened)));
+    expect(openedText).not.toContain(liveAuthorization);
+    expect(openedText).not.toContain("live-9f2c6a1d4e7b8035c9a1f6e2b7d4890a");
+
+    // The tool result also names what it dropped, per this task's minimal
+    // report requirement.
+    const textContent = result.content?.find((c) => c.type === "text") as { text: string } | undefined;
+    expect(textContent?.text).toMatch(/redacted 1 secret-shaped value/i);
+  });
+
+  /**
+   * The header case above is the obvious one. These two are the cases that
+   * were holes in `redactExchange` itself until PR #6 round three closed
+   * them, and they reach `seal` through exactly the same tool argument — so
+   * they are proved here the same way: by decrypting what actually left the
+   * process, not by trusting a count.
+   */
+  it("redacts a credential carried in an attached exchange's URL fragment before sealing", async () => {
+    const backend = createStubBackend(ORIGIN);
+    const client = await connectedClient(backend);
+
+    const liveToken = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJsaXZlLXVzZXIifQ.c2lnbmF0dXJlLWxpdmUtdmFsdWU";
+    const result = asToolResult(
+      await client.callTool({
+        name: "share",
+        arguments: {
+          documents: [
+            {
+              label: "a.json",
+              text: "{}",
+              exchange: { request: { url: `https://api.example.com/cb#access_token=${liveToken}&state=xyz` } },
+            },
+          ],
+          secret: SECRET_A,
+        },
+      }),
+    );
+    expect(result.isError).not.toBe(true);
+
+    const uploaded = backend.calls.find((c) => c.init?.method === "POST")!.init!.body!;
+    const opened = await open(uploaded, SECRET_A);
+    const openedText = JSON.stringify(opened);
+    expect(openedText).not.toContain(liveToken);
+    // The non-credential remainder of the fragment is data, and survives.
+    expect(openedText).toContain("state=xyz");
+  });
+
+  it("redacts a credential hiding in an attached exchange's Set-Cookie attribute before sealing", async () => {
+    const backend = createStubBackend(ORIGIN);
+    const client = await connectedClient(backend);
+
+    const liveSecret = "live-7c1e93af4b2d6058e1a9f3c7b2d64810";
+    const result = asToolResult(
+      await client.callTool({
+        name: "share",
+        arguments: {
+          documents: [
+            {
+              label: "a.json",
+              text: "{}",
+              exchange: {
+                response: {
+                  cookies: {
+                    entries: [
+                      { name: "sid", value: "abc", path: `/x, token=${liveSecret}`, domain: "example.com" },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+          secret: SECRET_A,
+        },
+      }),
+    );
+    expect(result.isError).not.toBe(true);
+
+    const uploaded = backend.calls.find((c) => c.init?.method === "POST")!.init!.body!;
+    const opened = await open(uploaded, SECRET_A);
+    const openedText = JSON.stringify(opened);
+    expect(openedText).not.toContain(liveSecret);
+    // An ordinary attribute beside it is not collateral damage.
+    expect(openedText).toContain("example.com");
+  });
+
+  it("redacts a live-looking Authorization header from an attached exchange before sealing, on the bundle path", async () => {
+    const backend = createStubBackend(ORIGIN);
+    const client = await connectedClient(backend);
+
+    const liveAuthorization = "Bearer live-3a7f1e9c2b6d4058a1f7e3c9b6d24081";
+    await client.callTool({
+      name: "share",
+      arguments: {
+        documents: [
+          { label: "a.json", text: "{}" },
+          {
+            label: "b.json",
+            text: "{}",
+            exchange: {
+              request: { headers: { entries: [{ name: "Authorization", value: liveAuthorization }] } },
+            },
+          },
+        ],
+        secret: SECRET_A,
+      },
+    });
+
+    const uploaded = backend.calls.find((c) => c.init?.method === "POST")!.init!.body!;
+    const opened = await open(uploaded, SECRET_A);
+    const openedText = new TextDecoder().decode(new TextEncoder().encode(JSON.stringify(opened)));
+    expect(openedText).not.toContain(liveAuthorization);
+  });
+
   it("defaults lifetime to 1d and honours an explicit one", async () => {
     const backend = createStubBackend(ORIGIN);
     const client = await connectedClient(backend);

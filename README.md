@@ -129,6 +129,13 @@ called — so it matches the rest of the UI. `/imprint`, `/legal`, `/datenschutz
   would put the paste view back over the top of it, which looks exactly like the paste having been
   ignored. A person cannot paste and click inside that window, but a test can, so both `boot` and
   `applyRoute` check for it rather than being accidentally right.
+- **A loaded document and an empty `#doc` is a normal state.** Landing on `/` with a document stored,
+  `boot()` parses it so "Back to document" is instant but deliberately stays on the paste view —
+  nothing is rendered until you ask for it. So `showDocument()` owns the only `showView("doc")` in
+  the file: it builds when `#doc` is empty and reveals otherwise, and the one call site that always
+  has a new document renders it outright first. Getting that wrong gave a blank page below the
+  topbar, with the right URL, the right title and no console error, on the most ordinary flow there
+  is — leave the tab, come back, click the button.
 - **A pointer with no matching resource** renders as an explicit struck-through "not in document"
   marker, and is counted in the summary. That distinction is usually the thing being diagnosed.
 - **`scroll-margin-top`** on every anchor target, or the sticky header and sticky group header would
@@ -256,17 +263,6 @@ link like the payload. And the key sits in the URL *path*, which means it reache
 anything else that handles the link — unlike a `#fragment`, which browsers never send. The app
 strips the secret from the address bar as soon as a link opens, and accepts `/d/<id>#<secret>` if you
 prefer the fragment form, but links are minted in the path form.
-
-## MCP server
-
-An assistant can mint and read share links without a browser: [`mcp/`](mcp/) is a stdio
-[MCP](https://modelcontextprotocol.io) server exposing `share` and `read`, built on the exact same
-[`src/crypto.ts`](src/crypto.ts) the browser uses — never a second implementation, so a link minted
-by one side always opens on the other. It generates no secret itself: minting a link with `share`
-needs a 64-character hex secret from `openssl rand -hex 32`, refusing anything else rather than
-guessing; opening one with `read` accepts whatever the link format itself can carry, since most
-links it opens were minted by the browser's own Share button, not by this server. See
-[`mcp/README.md`](mcp/README.md) for how to register it and what it can and cannot see.
 
 ## Findability
 
@@ -474,7 +470,11 @@ src/
   crypto.ts           gzip + AES-GCM + PBKDF2 for the share envelope — one document or a bundle
   share.ts            share API client and its modal
   store.ts            IndexedDB: current document and saved library
-  exchange.ts         placeholder for T2's captured-request model
+  exchange.ts         the Exchange model (request/response/body) and mergeExchange
+  params.ts           one query-string/form decoder, every encoding named, ambiguity kept
+  headers.ts          case-insensitive header lookup with duplicates preserved in order
+  cookies.ts          Cookie and Set-Cookie parsing into name/value/attributes
+  secrets.ts          secret-header/credential-shape detection, JWT decoding, redaction
   clipboard.ts        copy and download
   ui.ts               toast and modal
   panels.ts           raw view, saved documents, save, shortcuts
