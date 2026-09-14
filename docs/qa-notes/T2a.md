@@ -21,7 +21,7 @@ src/main.ts` finds nothing, and `src/main.ts` on this branch is byte-identical t
 
 ## What was verified instead, and how
 
-Everything in `docs/test-plans/T2a.md`, under vitest — 461 tests, typecheck clean. The security
+Everything in `docs/test-plans/T2a.md`, under vitest — 464 tests, typecheck clean. The security
 properties are additionally **mutation-checked**, because a passing test beside a fix is not
 evidence the test guards the fix:
 
