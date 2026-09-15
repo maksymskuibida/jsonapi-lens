@@ -1,3 +1,5 @@
+import type { RichPart } from "../dom.js";
+import { quoted } from "./quote.js";
 /**
  * Deutsch.
  *
@@ -56,6 +58,8 @@ export const de: Messages = {
     impressum: "Impressum",
     privacy: "Datenschutz",
     sourceLabel: "Quellcode",
+    /** Names the footer landmark for a screen reader. */
+    legalNav: "Rechtliches",
   },
 
   paste: {
@@ -482,8 +486,8 @@ export const de: Messages = {
         : "Die Seitentasten Ihrer Maus tun dasselbe, ebenso ein Wisch nach links oder rechts auf dem Trackpad.",
     otherPlatformNote: (apple) =>
       apple
-        ? "Unter Windows und Linux sind dieselben beiden Alt + ← und Alt + →."
-        : "Auf dem Mac sind dieselben beiden ⌘ + [ und ⌘ + ] (oder ⌘ + ← und ⌘ + →).",
+        ? "Unter Windows und Linux sind es Alt + ← und Alt + →."
+        : "Auf dem Mac sind es ⌘ + [ und ⌘ + ] (oder ⌘ + ← und ⌘ + →).",
   },
 
   jump: {
@@ -574,7 +578,7 @@ export const de: Messages = {
     },
     invalidJson: {
       headline: "Das ist kein gültiges JSON.",
-      hint: (detail) => `Der Parser ist hier stehen geblieben: ${detail}`,
+      hint: (detail): RichPart[] => ["Der Parser ist hier stehen geblieben: ", { verbatim: detail }],
     },
     bareArray: {
       headline: "Das ist ein blankes JSON-Array, kein JSON:API-Dokument.",
@@ -590,8 +594,12 @@ export const de: Messages = {
     },
     notJsonApi: {
       headline: "Das ist gültiges JSON, aber kein JSON:API-Dokument.",
-      hintKeys: (preview, more) =>
-        `Auf oberster Ebene gibt es weder \`data\` noch \`errors\` oder \`meta\` — nur ${preview}${more ? ", …" : ""}. Wenn das Dokument in einem davon steckt, fügen Sie diesen Teil ein.`,
+      hintKeys: (keys, more) => [
+        "Auf oberster Ebene gibt es weder `data` noch `errors` oder `meta` — nur ",
+        // German quotation marks, not the English pair baked into code before.
+        ...quoted(keys, "\u201e", "\u201c"),
+        `${more ? ", …" : ""}. Wenn das Dokument in einem davon steckt, fügen Sie diesen Teil ein.`,
+      ],
       hintEmpty:
         "Das Objekt ist leer. Ein JSON:API-Dokument braucht mindestens eines von `data`, `errors` oder `meta`.",
     },
