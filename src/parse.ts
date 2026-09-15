@@ -1,3 +1,5 @@
+import { richToText } from "./dom.js";
+import type { RichPart } from "./dom.js";
 import { domId, resourceKey, typeHue, typeSigil } from "./ident.js";
 import { buildJsonIndex } from "./json-index.js";
 import { join as pointerJoin } from "./pointer.js";
@@ -20,13 +22,18 @@ import type {
 export class DocumentError extends Error {
   /** Short headline. */
   readonly headline: string;
-  /** What to do about it. */
-  readonly hint: string;
+  /**
+   * What to do about it — catalogue text, or parts when the message carries a
+   * value out of the document. See `RichPart`: a value passed as a value
+   * cannot be mistaken for a `code`-span marker, which is what let a parser
+   * message quoting a backtick render with that backtick deleted.
+   */
+  readonly hint: string | RichPart[];
   /** 1-based line number, when the failure has a location in the source text. */
   readonly line?: number;
 
-  constructor(headline: string, hint: string, line?: number) {
-    super(`${headline} ${hint}`);
+  constructor(headline: string, hint: string | RichPart[], line?: number) {
+    super(`${headline} ${typeof hint === "string" ? hint : richToText(hint)}`);
     this.name = "DocumentError";
     this.headline = headline;
     this.hint = hint;
@@ -124,16 +131,11 @@ export function assertJsonApi(value: JsonValue): JsonObject {
 
   if (!hasData && !hasErrors && !hasMeta) {
     const keys = Object.keys(value);
-    // Quoted, not backticked. These keys come out of the document, and the
-    // hint they land in is rendered by `setRichText`, where a backtick is the
-    // marker that opens a `code` span — so a key containing one would shift
-    // the pairing and display as something other than what the document says.
-    // Backticks stay for the member names the catalogue itself owns.
-    const preview = keys.slice(0, 6).map((k) => `\u201c${k}\u201d`).join(", ");
+
     throw new DocumentError(
       t().parseErrors.notJsonApi.headline,
       keys.length
-        ? t().parseErrors.notJsonApi.hintKeys(preview, keys.length > 6)
+        ? t().parseErrors.notJsonApi.hintKeys(keys.slice(0, 6), keys.length > 6)
         : t().parseErrors.notJsonApi.hintEmpty,
     );
   }

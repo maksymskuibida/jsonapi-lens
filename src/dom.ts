@@ -79,27 +79,61 @@ export function clear(node: Element): void {
 }
 
 /**
- * Fill an element with text, turning `backticked` spans into `<code>`.
+ * A piece of a rendered message.
  *
- * The catalogues write member names the way the rest of the documentation
- * does — `` `_links` ``, `` `@odata.context` `` — and several of those strings
- * were being assigned straight to `textContent`, so the backticks reached the
- * screen as literal characters in all three languages.
+ * A plain `string` is **catalogue-owned** text: its backticks are markers and
+ * become `<code>` spans. A `{ verbatim }` part is **anything else** — a key out
+ * of the document, a parser's own message quoting a slice of the payload — and
+ * is inserted exactly as given, never scanned.
  *
- * Splits and appends real nodes rather than touching `innerHTML`: every one of
- * these strings interpolates values out of the document being inspected, which
- * is exactly the input that must never be parsed as markup.
+ * That split is the whole point. The first version of this took one string and
+ * parsed the lot, so a caller that interpolated document text into it handed
+ * the renderer a marker character it did not control: a key spelled `` a`b ``
+ * displayed as `ab`, and V8's "Unexpected token '`'" rendered as "Unexpected
+ * token ''" — the message's entire job is to name that character — with
+ * fragments of the payload styled as member names. Escaping at each call site
+ * was patching the same hole once per site; passing values as values closes it.
  */
-export function setRichText(target: HTMLElement, message: string): void {
-  const parts = message.split("`");
-  target.replaceChildren(
-    ...parts.map((part, index) =>
-      // Odd indices are what sat between a pair of backticks. An unpaired
-      // trailing backtick leaves its text in an even slot, so it stays plain
-      // rather than silently opening a `<code>` that never closes.
-      index % 2 === 1 && index < parts.length - 1
-        ? el("code", { class: "code-span", text: part })
-        : document.createTextNode(part),
-    ),
-  );
+export type RichPart = string | { readonly verbatim: string };
+
+/** The plain-text reading of a part list, for `Error.message` and the like. */
+export function richToText(parts: readonly RichPart[]): string {
+  return parts.map((part) => (typeof part === "string" ? part.replace(/`/g, "") : part.verbatim)).join("");
+}
+
+/**
+ * Render a message into an element: catalogue text with `code` spans, and
+ * interpolated values exactly as they came.
+ *
+ * Appends real nodes rather than touching `innerHTML` — every one of these
+ * strings can carry text out of the document being inspected, which is the
+ * input that must never be parsed as markup.
+ */
+export function setRich(target: HTMLElement, parts: readonly RichPart[]): void {
+  const nodes: Node[] = [];
+
+  for (const part of parts) {
+    if (typeof part !== "string") {
+      nodes.push(document.createTextNode(part.verbatim));
+      continue;
+    }
+    const chunks = part.split("`");
+    chunks.forEach((chunk, index) => {
+      // Odd indices sat between a pair. An unpaired trailing backtick leaves
+      // its text in an even slot, so it stays plain rather than opening a span
+      // that never closes.
+      nodes.push(
+        index % 2 === 1 && index < chunks.length - 1
+          ? el("code", { class: "code-span", text: chunk })
+          : document.createTextNode(chunk),
+      );
+    });
+  }
+
+  target.replaceChildren(...nodes);
+}
+
+/** The common case: one catalogue-owned string, no interpolated values. */
+export function setRichText(target: HTMLElement, message: string | readonly RichPart[]): void {
+  setRich(target, typeof message === "string" ? [message] : message);
 }
