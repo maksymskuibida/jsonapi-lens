@@ -1,3 +1,5 @@
+import type { RichPart } from "../dom.js";
+import { quoted } from "./quote.js";
 /**
  * English — and, because `Messages` is derived from it, the shape every other
  * language has to satisfy.
@@ -71,6 +73,8 @@ export const en = {
     privacy: "Privacy",
     /** Reachable from every view, which is the point of putting it here. */
     sourceLabel: "Source",
+    /** Names the footer landmark for a screen reader. */
+    legalNav: "Legal",
   },
 
   /* -------------------------------------------------------- paste view --- */
@@ -563,6 +567,7 @@ export const en = {
 
   modal: {
     close: "Close",
+    cancel: "Cancel",
   },
 
   /* ------------------------------------------------------------- share --- */
@@ -642,7 +647,7 @@ export const en = {
     },
     invalidJson: {
       headline: "That is not valid JSON.",
-      hint: (detail: string) => `The parser stopped here: ${detail}`,
+      hint: (detail: string): RichPart[] => ["The parser stopped here: ", { verbatim: detail }],
     },
     bareArray: {
       headline: "This is a bare JSON array, not a JSON:API document.",
@@ -658,8 +663,11 @@ export const en = {
     },
     notJsonApi: {
       headline: "This is valid JSON, but not a JSON:API document.",
-      hintKeys: (preview: string, more: boolean) =>
-        `It has no \`data\`, \`errors\` or \`meta\` at the top level — only ${preview}${more ? ", …" : ""}. If the document is nested inside one of those, paste that part.`,
+      hintKeys: (keys: readonly string[], more: boolean): RichPart[] => [
+        "It has no `data`, `errors` or `meta` at the top level — only ",
+        ...quoted(keys, "\u201c", "\u201d"),
+        `${more ? ", …" : ""}. If the document is nested inside one of those, paste that part.`,
+      ],
       hintEmpty:
         "The object is empty. A JSON:API document needs at least one of `data`, `errors` or `meta`.",
     },

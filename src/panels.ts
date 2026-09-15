@@ -8,7 +8,8 @@ import type { KeyHint } from "./platform.js";
 import { openBundleShareModal, openShareModal } from "./share.js";
 import { deleteFromLibrary, listLibrary, renameInLibrary } from "./store.js";
 import type { LibraryEntry } from "./store.js";
-import { openModal, toast } from "./ui.js";
+import { confirmModal, openModal, promptModal, toast } from "./ui.js";
+import type { ModalHandle } from "./ui.js";
 
 /* ------------------------------------------------------------- raw view --- */
 
@@ -142,8 +143,47 @@ export async function openLibraryModal(
     else openBundleShareModal(found);
   }
 
+  // Assigned by the `openModal` call below; `render` only ever runs after it,
+  // and reads it through the optional chain above for the one call that does
+  // not — the initial render that builds the body `openModal` is given.
+  let handle: ModalHandle | undefined;
+
+  /**
+   * Put focus back on the list after a re-render.
+   *
+   * `render` rebuilds `body` wholesale, which destroys whatever node had
+   * focus — so a successful rename or delete dropped focus to `<body>`,
+   * outside the dialog, where `openModal`'s Tab trap cannot recover it (it
+   * only wraps at the first and last focusable element, so the next Tab
+   * restarts from the top of the page). This is the same defect PR #5's
+   * review raised as B2 for `enterSelect`/`leaveSelect`, and the same fix:
+   * name a surviving control and focus it.
+   *
+   * `preferred` is the row action to land on when the row is still there;
+   * when it is not — the row was just deleted, or the list is now empty —
+   * focus falls back to whatever the dialog still offers.
+   */
+  const refocusList = (preferred?: string): void => {
+    const target =
+      (preferred ? body.querySelector<HTMLElement>(preferred) : null) ??
+      body.querySelector<HTMLElement>("button") ??
+      footer.querySelector<HTMLElement>("button");
+    target?.focus();
+  };
+
   const render = (list: LibraryEntry[]): void => {
     latestList = list;
+
+    // The header count is part of what `render` renders. Binding it once at
+    // open left "1 in this browser" sitting above "Nothing saved yet." the
+    // moment the last row was deleted — the subtitle described the list this
+    // modal opened with, not the list on screen.
+    const subtitle = handle?.root.querySelector(".modal__subtitle");
+    if (subtitle) {
+      subtitle.textContent = list.length
+        ? t().library.countInBrowser(list.length)
+        : t().library.storedLocally;
+    }
 
     if (!list.length) {
       body.replaceChildren(
@@ -164,7 +204,12 @@ export async function openLibraryModal(
 
     if (mode === "list") {
       for (const entry of list) {
-        const row = el("li", { class: "library__row" });
+        // The id is on the row so focus can find this exact row again after a
+        // re-render — see `refocusList`.
+        const row = el("li", {
+          class: "library__row",
+          "data-row-id": entry.id === undefined ? undefined : String(entry.id),
+        });
 
         const openButton = el(
           "button",
@@ -175,21 +220,29 @@ export async function openLibraryModal(
         openButton.addEventListener("click", () => onOpen(entry));
 
         const rename = el("button", {
-          class: "act",
+          class: "act library__rename",
           type: "button",
           title: t().library.renameTitle,
           "aria-label": t().library.renameLabel(entry.label),
           text: t().library.rename,
         });
         rename.addEventListener("click", async () => {
-          const next = window.prompt(t().library.renamePrompt, entry.label);
-          if (next === null) return;
-          const trimmed = next.trim();
-          if (!trimmed) return;
+          const trimmed = await promptModal({
+            title: t().library.renameTitle,
+            label: t().library.renamePrompt,
+            value: entry.label,
+            confirmLabel: t().library.renameTitle,
+            cancelLabel: t().modal.cancel,
+          });
+          // `null` covers every way out: cancel, Escape, the ✕, the backdrop,
+          // and a name cleared to nothing.
+          if (trimmed === null) return;
           if (entry.id !== undefined && (await renameInLibrary(entry.id, trimmed))) {
             entry.label = trimmed;
             render(list);
             onChange();
+            // The renamed row survives, so focus returns to its rename button.
+            refocusList(`[data-row-id="${String(entry.id)}"] .library__rename`);
             toast(t().library.renamed(trimmed));
           } else {
             toast(t().library.renameFailed, "error");
@@ -204,11 +257,21 @@ export async function openLibraryModal(
           text: t().library.delete,
         });
         remove.addEventListener("click", async () => {
-          if (!window.confirm(t().library.deleteConfirm(entry.label))) return;
+          const confirmed = await confirmModal({
+            title: t().library.deleteTitle,
+            message: t().library.deleteConfirm(entry.label),
+            confirmLabel: t().library.deleteTitle,
+            cancelLabel: t().modal.cancel,
+            tone: "danger",
+          });
+          if (!confirmed) return;
           if (entry.id !== undefined && (await deleteFromLibrary(entry.id))) {
             const remaining = list.filter((e) => e.id !== entry.id);
             render(remaining);
             onChange();
+            // The row this was clicked from is gone; land on whatever the
+            // rebuilt list offers first, or the footer when it is empty.
+            refocusList();
             toast(t().library.deleted(entry.label));
           } else {
             toast(t().library.deleteFailed, "error");
@@ -310,7 +373,7 @@ export async function openLibraryModal(
   };
   document.addEventListener("keydown", onKeydownCapture, true);
 
-  const handle = openModal({
+  handle = openModal({
     title: t().library.title,
     subtitle: entries.length
       ? t().library.countInBrowser(entries.length)

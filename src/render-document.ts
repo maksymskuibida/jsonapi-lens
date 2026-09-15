@@ -1,4 +1,4 @@
-import { el, escapeHtml } from "./dom.js";
+import { el, escapeHtml, setRichText } from "./dom.js";
 import { formatBytes, formatDuration } from "./format.js";
 import { t } from "./i18n/index.js";
 import { groupDomId, groupHref, nodeHref, resourceKey, typeSigil } from "./ident.js";
@@ -325,7 +325,12 @@ export function renderJsonOverview(index: JsonIndex, stats: DocumentStats): HTML
   );
   section.append(list);
 
-  section.append(el("p", { class: "overview__note", text: shape.evidence(index.shapeEvidence) }));
+  // The same sentence the paste-view offer shows, so it is rendered the same
+  // way — with `code` spans rather than literal backticks. This is where most
+  // people read it: the offer appears once, the note is on every document.
+  const note = el("p", { class: "overview__note" });
+  setRichText(note, shape.evidence(index.shapeEvidence));
+  section.append(note);
 
   if (index.counts.total === 0 && index.collections.length === 0) {
     section.append(el("p", { class: "overview__note", text: shape.emptyNote }));

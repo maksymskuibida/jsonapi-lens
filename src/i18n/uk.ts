@@ -1,3 +1,5 @@
+import type { RichPart } from "../dom.js";
+import { quoted } from "./quote.js";
 /**
  * Українська.
  *
@@ -57,6 +59,8 @@ export const uk: Messages = {
     impressum: "Вихідні дані (Impressum)",
     privacy: "Конфіденційність",
     sourceLabel: "Код",
+    /** Names the footer landmark for a screen reader. */
+    legalNav: "Правова інформація",
   },
 
   paste: {
@@ -515,6 +519,7 @@ export const uk: Messages = {
 
   modal: {
     close: "Закрити",
+    cancel: "Скасувати",
   },
 
   share: {
@@ -586,7 +591,7 @@ export const uk: Messages = {
     },
     invalidJson: {
       headline: "Це некоректний JSON.",
-      hint: (detail) => `Парсер зупинився тут: ${detail}`,
+      hint: (detail): RichPart[] => ["Парсер зупинився тут: ", { verbatim: detail }],
     },
     bareArray: {
       headline: "Це голий масив JSON, а не документ JSON:API.",
@@ -602,8 +607,11 @@ export const uk: Messages = {
     },
     notJsonApi: {
       headline: "Це коректний JSON, але не документ JSON:API.",
-      hintKeys: (preview, more) =>
-        `На верхньому рівні немає ані \`data\`, ані \`errors\`, ані \`meta\` — лише ${preview}${more ? ", …" : ""}. Якщо документ вкладено в один із них, вставте саме цю частину.`,
+      hintKeys: (keys, more) => [
+        "На верхньому рівні немає ані `data`, ані `errors`, ані `meta` — лише ",
+        ...quoted(keys, "\u00ab", "\u00bb"),
+        `${more ? ", …" : ""}. Якщо документ вкладено в один із них, вставте саме цю частину.`,
+      ],
       hintEmpty:
         "Об’єкт порожній. Документу JSON:API потрібен щонайменше один із ключів `data`, `errors` або `meta`.",
     },

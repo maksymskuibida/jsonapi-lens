@@ -1,3 +1,4 @@
+import { locale } from "./i18n/index.js";
 import type { JsonValue } from "./types.js";
 
 export type ValueKind =
@@ -29,7 +30,47 @@ export function classify(value: JsonValue): ValueKind {
   return "string";
 }
 
-const NUMBER_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 });
+/**
+ * Formatters for *values out of the document*, bound to the language the app
+ * is running in — not to the host's.
+ *
+ * `Intl` with an `undefined` locale follows `navigator.language`, which is the
+ * browser's setting and has nothing to do with the language chosen here. On a
+ * Ukrainian machine with the interface switched to German, that rendered
+ * `42.5` as `42,5` and an ISO date as `30 лист. 2027 р.` — Ukrainian months
+ * inside a German interface, and a number whose printed form differs from the
+ * payload it came from. For a tool whose whole job is showing what is actually
+ * in a document, that is worse than a cosmetic slip.
+ *
+ * Built on first use rather than at module scope, and re-built when the
+ * language changes: `locale()` memoises on its first call, so constructing
+ * these eagerly would resolve the language before `?lang=` had been read —
+ * the same ordering trap the test-suite locale pin exists for.
+ */
+interface Formatters {
+  for: string;
+  number: Intl.NumberFormat;
+  date: Intl.DateTimeFormat;
+  dateTime: Intl.DateTimeFormat;
+}
+
+let formatters: Formatters | null = null;
+
+function formattersFor(): Formatters {
+  const active = locale();
+  if (formatters?.for !== active) {
+    formatters = {
+      for: active,
+      number: new Intl.NumberFormat(active, { maximumFractionDigits: 6 }),
+      // `timeZone: "UTC"` on the date-only formatter: a bare `2027-11-30` is a
+      // calendar date, and reading it in the viewer's zone would show the 29th
+      // west of Greenwich.
+      date: new Intl.DateTimeFormat(active, { dateStyle: "medium", timeZone: "UTC" }),
+      dateTime: new Intl.DateTimeFormat(active, { dateStyle: "medium", timeStyle: "medium" }),
+    };
+  }
+  return formatters;
+}
 
 /**
  * Render a date-ish string as both the local reading and the raw value.
@@ -42,16 +83,18 @@ export function formatDate(raw: string): { display: string; title: string } | nu
   if (Number.isNaN(parsed.getTime())) return null;
 
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
-  const display = dateOnly
-    ? parsed.toLocaleDateString(undefined, { dateStyle: "medium", timeZone: "UTC" })
-    : parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
+  const active = formattersFor();
+  // Through the same cache as numbers: `i18n/intl.ts` notes these are not free
+  // to construct, and this runs once per rendered date value — the hot path on
+  // a large document.
+  const display = dateOnly ? active.date.format(parsed) : active.dateTime.format(parsed);
 
   return { display, title: `${raw}${dateOnly ? "" : `  ·  ${parsed.toISOString()}`}` };
 }
 
 export function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return String(value);
-  return NUMBER_FORMAT.format(value);
+  return formattersFor().number.format(value);
 }
 
 /** One-line preview of a nested value, for a collapsed row. */
