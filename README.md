@@ -342,9 +342,25 @@ npm run build
 npm run fixtures
 ```
 
-`npm test` runs 259 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
+`npm test` runs 618 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
 the encryption round trip (a single document or a bundle), storage (including the saved-documents
 selection flow and the bundle import view) and the bulk-render escaping.
+
+It pins the catalogue to English before any of it runs, in [`test/setup.ts`](test/setup.ts). Node
+has had a built-in `navigator` since v21 whose `language` reflects the host's `LANG`, so
+`src/crypto.ts` — which reads its refusals through `t()` — used to answer in German on a German
+machine, and the suite's result depended on who ran it rather than on the code.
+[`test/locale-pin.test.ts`](test/locale-pin.test.ts) holds that pin in place, and proves the hazard
+is real rather than assuming it: [`test/locale-probe.mjs`](test/locale-probe.mjs) reads
+`navigator.language` out of a bare Node process started under `LANG=de_DE.UTF-8`. The probe is plain
+JavaScript, like [`test/browser/run.mjs`](test/browser/run.mjs) — a convention here, not a guard:
+`@types/node` is already a devDependency (the `mcp/` tree needs it), and a file under `src/` that
+imports `node:child_process` typechecks clean today. Keeping Node's APIs out of the app is a rule
+nothing currently enforces.
+
+To exercise German or Ukrainian through `t()` in a test, lift the pin — `stored()` is consulted
+before `navigator`, so stubbing the browser's languages alone will still answer English.
+`test/locale-pin.test.ts` is the worked example.
 
 History restoration is deliberately *not* among them. What it promises — Back puts the same content
 back in the same place on screen — depends on `content-visibility` and on real layout, and jsdom has
@@ -364,9 +380,15 @@ had a global `WebSocket` since 22, so that is about sixty lines and no new depen
 Headless rather than a real window on purpose. A headed tab only renders while it is the visible,
 non-occluded tab of a non-minimised window; anywhere else it stops running `requestAnimationFrame`
 and stops updating `content-visibility`, and the measurements come out quietly wrong rather than
-failing. Headless always renders, needs nobody's screen, and several copies can run at once. `npm run build` typechecks app and Worker
-separately (they have incompatible globals) and builds to `dist/`. `npm run fixtures` writes
-`fixtures/large-50k.json`; it takes an optional count and path.
+failing. Headless always renders, needs nobody's screen, and several copies can run at once.
+`npm run build` builds to `dist/`, typechecking the app on the way — but *not* the Worker, which has
+incompatible globals and its own program. Run that one yourself before shipping:
+
+```bash
+npx wrangler types && npx tsc -p tsconfig.worker.json --noEmit
+```
+
+`npm run fixtures` writes `fixtures/large-50k.json`; it takes an optional count and path.
 
 ## Deploying
 

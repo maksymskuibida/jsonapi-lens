@@ -58,6 +58,11 @@ function workingStorage(initial?: Record<string, string>): Storage {
 if (process.argv.includes("--pre-existing-storage")) {
   globalThis.localStorage = workingStorage();
 } else if (process.argv.includes("--pre-existing-de-storage")) {
+  // The key is spelled out rather than imported from `src/i18n/index.js`.
+  // That is the point of this file: it imports `mcp/build-server.js` and
+  // nothing else, so importing the module that owns the key would pull the
+  // locale machinery in ahead of the pin and test something other than the
+  // gap this probe exists for. A rename would have to reach here by hand.
   globalThis.localStorage = workingStorage({ "jsonapi-lens:locale": "de" });
 } else if (process.argv.includes("--throwing-storage")) {
   globalThis.localStorage = {
