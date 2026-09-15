@@ -357,7 +357,24 @@ code {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  flex: none;
+  /* Shrinkable, not `flex: none`. With `none` the row kept its full width at
+     any viewport, so a long label in one language pushed the last control
+     clean off the screen — on a 375px phone in German the "new document"
+     button started at x=412 and could not be reached at all. Now the bar
+     yields and the labels below it ellipsis instead. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* A label may be clipped; a control may never be pushed out of reach. */
+.topbar__actions .btn {
+  min-width: 0;
+}
+
+.topbar__actions .btn > span:not(.btn__badge) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- button --- */
@@ -398,6 +415,32 @@ code {
 .btn--primary:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+  color: var(--bg);
+}
+
+.code-span {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.btn--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.btn--danger:hover {
+  /* No `--danger-hover` token exists; the border darkening alone is enough of
+     a hover signal, and inventing a shade here would put a colour outside the
+     palette on the one button that must not look improvised. */
+  background: var(--danger);
+  border-color: var(--text);
   color: var(--bg);
 }
 
@@ -2517,6 +2560,23 @@ body.has-modal {
   padding: var(--sp-5) var(--sp-6);
   border-top: 1px solid var(--line);
   background: var(--surface-2);
+}
+
+.ask {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.ask__label {
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+}
+
+.ask__message {
+  margin: 0;
+  max-width: 52ch;
+  line-height: 1.5;
+  color: var(--text);
 }
 
 .modal__actions {

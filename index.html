@@ -499,7 +499,7 @@
         <p class="footer__tagline" id="footer-tagline">
           A JSON:API document viewer. Runs in your browser.
         </p>
-        <nav class="footer__links" aria-label="Legal">
+        <nav class="footer__links" id="footer-legal-nav" aria-label="Legal">
           <a class="footer__link" href="/impressum" id="footer-impressum">Legal Notice (Impressum)</a>
           <a class="footer__link" href="/privacy" id="footer-privacy">Privacy</a>
         </nav>
@@ -509,10 +509,17 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <div id="modal-root"></div>
 
+    <!--
+      All three languages, stacked. This is the one string that cannot be
+      localised at runtime — there is no script to do it with — so a visitor
+      gets a sentence they can read rather than whichever one we guessed.
+    -->
     <noscript>
-      <p id="noscript-message" style="padding: 2rem; font-family: system-ui">
-        jsonapi-lens parses and renders documents in the browser, so it needs JavaScript enabled.
-      </p>
+      <div id="noscript-message" style="padding: 2rem; font-family: system-ui; line-height: 1.5">
+        <p lang="en">jsonapi-lens parses and renders documents in the browser, so it needs JavaScript enabled.</p>
+        <p lang="de">jsonapi-lens verarbeitet und rendert Dokumente im Browser und benötigt daher aktiviertes JavaScript.</p>
+        <p lang="uk">jsonapi-lens обробляє та відображає документи у браузері, тому потребує увімкненого JavaScript.</p>
+      </div>
     </noscript>
   </body>
 </html>
