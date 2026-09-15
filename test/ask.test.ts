@@ -213,6 +213,70 @@ describe("the library uses them, and never the native dialogs", () => {
     native.mockRestore();
   });
 
+  /*
+   * `render` rebuilds the list wholesale, destroying whatever node had focus.
+   * Without help, focus fell back to the dialog's ✕ — inside the panel, so the
+   * Tab trap still worked, but a long way from the row just acted on. These
+   * assert the row, not merely the panel: "somewhere in the dialog" passes
+   * either way and would not have caught it.
+   */
+  it("returns focus to the renamed row, not to the dialog's close button", async () => {
+    await saveToLibrary({ label: "before.json", text: "{}", savedAt: 1, bytes: 2 });
+    await openLibraryModal(() => {});
+
+    button("rename", panels()[0]!).click();
+    await Promise.resolve();
+    topPanel().querySelector("input")!.value = "after.json";
+    button(t().library.renameTitle).click();
+    await until(async () => (await listLibrary())[0]?.label === "after.json", "the rename to be stored");
+
+    const focused = document.activeElement as HTMLElement | null;
+    expect(focused?.classList.contains("library__rename")).toBe(true);
+    expect(focused?.closest(".library__row")?.getAttribute("data-row-id")).toBeTruthy();
+  });
+
+  it("lands focus on the surviving list after a delete, not on the close button", async () => {
+    await saveToLibrary({ label: "one.json", text: "{}", savedAt: 1, bytes: 2 });
+    await saveToLibrary({ label: "two.json", text: "{}", savedAt: 2, bytes: 2 });
+    await openLibraryModal(() => {});
+
+    button("delete", panels()[0]!).click();
+    await Promise.resolve();
+    button(t().library.deleteTitle).click();
+    await until(async () => (await listLibrary()).length === 1, "the delete to be stored");
+
+    const focused = document.activeElement as HTMLElement | null;
+    expect(focused?.closest(".library")).not.toBeNull();
+    expect(focused?.classList.contains("modal__close")).toBe(false);
+  });
+
+  it("still keeps focus in the dialog when the last row is deleted and the list empties", async () => {
+    await saveToLibrary({ label: "only.json", text: "{}", savedAt: 1, bytes: 2 });
+    await openLibraryModal(() => {});
+
+    button("delete", panels()[0]!).click();
+    await Promise.resolve();
+    button(t().library.deleteTitle).click();
+    await until(async () => (await listLibrary()).length === 0, "the delete to be stored");
+
+    // Nothing in the list to land on; the dialog must still hold focus.
+    expect(panels()[0]!.contains(document.activeElement)).toBe(true);
+  });
+
+  it("settles false when a replacing modal opens over a pending ask", async () => {
+    // The route the PR body calls out as the forgotten-route hazard, and the
+    // one the first round left untested.
+    const answer = confirmModal({ title: "T", message: "M", confirmLabel: "Y", cancelLabel: "N" });
+    openModal({ title: "Replacing", body: document.createElement("div") });
+    expect(await answer).toBe(false);
+  });
+
+  it("closeAllModals settles a pending ask rather than leaving it hanging", async () => {
+    const answer = promptModal({ title: "T", label: "L", value: "x", confirmLabel: "OK", cancelLabel: "No" });
+    closeAllModals();
+    expect(await answer).toBeNull();
+  });
+
   it("keeps the header count in step with the list it is describing", async () => {
     await saveToLibrary({ label: "one.json", text: "{}", savedAt: 1, bytes: 2 });
     await saveToLibrary({ label: "two.json", text: "{}", savedAt: 2, bytes: 2 });
