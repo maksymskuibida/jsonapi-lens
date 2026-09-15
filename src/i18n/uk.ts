@@ -57,6 +57,8 @@ export const uk: Messages = {
     impressum: "Вихідні дані (Impressum)",
     privacy: "Конфіденційність",
     sourceLabel: "Код",
+    /** Names the footer landmark for a screen reader. */
+    legalNav: "Правова інформація",
   },
 
   paste: {

@@ -56,6 +56,8 @@ export const de: Messages = {
     impressum: "Impressum",
     privacy: "Datenschutz",
     sourceLabel: "Quellcode",
+    /** Names the footer landmark for a screen reader. */
+    legalNav: "Rechtliches",
   },
 
   paste: {
@@ -482,8 +484,8 @@ export const de: Messages = {
         : "Die Seitentasten Ihrer Maus tun dasselbe, ebenso ein Wisch nach links oder rechts auf dem Trackpad.",
     otherPlatformNote: (apple) =>
       apple
-        ? "Unter Windows und Linux sind dieselben beiden Alt + ← und Alt + →."
-        : "Auf dem Mac sind dieselben beiden ⌘ + [ und ⌘ + ] (oder ⌘ + ← und ⌘ + →).",
+        ? "Unter Windows und Linux sind es Alt + ← und Alt + →."
+        : "Auf dem Mac sind es ⌘ + [ und ⌘ + ] (oder ⌘ + ← und ⌘ + →).",
   },
 
   jump: {

@@ -142,6 +142,7 @@ export const STATIC_BINDINGS: [selector: string, apply: Apply][] = [
 
   /* footer */
   ["#footer-tagline", text((m) => m.footer.tagline)],
+  ["#footer-legal-nav", attr("aria-label", (m) => m.footer.legalNav)],
   ["#footer-impressum", text((m) => m.footer.impressum)],
   ["#footer-privacy", text((m) => m.footer.privacy)],
 ];

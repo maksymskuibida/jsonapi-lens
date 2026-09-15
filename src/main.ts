@@ -4,7 +4,7 @@ import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
 
 import { copyBlob, copyText, downloadText } from "./clipboard.js";
-import { el } from "./dom.js";
+import { el, setRichText } from "./dom.js";
 import { formatBytes, formatDuration } from "./format.js";
 import {
   applyDocumentLanguage,
@@ -340,7 +340,7 @@ function showError(error: unknown): void {
           );
 
   errorHeadlineEl.textContent = documentError.headline;
-  errorHintEl.textContent = documentError.hint;
+  setRichText(errorHintEl, documentError.hint);
   if (documentError.line !== undefined) {
     errorWhereEl.textContent = t().paste.errorWhere(documentError.line);
     errorWhereEl.hidden = false;
@@ -380,7 +380,7 @@ function showShapeOffer(text: string, label: string, index: JsonIndex): void {
   pendingOffer = { text, label };
   const shape = t().shape;
   shapeOfferHeadlineEl.textContent = shape.offerHeadline(shape.name(index.shape));
-  shapeOfferHintEl.textContent = shape.evidence(index.shapeEvidence);
+  setRichText(shapeOfferHintEl, shape.evidence(index.shapeEvidence));
   shapeOfferEl.hidden = false;
   shapeOfferEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }

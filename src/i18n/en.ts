@@ -71,6 +71,8 @@ export const en = {
     privacy: "Privacy",
     /** Reachable from every view, which is the point of putting it here. */
     sourceLabel: "Source",
+    /** Names the footer landmark for a screen reader. */
+    legalNav: "Legal",
   },
 
   /* -------------------------------------------------------- paste view --- */

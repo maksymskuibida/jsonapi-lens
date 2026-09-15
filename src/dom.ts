@@ -77,3 +77,29 @@ export function escapeHtml(value: string): string {
 export function clear(node: Element): void {
   node.replaceChildren();
 }
+
+/**
+ * Fill an element with text, turning `backticked` spans into `<code>`.
+ *
+ * The catalogues write member names the way the rest of the documentation
+ * does — `` `_links` ``, `` `@odata.context` `` — and several of those strings
+ * were being assigned straight to `textContent`, so the backticks reached the
+ * screen as literal characters in all three languages.
+ *
+ * Splits and appends real nodes rather than touching `innerHTML`: every one of
+ * these strings interpolates values out of the document being inspected, which
+ * is exactly the input that must never be parsed as markup.
+ */
+export function setRichText(target: HTMLElement, message: string): void {
+  const parts = message.split("`");
+  target.replaceChildren(
+    ...parts.map((part, index) =>
+      // Odd indices are what sat between a pair of backticks. An unpaired
+      // trailing backtick leaves its text in an even slot, so it stays plain
+      // rather than silently opening a `<code>` that never closes.
+      index % 2 === 1 && index < parts.length - 1
+        ? el("code", { class: "code-span", text: part })
+        : document.createTextNode(part),
+    ),
+  );
+}
