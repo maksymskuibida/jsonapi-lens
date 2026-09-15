@@ -3397,7 +3397,6 @@ body.has-modal {
     grid-template-columns: minmax(8rem, 18rem) minmax(0, 1fr);
   }
 
-
   /* Keep prose at a readable measure even when the column is wide. */
   .overview__note,
   .absent-list__note,

@@ -692,7 +692,6 @@ try {
     report(false, "err", "the topbar fits a phone in every language, with every control reachable", error.message);
   }
 
-
   // `total` is whatever `report` was actually called with, rather than a
   // hand-maintained `keys.length + n`: every check added since this line was
   // written was added outside `SCEN`, and each one silently widened the gap
