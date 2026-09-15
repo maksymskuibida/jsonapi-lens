@@ -48,7 +48,14 @@ export const LOCALE_CODES: Record<Locale, string> = {
 
 const CATALOGUES: Record<Locale, Messages> = { en, de, uk };
 
-const STORAGE_KEY = "jsonapi-lens:locale";
+/**
+ * Where a chosen language is remembered.
+ *
+ * Exported because the test suite pins itself to English by writing this key
+ * before anything calls `t()` (see `test/setup.ts`), and a rename here must
+ * fail that pin loudly rather than leave it writing a key nothing reads.
+ */
+export const STORAGE_KEY = "jsonapi-lens:locale";
 const QUERY_KEY = "lang";
 const FALLBACK: Locale = "en";
 
@@ -121,7 +128,16 @@ function negotiate(): Locale {
  * Resolved on first use rather than at import.
  *
  * `crypto.ts` reaches the catalogue for its error messages and is unit-tested
- * in a plain Node environment, where `location` and `navigator` do not exist.
+ * in a plain Node environment, where `location` does not exist.
+ *
+ * `navigator` does, though. Node has shipped one since v21, and unlike a
+ * browser's, its `language`/`languages` report the *host's* locale — so
+ * `fromNavigator()` answers on Node with whatever the machine's `LANG` says,
+ * rather than declining. Nothing the app ships reaches this outside a browser,
+ * but the test suite does, and it pins a language in `localStorage` before
+ * anything calls `t()` — which `stored()` honours ahead of `navigator`. See
+ * `test/setup.ts`.
+ *
  * Negotiating lazily — and treating every source as optional — keeps importing
  * this module free of assumptions about the host, which is the same reason the
  * three lookups above are each guarded.

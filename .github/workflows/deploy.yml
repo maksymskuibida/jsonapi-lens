@@ -68,6 +68,17 @@ jobs:
       - name: Test
         run: npm test
 
+      # The same suite again under a host language the app itself ships. Node's
+      # built-in `navigator.language` follows `LANG`, and `src/crypto.ts` reads
+      # its refusals through `t()`, so before `test/setup.ts` pinned the
+      # catalogue this run would have failed while the one above passed — which
+      # is exactly the failure a green CI on an English runner used to hide.
+      - name: Test under a non-English host language
+        run: npm test
+        env:
+          LANG: de_DE.UTF-8
+          LC_ALL: de_DE.UTF-8
+
       - name: Build
         run: npx vite build
 
