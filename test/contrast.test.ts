@@ -26,6 +26,19 @@ const CSS = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 /** AA for text below the large-text threshold. */
 const AA_NORMAL = 4.5;
 
+const TEXT_TOKENS = ["text", "text-2", "text-3"] as const;
+
+/**
+ * **Every** surface a text token can land on, not the obvious three.
+ *
+ * The first version of this test checked `--bg`, `--surface` and
+ * `--surface-2`, and so missed both `--surface-3` — the darkest light surface,
+ * where `.block__count` and `.block__pointer` sit at 11px and `--text-3` was
+ * still failing at 4.31 after the first fix — and `--bg-sunk`, which is the
+ * footer, i.e. the very surface this change was written about.
+ */
+const SURFACES = ["bg", "bg-sunk", "surface", "surface-2", "surface-3"] as const;
+
 function oklchToRgb(l: number, c: number, hDeg: number): [number, number, number] {
   const h = (hDeg * Math.PI) / 180;
   const a = c * Math.cos(h);
@@ -77,20 +90,26 @@ describe("text tokens meet AA against the surfaces they sit on", () => {
   it("parses every declaration of each token — three per token, one light and two dark", () => {
     // If this drops to one, the regex has stopped matching and every assertion
     // below would be checking the light theme three times.
-    for (const token of ["text", "text-2", "text-3", "bg", "surface", "surface-2"]) {
+    for (const token of [...TEXT_TOKENS, ...SURFACES]) {
       expect(tokenValues(token), token).toHaveLength(3);
     }
   });
 
-  it("light theme: every text tier clears AA on every light surface", () => {
-    const bg = tokenValues("bg")[0]!;
-    const surface = tokenValues("surface")[0]!;
-    const surface2 = tokenValues("surface-2")[0]!;
+  it("index 0 really is the light theme, so the light assertions test light values", () => {
+    // Order is light, `prefers-color-scheme`, `[data-theme]`. Nothing but file
+    // order says so, and if the blocks were reordered the light assertions
+    // would read dark values against dark surfaces — and pass, testing nothing.
+    expect(luminance(tokenValues("bg")[0]!)).toBeGreaterThan(luminance(tokenValues("bg")[1]!));
+    expect(luminance(tokenValues("text")[0]!)).toBeLessThan(luminance(tokenValues("text")[1]!));
+  });
 
-    for (const token of ["text", "text-2", "text-3"]) {
+  it("light theme: every text tier clears AA on every light surface", () => {
+    for (const token of TEXT_TOKENS) {
       const fg = tokenValues(token)[0]!;
-      for (const [label, on] of [["bg", bg], ["surface", surface], ["surface-2", surface2]] as const) {
-        expect(contrast(fg, on), `light --${token} on --${label}`).toBeGreaterThanOrEqual(AA_NORMAL);
+      for (const label of SURFACES) {
+        expect(contrast(fg, tokenValues(label)[0]!), `light --${token} on --${label}`).toBeGreaterThanOrEqual(
+          AA_NORMAL,
+        );
       }
     }
   });
@@ -100,24 +119,20 @@ describe("text tokens meet AA against the surfaces they sit on", () => {
     // stamp. They must agree, and both must pass — a viewer on "system" sees
     // the first and a viewer who toggled sees the second.
     for (const index of [1, 2]) {
-      const surfaces = {
-        bg: tokenValues("bg")[index]!,
-        surface: tokenValues("surface")[index]!,
-        "surface-2": tokenValues("surface-2")[index]!,
-      };
-      for (const token of ["text", "text-2", "text-3"]) {
+      for (const token of TEXT_TOKENS) {
         const fg = tokenValues(token)[index]!;
-        for (const [label, on] of Object.entries(surfaces)) {
-          expect(contrast(fg, on), `dark[${index}] --${token} on --${label}`).toBeGreaterThanOrEqual(
-            AA_NORMAL,
-          );
+        for (const label of SURFACES) {
+          expect(
+            contrast(fg, tokenValues(label)[index]!),
+            `dark[${index}] --${token} on --${label}`,
+          ).toBeGreaterThanOrEqual(AA_NORMAL);
         }
       }
     }
   });
 
   it("the two dark blocks declare the same values, so a toggle matches the system", () => {
-    for (const token of ["text", "text-2", "text-3", "bg", "surface", "surface-2"]) {
+    for (const token of [...TEXT_TOKENS, ...SURFACES]) {
       const values = tokenValues(token);
       expect(values[1], token).toEqual(values[2]);
     }
@@ -127,9 +142,13 @@ describe("text tokens meet AA against the surfaces they sit on", () => {
     const text = tokenValues("text")[0]!;
     const text2 = tokenValues("text-2")[0]!;
     const text3 = tokenValues("text-3")[0]!;
-    // Raising `--text-3` to clear AA pulls it toward `--text-2`. It must still
-    // be lighter than it, and both still darker than nothing.
+    // Ordering alone is not enough — it would pass with `--text-3` one point
+    // from `--text-2`, which is the failure this test is named for. Raising
+    // `--text-3` to clear AA already pulled the two from 14 lightness points
+    // apart to 4, so the separation is asserted as a ratio between them.
     expect(luminance(text3)).toBeGreaterThan(luminance(text2));
     expect(luminance(text2)).toBeGreaterThan(luminance(text));
+    expect(contrast(text3, text2), "muted vs secondary must stay distinguishable").toBeGreaterThan(1.3);
+    expect(contrast(text2, text), "secondary vs primary must stay distinguishable").toBeGreaterThan(1.5);
   });
 });
