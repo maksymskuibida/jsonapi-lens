@@ -277,6 +277,48 @@ describe("the library uses them, and never the native dialogs", () => {
     expect(await answer).toBeNull();
   });
 
+  it("tells the caller which entry was renamed, so the open document can follow", async () => {
+    // The modal knows which entry moved; the caller knows which is on screen.
+    // Without this, renaming the document currently open left the topbar and
+    // the page title reading the old name until something else re-rendered.
+    await saveToLibrary({ label: "before.json", text: '{"a":1}', savedAt: 1, bytes: 7 });
+    const changes: unknown[] = [];
+    await openLibraryModal(
+      () => {},
+      (change) => changes.push(change),
+    );
+
+    button("rename", panels()[0]!).click();
+    await Promise.resolve();
+    topPanel().querySelector("input")!.value = "after.json";
+    button(t().library.renameTitle).click();
+    await until(async () => (await listLibrary())[0]?.label === "after.json", "the rename to be stored");
+
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ kind: "renamed" });
+    // The text is what identifies the document to the caller.
+    expect((changes[0] as { entry: { text: string; label: string } }).entry).toMatchObject({
+      text: '{"a":1}',
+      label: "after.json",
+    });
+  });
+
+  it("reports a delete as a delete, not as a rename", async () => {
+    await saveToLibrary({ label: "gone.json", text: "{}", savedAt: 1, bytes: 2 });
+    const changes: { kind: string }[] = [];
+    await openLibraryModal(
+      () => {},
+      (change) => changes.push(change),
+    );
+
+    button("delete", panels()[0]!).click();
+    await Promise.resolve();
+    button(t().library.deleteTitle).click();
+    await until(async () => (await listLibrary()).length === 0, "the delete to be stored");
+
+    expect(changes.map((c) => c.kind)).toEqual(["deleted"]);
+  });
+
   it("keeps the header count in step with the list it is describing", async () => {
     await saveToLibrary({ label: "one.json", text: "{}", savedAt: 1, bytes: 2 });
     await saveToLibrary({ label: "two.json", text: "{}", savedAt: 2, bytes: 2 });
