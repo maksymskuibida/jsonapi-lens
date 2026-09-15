@@ -608,6 +608,8 @@ try {
         docShowing: !document.getElementById('doc').hidden,
         bundleContainerShowing: extra ? !extra.hidden : null,
         bundleContainerHasChildren: extra ? extra.hasChildNodes() : null,
+        toast: (document.getElementById('toast') || {}).textContent || '',
+        stillMarked: (history.state || {}).bundle === true,
       };
     })())`),
   );
@@ -619,6 +621,18 @@ try {
     "-",
     "a cold reload of a bundle-marked entry is not blank",
     JSON.stringify(bundleReload),
+  );
+
+  // Not blank is only half of it. Before this, the reload silently rendered
+  // whatever document had been stored previously — so the shared documents
+  // appeared to turn into an unrelated one, with nothing said. The bundle is
+  // genuinely unrecoverable (the key left the URL before the entry existed),
+  // which is exactly why the app has to say so rather than substitute.
+  report(
+    bundleReload.toast.trim().length > 0 && !bundleReload.stillMarked,
+    "-",
+    "a cold reload of a bundle-marked entry says the documents are gone, once",
+    `toast: ${JSON.stringify(bundleReload.toast.slice(0, 60))}, still marked: ${bundleReload.stillMarked}`,
   );
 
   // `total` is whatever `report` was actually called with, rather than a

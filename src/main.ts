@@ -250,6 +250,33 @@ function isBundleEntryShowing(): boolean {
   return state?.bundle === true && bundleImportEl.hasChildNodes();
 }
 
+/**
+ * A bundle-marked entry with nothing left in the container — a cold reload, or
+ * a traversal after the page was rebuilt.
+ *
+ * This is the same condition `isBundleEntryShowing` rules out, read from the
+ * other side. It used to fall through silently to "load the stored document",
+ * so a reload on the import view replaced the shared documents with an
+ * unrelated one and said nothing. The bundle genuinely cannot be recovered —
+ * the key left the URL before this state existed — so the fix is to say so
+ * rather than to substitute.
+ */
+function isStrandedBundleEntry(): boolean {
+  const state = history.state as BundleEntryState | null;
+  return state?.bundle === true && !bundleImportEl.hasChildNodes();
+}
+
+/**
+ * Drop the marker, so the explanation is given once for the entry rather than
+ * on every later traversal back onto it. This is also the only place the
+ * marker is ever cleared — see `isBundleEntryShowing`'s note that it otherwise
+ * rests on an invariant.
+ */
+function clearBundleEntry(): void {
+  const { bundle: _dropped, ...rest } = (history.state ?? {}) as BundleEntryState & object;
+  history.replaceState(rest, "");
+}
+
 /** Mark the current history entry as a bundle-import entry, preserving whatever else it already carries. */
 function markBundleEntry(): void {
   history.replaceState({ ...(history.state as object | null), bundle: true }, "");
@@ -1904,6 +1931,13 @@ async function applyRoute(): Promise<void> {
     if (isBundleEntryShowing()) {
       showView("bundle");
       return;
+    }
+    // Marked, but the container is empty: the import view this entry belonged
+    // to is gone and cannot be rebuilt. Say so before showing something else,
+    // and un-mark the entry so this is said once.
+    if (isStrandedBundleEntry()) {
+      clearBundleEntry();
+      toast(t().bundle.errors.reloaded, "error");
     }
     const stored = await loadDocument();
     // Opening IndexedDB is slow enough to lose a race with a person: a document
