@@ -610,6 +610,13 @@ try {
         bundleContainerHasChildren: extra ? extra.hasChildNodes() : null,
         toast: (document.getElementById('toast') || {}).textContent || '',
         stillMarked: (history.state || {}).bundle === true,
+        // The same branch can fall through to a "no document" toast a few
+        // lines below, and this suite runs in whatever language the browser
+        // negotiated — so the text cannot be compared and "a toast appeared"
+        // is not the assertion. The two differ by tone: this one is an error,
+        // that one is not, and the error class is what says so.
+        toastIsError: (document.getElementById('toast') || { classList: { contains: () => false } })
+          .classList.contains('toast--error'),
       };
     })())`),
   );
@@ -628,11 +635,15 @@ try {
   // appeared to turn into an unrelated one, with nothing said. The bundle is
   // genuinely unrecoverable (the key left the URL before the entry existed),
   // which is exactly why the app has to say so rather than substitute.
+  // Not "a toast appeared" — *this* toast. The same branch can fall through to
+  // "no document" a few lines below, and that would have kept a length check
+  // green while the bundle message was gone.
+  const saidTheRightThing = bundleReload.toast.trim().length > 0 && bundleReload.toastIsError;
   report(
-    bundleReload.toast.trim().length > 0 && !bundleReload.stillMarked,
+    saidTheRightThing && !bundleReload.stillMarked,
     "-",
     "a cold reload of a bundle-marked entry says the documents are gone, once",
-    `toast: ${JSON.stringify(bundleReload.toast.slice(0, 60))}, still marked: ${bundleReload.stillMarked}`,
+    `error-toned toast: ${bundleReload.toastIsError}, still marked: ${bundleReload.stillMarked}, got: ${JSON.stringify(bundleReload.toast.slice(0, 50))}`,
   );
 
   /*

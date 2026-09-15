@@ -682,7 +682,7 @@ export const de: Messages = {
         hint: "Es ließ sich entschlüsseln, enthält aber kein Bündel.",
       },
       reloaded:
-        "Diese geteilten Dokumente sind nicht mehr geladen. Der Schlüssel des Links wird beim Öffnen sofort aus der Adressleiste entfernt, deshalb kann ein Neuladen sie nicht erneut abrufen — öffne den ursprünglichen Link, um sie zu importieren.",
+        "Diese geteilten Dokumente sind nicht mehr geladen. Der Schlüssel des Links wird beim Öffnen sofort aus der Adressleiste entfernt, deshalb kann ein Neuladen sie nicht erneut abrufen — öffnen Sie den ursprünglichen Link, um sie zu importieren.",
     },
   },
 

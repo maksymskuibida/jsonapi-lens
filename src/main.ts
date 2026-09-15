@@ -274,7 +274,9 @@ function isStrandedBundleEntry(): boolean {
  * rests on an invariant.
  */
 function clearBundleEntry(): void {
-  const { bundle: _dropped, ...rest } = (history.state ?? {}) as BundleEntryState & object;
+  // Typed so the rest is visibly `EntryState`, rather than `{}` behind a cast:
+  // the scroll-restoration data lives in this same object and has to survive.
+  const { bundle: _dropped, ...rest } = (history.state ?? {}) as Partial<EntryState> & BundleEntryState;
   history.replaceState(rest, "");
 }
 
