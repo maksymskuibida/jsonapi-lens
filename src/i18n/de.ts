@@ -683,10 +683,8 @@ export const de: Messages = {
         headline: "Dieses geteilte Bündel ist beschädigt.",
         hint: "Es ließ sich entschlüsseln, enthält aber kein Bündel.",
       },
-      unavailable: {
-        headline: "Dieser Share-Link enthält mehrere Dokumente.",
-        hint: "Diese Version von jsonapi-lens hat noch keine Bündelansicht und kann es daher nicht anzeigen. Bitten Sie um einen Link mit nur einem Dokument, oder versuchen Sie es später erneut.",
-      },
+      reloaded:
+        "Diese geteilten Dokumente sind nicht mehr geladen. Der Schlüssel des Links wird beim Öffnen sofort aus der Adressleiste entfernt, deshalb kann ein Neuladen sie nicht erneut abrufen — öffnen Sie den ursprünglichen Link, um sie zu importieren.",
     },
   },
 
