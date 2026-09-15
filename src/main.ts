@@ -343,8 +343,6 @@ function showError(error: unknown): void {
           );
 
   renderErrorCard(errorHeadlineEl, errorHintEl, errorWhereEl, documentError);
-  {
-  }
   errorEl.hidden = false;
   errorEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }

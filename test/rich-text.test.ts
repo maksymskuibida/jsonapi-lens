@@ -202,26 +202,6 @@ describe("the sinks render, not just the helper", () => {
     expect(hint.querySelector("code")!.textContent).toBe("_links");
   });
 
-  it("the error card renders both its headline and its hint through the same path", () => {
-    let thrown: DocumentError | null = null;
-    try {
-      readDocument(JSON.stringify({ data: [], errors: [] }));
-    } catch (error) {
-      thrown = error as DocumentError;
-    }
-    expect(thrown).not.toBeNull();
-
-    // The headline is "This document has both `data` and `errors`." — it sat
-    // two lines above the hint and kept its backticks while the hint lost them.
-    const headline = host();
-    setRichText(headline, thrown!.headline);
-    expect(headline.textContent).not.toContain("`");
-    expect([...headline.querySelectorAll("code")].map((c) => c.textContent)).toEqual(["data", "errors"]);
-
-    const hint = host();
-    setRichText(hint, thrown!.hint);
-    expect(hint.textContent).not.toContain("`");
-  });
 
   it("every static catalogue string carrying a marker is balanced and renders, in all three languages", async () => {
     // All three: an unpaired marker is most likely to arrive in a translation

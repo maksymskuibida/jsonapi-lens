@@ -17,7 +17,7 @@
 import { setRichText } from "./dom.js";
 import type { DocumentError } from "./parse.js";
 import { t } from "./i18n/index.js";
-import type { ShapeEvidence } from "./types.js";
+import type { Shape, ShapeEvidence } from "./types.js";
 
 /** Fill the error card. Returns nothing; the elements are the output. */
 export function renderErrorCard(
@@ -41,10 +41,19 @@ export function renderErrorCard(
 export function renderShapeOffer(
   headlineEl: HTMLElement,
   hintEl: HTMLElement,
-  shape: string,
+  shape: Shape,
   evidence: ShapeEvidence,
 ): void {
   const copy = t().shape;
-  headlineEl.textContent = copy.offerHeadline(copy.name(shape as never));
+  // `Shape`, not `string`: `shape.name` is an exhaustive switch with no
+  // `default`, so a ninth member becomes a type error — the guard the repo
+  // wants. A cast here would keep that guard but let this function take any
+  // string at runtime, fall off the end of the switch, and render "This looks
+  // like undefined, not JSON:API."
+  //
+  // Both lines go through `setRichText`, even though no headline carries a
+  // marker today: the headline and the hint drifting apart is exactly what
+  // this PR's second round was about, and they are one function apart.
+  setRichText(headlineEl, copy.offerHeadline(copy.name(shape)));
   setRichText(hintEl, copy.evidence(evidence));
 }
