@@ -328,6 +328,8 @@ export const de: Messages = {
       `${f.n(n)} ${f.plural(n, { one: "eindeutiger Pointer zeigt", other: "eindeutige Pointer zeigen" })} in diesem Dokument ins Leere`,
     total: (n) => `${f.n(n)} insgesamt`,
     note: "Auf diese wird über Beziehungen verwiesen, sie wurden aber weder in data noch in included mitgeschickt. Meist fehlte dem Request ein include-Parameter — oder der Server hat etwas weggelassen, das er hätte senden sollen.",
+    noteJson:
+      "Jeder dieser Schlüssel liest sich wie eine Referenz — ein Name, der auf `id` endet — aber unter einem passenden Namen fand sich nichts. Vielleicht fehlt dem Dokument die andere Hälfte; vielleicht passen die beiden Namen nicht so zusammen, wie diese Lesart sie einander zuordnet; vielleicht ist der Schlüssel gar keine Referenz.",
   },
 
   errors: {
