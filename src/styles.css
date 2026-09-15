@@ -357,7 +357,24 @@ code {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  flex: none;
+  /* Shrinkable, not `flex: none`. With `none` the row kept its full width at
+     any viewport, so a long label in one language pushed the last control
+     clean off the screen — on a 375px phone in German the "new document"
+     button started at x=412 and could not be reached at all. Now the bar
+     yields and the labels below it ellipsis instead. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* A label may be clipped; a control may never be pushed out of reach. */
+.topbar__actions .btn {
+  min-width: 0;
+}
+
+.topbar__actions .btn > span:not(.btn__badge) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- button --- */

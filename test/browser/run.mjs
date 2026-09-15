@@ -621,6 +621,77 @@ try {
     JSON.stringify(bundleReload),
   );
 
+  /*
+   * Last in the file on purpose: this drives a same-origin iframe through the
+   * app's own paste flow, which writes to the shared `documents` store — the
+   * record `resume renders the stored document` and the bundle-reload check
+   * read would be overwritten if it ran earlier.
+   *
+   * Layout, measured rather than eyeballed. This shipped to production and was
+   * found by a QA pass, and it is not expressible in jsdom — it has no layout
+   * engine, which is why the preflight forbids layout assertions there.
+   *
+   * Run in a same-origin iframe sized to a phone, so the width is real without
+   * disturbing the metrics override the scenarios above depend on.
+   */
+  try {
+    const narrow = await page.evaluate(`(async () => {
+      const widths = {};
+      for (const lang of ["en", "de", "uk"]) {
+        const frame = document.createElement("iframe");
+        frame.style.cssText = "position:fixed;left:-9999px;top:0;width:375px;height:812px;border:0";
+        frame.src = location.origin + "/?lang=" + lang;
+        document.body.appendChild(frame);
+        await new Promise((resolve) => {
+          frame.addEventListener("load", resolve, { once: true });
+          setTimeout(resolve, 4000);
+        });
+        await new Promise((r) => setTimeout(r, 600));
+        const d = frame.contentDocument;
+        const input = d.getElementById("input");
+        input.value = '{"data":{"type":"a","id":"1"}}';
+        input.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
+        d.getElementById("parse").click();
+        await new Promise((r) => setTimeout(r, 1200));
+        const root = d.documentElement;
+        const buttons = [...d.querySelectorAll(".topbar button")];
+        const reachable = buttons.every(
+          (b) => b.getBoundingClientRect().right <= root.clientWidth + 0.5,
+        );
+        // The new-document button is the widest control and is hidden until a
+        // document is open. A hidden element measures all zeros, so without
+        // this the check would quietly stop measuring what overflowed.
+        const newDoc = d.getElementById("new-doc");
+        widths[lang] = {
+          vw: root.clientWidth,
+          sw: root.scrollWidth,
+          reachable,
+          buttons: buttons.length,
+          newDocShown: !!newDoc && newDoc.offsetParent !== null,
+        };
+        frame.remove();
+      }
+      return widths;
+    })()`);
+
+    const fits = Object.values(narrow).every(
+      (w) => w.sw <= w.vw && w.reachable && w.newDocShown && w.buttons >= 4,
+    );
+    report(
+      fits,
+      "375px",
+      "the topbar fits a phone in every language, with every control reachable",
+      Object.entries(narrow)
+        .map(
+          ([lang, w]) =>
+            `${lang} ${w.sw}/${w.vw}${w.reachable ? "" : " UNREACHABLE"}${w.newDocShown ? "" : " NO-NEW-DOC"}`,
+        )
+        .join(", "),
+    );
+  } catch (error) {
+    report(false, "err", "the topbar fits a phone in every language, with every control reachable", error.message);
+  }
+
   // `total` is whatever `report` was actually called with, rather than a
   // hand-maintained `keys.length + n`: every check added since this line was
   // written was added outside `SCEN`, and each one silently widened the gap
