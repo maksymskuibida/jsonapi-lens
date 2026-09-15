@@ -39,6 +39,13 @@ const TEXT_TOKENS = ["text", "text-2", "text-3"] as const;
  */
 const SURFACES = ["bg", "bg-sunk", "surface", "surface-2", "surface-3"] as const;
 
+/**
+ * `--accent-soft`, `--absent-soft` and `--danger-soft` are deliberately absent:
+ * every rule that paints them (`.tag--*`, `.act--*`) sets its own `color`, so
+ * no text token lands on them. They all clear AA today anyway — the exclusion
+ * is about what the list *means*, not about hiding a failure.
+ */
+
 function oklchToRgb(l: number, c: number, hDeg: number): [number, number, number] {
   const h = (hDeg * Math.PI) / 180;
   const a = c * Math.cos(h);
@@ -138,7 +145,25 @@ describe("text tokens meet AA against the surfaces they sit on", () => {
     }
   });
 
-  it("keeps the tiers distinguishable, so the hierarchy survives the fix", () => {
+  it("keeps the tiers distinguishable in every theme, so the hierarchy survives the fix", () => {
+    // Every declaration, not just index 0. The first version of this read the
+    // light theme alone, so the dark hierarchy — which this change also moved —
+    // was unguarded: collapsing dark `--text-2` to one point from `--text-3`
+    // left the suite green. That is the same "guard some, not all" shape as
+    // the surface list that let this PR's own blocker through.
+    for (const index of [0, 1, 2]) {
+      const text = tokenValues("text")[index]!;
+      const text2 = tokenValues("text-2")[index]!;
+      const text3 = tokenValues("text-3")[index]!;
+
+      // 1.3 and 1.5 are empirical ratchets, not a standard — WCAG says nothing
+      // about separating tiers. They sit below the shipped values (light 1.40 /
+      // 2.14, dark 1.45 / 1.84) to catch drift, not to certify a threshold.
+      expect(contrast(text3, text2), `[${index}] muted vs secondary`).toBeGreaterThan(1.3);
+      expect(contrast(text2, text), `[${index}] secondary vs primary`).toBeGreaterThan(1.5);
+    }
+
+    // Ordering is light-theme only: in dark the luminance order inverts.
     const text = tokenValues("text")[0]!;
     const text2 = tokenValues("text-2")[0]!;
     const text3 = tokenValues("text-3")[0]!;
@@ -148,7 +173,6 @@ describe("text tokens meet AA against the surfaces they sit on", () => {
     // apart to 4, so the separation is asserted as a ratio between them.
     expect(luminance(text3)).toBeGreaterThan(luminance(text2));
     expect(luminance(text2)).toBeGreaterThan(luminance(text));
-    expect(contrast(text3, text2), "muted vs secondary must stay distinguishable").toBeGreaterThan(1.3);
-    expect(contrast(text2, text), "secondary vs primary must stay distinguishable").toBeGreaterThan(1.5);
+
   });
 });

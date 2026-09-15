@@ -87,11 +87,12 @@
      else. 52% clears 4.5 on all **five** light surfaces with margin rather
      than sitting on the line.
 
-     The muted tier is now 4 lightness points from `--text-2` where it was 14.
-     That compression is the cost of a muted grey that is actually readable;
-     `--text-2` is left alone rather than darkened to restore the gap, since
-     moving it would repaint most of the app's secondary text to fix a
-     hierarchy that still reads. */
+     Raising this collapsed the gap to `--text-2` to 1.18:1 — two greys the eye
+     cannot separate at 11px — so `--text-2` moved down with it (see above).
+     The tiers now sit 8 lightness points apart, against 14 before. Lightening
+     `--surface-3` instead would have been the smaller change, and does not
+     work: even at 97%, where it is indistinguishable from `--surface-2`, it
+     buys this token only 54% and a 1.29 tier gap. */
   --text-3: oklch(52% 0.012 265);
 
   --accent: oklch(50% 0.185 274);
