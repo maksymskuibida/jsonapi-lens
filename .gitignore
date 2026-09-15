@@ -12,16 +12,21 @@ worker-configuration.d.ts
 # Delivery-loop scaffolding — the process this repo is built with, not the
 # product. Kept out of the tree so the repository is the app and its docs.
 #
-# NOT ignored, deliberately: docs/DECISIONS.md (src/ident.ts and
-# src/exchange.ts cite D1/D2 in their header comments, and D1 carries the
-# anchor-collision proof the whole navigation model rests on),
-# test/hygiene.test.ts and test/fixtures/ (real tests and real test data),
-# and CLAUDE.md (the codebase rules, minus the process links).
+# NOT ignored, deliberately, because shipped source cites them:
+#   - docs/DECISIONS.md — src/ident.ts and src/exchange.ts cite D1/D2 in their
+#     header comments, and D1 carries the anchor-collision proof the whole
+#     navigation model rests on.
+#   - docs/task-specs/ and docs/PROCESS.md — cited by header comments in
+#     src/{secrets,exchange,params,headers,cookies,json-index,render-json,
+#     render-value}.ts and mcp/*.ts, 20+ references in all. These read as
+#     product documentation for the modules rather than as delivery process,
+#     and a comment pointing at a file that is not in the repository is worse
+#     than the file being here.
+#   - test/hygiene.test.ts and test/fixtures/ — real tests, real test data.
+#   - CLAUDE.md — the codebase rules, minus the process links.
 docs/DELIVERY.md
-docs/PROCESS.md
 docs/STATUS.md
 docs/templates/
-docs/task-specs/
 docs/test-plans/
 docs/qa-notes/
 docs/qa-reports/
