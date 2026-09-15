@@ -503,6 +503,7 @@ export const de: Messages = {
 
   modal: {
     close: "Schließen",
+    cancel: "Abbrechen",
   },
 
   share: {

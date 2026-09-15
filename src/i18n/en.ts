@@ -567,6 +567,7 @@ export const en = {
 
   modal: {
     close: "Close",
+    cancel: "Cancel",
   },
 
   /* ------------------------------------------------------------- share --- */

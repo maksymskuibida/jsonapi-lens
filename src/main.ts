@@ -56,7 +56,7 @@ import {
   saveToLibrary,
 } from "./store.js";
 import type { LibraryEntry } from "./store.js";
-import { closeModal, modalIsOpen, toast } from "./ui.js";
+import { closeAllModals, closeModal, modalIsOpen, toast } from "./ui.js";
 import type { DocumentIndex, JsonIndex, JsonValue, Lens, Resource } from "./types.js";
 
 import sampleArticles from "./samples/articles.json?raw";
@@ -1736,7 +1736,10 @@ document.addEventListener("keydown", (event) => {
   // Shift+Escape leaves the document from anywhere, including out of a dialog.
   if (event.key === "Escape" && event.shiftKey) {
     event.preventDefault();
-    closeModal();
+    // Every modal, not just the innermost: a rename dialog open over the
+    // saved-documents list is two, and leaving the document behind both of
+    // them must not leave either on screen.
+    closeAllModals();
     leaveDocument();
     return;
   }
