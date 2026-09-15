@@ -328,6 +328,8 @@ export const de: Messages = {
       `${f.n(n)} ${f.plural(n, { one: "eindeutiger Pointer zeigt", other: "eindeutige Pointer zeigen" })} in diesem Dokument ins Leere`,
     total: (n) => `${f.n(n)} insgesamt`,
     note: "Auf diese wird über Beziehungen verwiesen, sie wurden aber weder in data noch in included mitgeschickt. Meist fehlte dem Request ein include-Parameter — oder der Server hat etwas weggelassen, das er hätte senden sollen.",
+    noteJson:
+      "Jeder dieser Schlüssel liest sich wie eine Referenz — ein Name, der auf `id` endet — aber unter einem passenden Namen fand sich nichts. Vielleicht fehlt dem Dokument die andere Hälfte; vielleicht passen die beiden Namen nicht so zusammen, wie diese Lesart sie einander zuordnet; vielleicht ist der Schlüssel gar keine Referenz.",
   },
 
   errors: {
@@ -681,10 +683,8 @@ export const de: Messages = {
         headline: "Dieses geteilte Bündel ist beschädigt.",
         hint: "Es ließ sich entschlüsseln, enthält aber kein Bündel.",
       },
-      unavailable: {
-        headline: "Dieser Share-Link enthält mehrere Dokumente.",
-        hint: "Diese Version von jsonapi-lens hat noch keine Bündelansicht und kann es daher nicht anzeigen. Bitten Sie um einen Link mit nur einem Dokument, oder versuchen Sie es später erneut.",
-      },
+      reloaded:
+        "Diese geteilten Dokumente sind nicht mehr geladen. Der Schlüssel des Links wird beim Öffnen sofort aus der Adressleiste entfernt, deshalb kann ein Neuladen sie nicht erneut abrufen — öffnen Sie den ursprünglichen Link, um sie zu importieren.",
     },
   },
 
