@@ -136,7 +136,11 @@ describe("test data hygiene", () => {
     const files = scannedFiles();
     expect(files.length).toBeGreaterThan(15);
     expect(files.map((f) => f.path)).toContain("test/fixtures/transport-log-started.json");
-    expect(files.map((f) => f.path)).toContain("docs/task-specs/T1.md");
+    // One canary per scanned root, so a walk that lost a whole directory is
+    // caught rather than merely scanning fewer files. `docs/DECISIONS.md` is
+    // the docs canary because it is the one document that stays tracked —
+    // see `.gitignore`'s delivery-loop section for why the rest do not.
+    expect(files.map((f) => f.path)).toContain("docs/DECISIONS.md");
   });
 
   it("contains no email address outside the reserved example domains", () => {
