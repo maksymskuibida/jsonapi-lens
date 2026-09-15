@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { nodeDomId } from "../src/ident.js";
 import { buildJsonIndex } from "../src/json-index.js";
 import { buildIndex } from "../src/parse.js";
-import { EAGER_BODY_LIMIT, librarySummary } from "../src/render-document.js";
+import { EAGER_BODY_LIMIT, librarySummary, renderJsonDangling } from "../src/render-document.js";
 import { buildAnnotations, renderJsonGroups, renderJsonLeftover } from "../src/render-json.js";
+import { t } from "../src/i18n/index.js";
+import { richToText } from "../src/dom.js";
 import type { JsonObject, JsonValue } from "../src/types.js";
 
 const doc = (value: unknown): JsonObject => value as JsonObject;
@@ -434,5 +436,64 @@ describe("librarySummary — the LibraryEntry projection, for either Lens kind",
     const index = buildJsonIndex(42 as JsonValue, "plain", { kind: "plain-scalar" });
     const summary = librarySummary({ kind: "json", index });
     expect(summary).toEqual({ resources: 0, types: 0, shape: "plain" });
+  });
+});
+
+describe("the plain-JSON unresolved panel does not talk about JSON:API", () => {
+  /**
+   * Found by a blind QA pass. `{"androidId": 1}` with no `android` collection
+   * produced a chip saying the resource was "not in document" under a note
+   * reading "…were not sent in `data` or `included`. Usually that means the
+   * request was missing an `include` parameter — or the server dropped
+   * something it should have sent."
+   *
+   * None of that exists for a plain-JSON document: no `included`, no `include`
+   * parameter, and no server in the story. The reading itself is kept — a key
+   * ending in `id` whose identity is absent is worth surfacing, and
+   * `json-index.test.ts` pins the cases where it must not link — but the note
+   * now describes the reading rather than blaming a sender.
+   */
+  it("uses its own note, and never the JSON:API one", () => {
+    const index = buildJsonIndex(
+      { androidId: 1, note: "no android collection exists here" } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    const panel = renderJsonDangling(index);
+    expect(panel).not.toBeNull();
+
+    const noteEl = panel!.querySelector(".absent-list__note")!;
+    // `richToText`, not the raw catalogue string: the note writes `id` as code,
+    // so the rendered text has the backticks stripped. Asserting the catalogue
+    // string directly would pin the un-rendered form — which is exactly the
+    // defect this round fixed.
+    expect(noteEl.textContent).toBe(richToText([t().dangling.noteJson]));
+    expect(noteEl.textContent).not.toContain("`");
+    expect(noteEl.querySelectorAll("code.code-span").length).toBeGreaterThan(0);
+  });
+
+  it("says nothing about JSON:API in any language", async () => {
+    // `t()` only ever resolves one locale, so the German and Ukrainian strings
+    // were covered by nothing but `tsc` proving the key exists — either could
+    // have carried "included" and sailed through.
+    const { en } = await import("../src/i18n/en.js");
+    const { de } = await import("../src/i18n/de.js");
+    const { uk } = await import("../src/i18n/uk.js");
+
+    for (const [lang, catalogue] of [["en", en], ["de", de], ["uk", uk]] as const) {
+      const note = catalogue.dangling.noteJson.toLowerCase();
+      // Latin terms alone let Ukrainian through: it transliterates rather than
+      // borrowing, so "сервер" is the one spelling of the banned sentence the
+      // guard could not see — in the language it was added for. A guard that
+      // silently exempts a locale reads as coverage and is not.
+      for (const jsonApiOnly of ["included", "include parameter", "server", "сервер", "включ"]) {
+        expect(note, `${lang}: ${jsonApiOnly}`).not.toContain(jsonApiOnly.toLowerCase());
+      }
+      expect(catalogue.dangling.noteJson, lang).not.toBe(catalogue.dangling.note);
+    }
+  });
+
+  it("the JSON:API panel keeps its own note, which is right there", () => {
+    expect(t().dangling.note).toContain("included");
   });
 });
