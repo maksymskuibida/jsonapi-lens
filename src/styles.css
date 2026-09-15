@@ -73,7 +73,13 @@
   --line-strong: oklch(84% 0.011 265);
   --text: oklch(24% 0.018 265);
   --text-2: oklch(48% 0.014 265);
-  --text-3: oklch(62% 0.012 265);
+  /* 54%, not 62%. At 62% this measured 3.26:1 against the footer's surface and
+     3.64:1 against white — below the 4.5:1 AA needs for text at this size, and
+     it is used on 61 declarations including the tagline and every meta line.
+     54% clears 4.5 against all three light surfaces with margin. The muted
+     tier sits closer to `--text-2` than it did; that is the cost of a muted
+     grey that is actually readable. */
+  --text-3: oklch(54% 0.012 265);
 
   --accent: oklch(50% 0.185 274);
   --accent-hover: oklch(44% 0.19 274);
@@ -115,7 +121,7 @@
     --line-strong: oklch(38% 0.02 265);
     --text: oklch(94.5% 0.006 265);
     --text-2: oklch(72% 0.012 265);
-    --text-3: oklch(58% 0.013 265);
+    --text-3: oklch(64% 0.013 265);
 
     --accent: oklch(74% 0.145 276);
     --accent-hover: oklch(82% 0.13 276);
@@ -157,7 +163,7 @@
   --line-strong: oklch(38% 0.02 265);
   --text: oklch(94.5% 0.006 265);
   --text-2: oklch(72% 0.012 265);
-  --text-3: oklch(58% 0.013 265);
+  --text-3: oklch(64% 0.013 265);
 
   --accent: oklch(74% 0.145 276);
   --accent-hover: oklch(82% 0.13 276);
