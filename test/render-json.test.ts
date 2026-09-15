@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { nodeDomId } from "../src/ident.js";
 import { buildJsonIndex } from "../src/json-index.js";
 import { buildIndex } from "../src/parse.js";
-import { EAGER_BODY_LIMIT, librarySummary } from "../src/render-document.js";
+import { EAGER_BODY_LIMIT, librarySummary, renderJsonDangling } from "../src/render-document.js";
 import { buildAnnotations, renderJsonGroups, renderJsonLeftover } from "../src/render-json.js";
-import { renderJsonDangling } from "../src/render-document.js";
 import { t } from "../src/i18n/index.js";
+import { richToText } from "../src/dom.js";
 import type { JsonObject, JsonValue } from "../src/types.js";
 
 const doc = (value: unknown): JsonObject => value as JsonObject;
@@ -462,15 +462,34 @@ describe("the plain-JSON unresolved panel does not talk about JSON:API", () => {
     const panel = renderJsonDangling(index);
     expect(panel).not.toBeNull();
 
-    const note = panel!.querySelector(".absent-list__note")!.textContent!;
-    expect(note).toBe(t().dangling.noteJson);
-    for (const jsonApiOnly of ["included", "include parameter", "server"]) {
-      expect(note.toLowerCase()).not.toContain(jsonApiOnly.toLowerCase());
+    const noteEl = panel!.querySelector(".absent-list__note")!;
+    // `richToText`, not the raw catalogue string: the note writes `id` as code,
+    // so the rendered text has the backticks stripped. Asserting the catalogue
+    // string directly would pin the un-rendered form — which is exactly the
+    // defect this round fixed.
+    expect(noteEl.textContent).toBe(richToText([t().dangling.noteJson]));
+    expect(noteEl.textContent).not.toContain("`");
+    expect(noteEl.querySelectorAll("code.code-span").length).toBeGreaterThan(0);
+  });
+
+  it("says nothing about JSON:API in any language", async () => {
+    // `t()` only ever resolves one locale, so the German and Ukrainian strings
+    // were covered by nothing but `tsc` proving the key exists — either could
+    // have carried "included" and sailed through.
+    const { en } = await import("../src/i18n/en.js");
+    const { de } = await import("../src/i18n/de.js");
+    const { uk } = await import("../src/i18n/uk.js");
+
+    for (const [lang, catalogue] of [["en", en], ["de", de], ["uk", uk]] as const) {
+      const note = catalogue.dangling.noteJson.toLowerCase();
+      for (const jsonApiOnly of ["included", "include parameter", "server", "server"]) {
+        expect(note, `${lang}: ${jsonApiOnly}`).not.toContain(jsonApiOnly.toLowerCase());
+      }
+      expect(catalogue.dangling.noteJson, lang).not.toBe(catalogue.dangling.note);
     }
   });
 
   it("the JSON:API panel keeps its own note, which is right there", () => {
     expect(t().dangling.note).toContain("included");
-    expect(t().dangling.noteJson).not.toBe(t().dangling.note);
   });
 });

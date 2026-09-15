@@ -427,7 +427,12 @@ export function renderJsonDangling(index: JsonIndex): HTMLElement | null {
   );
 
   const body = el("div", { class: "absent-list__body" });
-  body.append(el("p", { class: "absent-list__note", text: t().dangling.noteJson }));
+  // Through `setRichText`, not `text:` — this note writes `id` as code, and a
+  // `textContent` sink would put the backticks on screen as characters. The
+  // JSON:API note above writes its member names bare for exactly that reason.
+  const note = el("p", { class: "absent-list__note" });
+  setRichText(note, t().dangling.noteJson);
+  body.append(note);
 
   const list = el("ul", { class: "absent-list__items" });
   for (const target of index.dangling) {

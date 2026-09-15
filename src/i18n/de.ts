@@ -329,7 +329,7 @@ export const de: Messages = {
     total: (n) => `${f.n(n)} insgesamt`,
     note: "Auf diese wird über Beziehungen verwiesen, sie wurden aber weder in data noch in included mitgeschickt. Meist fehlte dem Request ein include-Parameter — oder der Server hat etwas weggelassen, das er hätte senden sollen.",
     noteJson:
-      "Jeder dieser Schlüssel liest sich wie eine Referenz — ein Name, der auf `id` endet — aber keine Sammlung dieses Namens enthält eine passende Identität. Entweder fehlt dem Dokument die andere Hälfte, oder der Schlüssel ist gar keine Referenz und diese Lesart ist falsch.",
+      "Jeder dieser Schlüssel liest sich wie eine Referenz — ein Name, der auf `id` endet — aber unter einem passenden Namen fand sich nichts. Vielleicht fehlt dem Dokument die andere Hälfte; vielleicht passen die Namen nicht so zusammen, wie diese Lesart sie zurückführt (`houses` und `house_id` tun es nicht); vielleicht ist der Schlüssel gar keine Referenz.",
   },
 
   errors: {
