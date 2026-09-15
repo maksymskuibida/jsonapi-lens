@@ -1408,11 +1408,33 @@ function saveCurrent(): void {
       return;
     }
     loaded.label = label;
-    topbarLabelEl.textContent = label;
-    applyPageMeta(documentMeta(label));
+    showDocumentName(label);
     void refreshLibraryCount();
     toast(t().save.done(label));
   });
+}
+
+/**
+ * Move a document's name onto the screen: the topbar, and the page's own head.
+ *
+ * `documentMeta` carries `path: null`, so `applyPageMeta` marks the page
+ * `noindex` and strips its canonical and every `hreflang` alternate. Right for
+ * `/view`, wrong anywhere else — and the saved-documents button lives in the
+ * topbar, which `showView` never hides, so both callers are reachable in
+ * principle while the paste view is showing.
+ *
+ * **Not covered by a test, deliberately.** Two attempts to reach that state in
+ * the browser suite failed: `Shift+Escape` drops `current`, and a reload with
+ * a stored document leaves `topbar-doc` hidden, so the handler returns at its
+ * `!current` check before this is called either way. A check that cannot reach
+ * the branch it names is worse than none — so the guard stays (it is one line
+ * and obviously right) and the gap is written down instead of papered over.
+ * Raised as a suggestion in review, on `saveCurrent` as much as here.
+ */
+function showDocumentName(label: string): void {
+  topbarLabelEl.textContent = label;
+  if (docEl.hidden) return;
+  applyPageMeta(documentMeta(label));
 }
 
 function openLibrary(): void {
@@ -1423,7 +1445,18 @@ function openLibrary(): void {
     },
     // Renames and deletes happen inside the modal, so the badge is refreshed
     // from there rather than guessed at here.
-    () => void refreshLibraryCount(),
+    (change) => {
+      void refreshLibraryCount();
+
+      // Renaming the document that is currently open has to move the name on
+      // screen with it. Matched on the text rather than an id, because
+      // `current` is a parsed document and carries no library id — and
+      // byte-identical text is what "the same document" means everywhere else
+      // here, including the import view's already-saved check.
+      if (change.kind !== "renamed" || !current || current.text !== change.entry.text) return;
+      current.label = change.entry.label;
+      showDocumentName(change.entry.label);
+    },
   );
 }
 
