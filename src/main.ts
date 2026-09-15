@@ -1394,7 +1394,19 @@ function openLibrary(): void {
     },
     // Renames and deletes happen inside the modal, so the badge is refreshed
     // from there rather than guessed at here.
-    () => void refreshLibraryCount(),
+    (change) => {
+      void refreshLibraryCount();
+
+      // Renaming the document that is currently open has to move the name on
+      // screen with it. Matched on the text rather than an id, because
+      // `current` is a parsed document and carries no library id — and
+      // byte-identical text is what "the same document" means everywhere else
+      // here, including the import view's already-saved check.
+      if (change?.kind !== "renamed" || !current || current.text !== change.entry.text) return;
+      current.label = change.entry.label;
+      topbarLabelEl.textContent = change.entry.label;
+      applyPageMeta(documentMeta(change.entry.label));
+    },
   );
 }
 

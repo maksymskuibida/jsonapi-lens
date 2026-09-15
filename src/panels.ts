@@ -86,9 +86,22 @@ function rowMeta(entry: LibraryEntry): HTMLElement {
   );
 }
 
+/**
+ * What changed in the library, for a caller that is showing one of these
+ * documents right now.
+ *
+ * `onChange` used to take nothing, so the only thing it could do was refresh
+ * the badge — and renaming the document currently open left the topbar and the
+ * page title reading the old name until something else re-rendered them. The
+ * modal knows which entry moved; the caller knows which one is on screen.
+ */
+export type LibraryChange =
+  | { readonly kind: "renamed"; readonly entry: LibraryEntry }
+  | { readonly kind: "deleted"; readonly entry: LibraryEntry };
+
 export async function openLibraryModal(
   onOpen: (entry: LibraryEntry) => void,
-  onChange: () => void = () => {},
+  onChange: (change?: LibraryChange) => void = () => {},
 ): Promise<void> {
   const entries = await listLibrary();
 
@@ -240,7 +253,7 @@ export async function openLibraryModal(
           if (entry.id !== undefined && (await renameInLibrary(entry.id, trimmed))) {
             entry.label = trimmed;
             render(list);
-            onChange();
+            onChange({ kind: "renamed", entry });
             // The renamed row survives, so focus returns to its rename button.
             refocusList(`[data-row-id="${String(entry.id)}"] .library__rename`);
             toast(t().library.renamed(trimmed));
@@ -268,7 +281,7 @@ export async function openLibraryModal(
           if (entry.id !== undefined && (await deleteFromLibrary(entry.id))) {
             const remaining = list.filter((e) => e.id !== entry.id);
             render(remaining);
-            onChange();
+            onChange({ kind: "deleted", entry });
             // The row this was clicked from is gone; land on whatever the
             // rebuilt list offers first, or the footer when it is empty.
             refocusList();

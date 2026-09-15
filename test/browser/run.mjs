@@ -621,6 +621,69 @@ try {
     JSON.stringify(bundleReload),
   );
 
+  // Renaming the document that is open has to move the name on screen with it.
+  // `main.ts` wires itself to the real document at module scope, so no vitest
+  // test can reach this sink — the unit tests cover only the notification the
+  // modal sends, not whether the topbar acts on it.
+  try {
+    await page.navigate(`${ORIGIN}/`);
+    await waitFor(page, "!!document.getElementById('input')", "the paste view");
+    await page.evaluate(readFlow('{"data":{"type":"a","id":"1"}}'));
+
+    const renamed = await page.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const byText = (text, root) =>
+        [...(root || document).querySelectorAll("button")].find((b) => b.textContent.trim() === text);
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true }));
+      await wait(500);
+      const save = [...document.querySelectorAll(".modal__panel button")].pop();
+      save.click();
+      await wait(800);
+
+      const before = {
+        topbar: document.getElementById("topbar-label").textContent,
+        title: document.title,
+      };
+
+      document.getElementById("library-label").closest("button").click();
+      await wait(700);
+      const rename = [...document.querySelectorAll(".modal__panel button")]
+        .find((b) => /rename|umbenennen|перейменувати/i.test(b.textContent.trim()));
+      if (!rename) return { before, after: null, reason: "no rename button" };
+      rename.click();
+      await wait(500);
+
+      const top = [...document.querySelectorAll(".modal__panel")].pop();
+      top.querySelector("input").value = "renamed-while-open";
+      const confirm = [...top.querySelectorAll(".modal__actions button")].pop();
+      confirm.click();
+      await wait(1200);
+
+      return {
+        before,
+        after: {
+          topbar: document.getElementById("topbar-label").textContent,
+          title: document.title,
+        },
+      };
+    })()`);
+
+    const followed =
+      renamed.after !== null &&
+      renamed.after.topbar === "renamed-while-open" &&
+      renamed.after.title.startsWith("renamed-while-open") &&
+      renamed.before.topbar !== renamed.after.topbar;
+    report(
+      followed,
+      "-",
+      "renaming the open document moves the name in the topbar and the title",
+      `${JSON.stringify(renamed.before)} -> ${JSON.stringify(renamed.after)}`,
+    );
+  } catch (error) {
+    report(false, "err", "renaming the open document moves the name in the topbar and the title", error.message);
+  }
+
   /*
    * Last in the file on purpose: this drives a same-origin iframe through the
    * app's own paste flow, which writes to the shared `documents` store — the
