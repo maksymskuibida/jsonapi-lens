@@ -138,6 +138,71 @@ async function connect(port) {
   };
 }
 
+/**
+ * The retry loop that reads `wanted` through the app's own paste flow — the
+ * textarea, Read, and (when the shape offer appears) "Read as plain JSON" —
+ * rather than reaching into the app's internals, so this exercises what a
+ * person does. Returns the expression string for `page.evaluate`; the result
+ * is `''` on success or an error message on rejection.
+ *
+ * Retried, because the paste view is static markup in index.html: the button
+ * exists long before the module that listens to it has booted, so a single
+ * click can land on nothing and look exactly like a slow render. Clicking
+ * again once it has rendered is harmless, so a loop is the simplest way to be
+ * sure the click took.
+ *
+ * The "rendered" check is `#overview`, not `.res` — `render-document.ts`
+ * gives both `renderOverview` (JSON:API) and `renderJsonOverview` (plain
+ * JSON) the same id, which is what makes this one check work for either
+ * shape. Before this, the loop only ever recognised a `.res` section, so a
+ * plain-JSON document — which never has one — timed out as "the app
+ * rejected it" no matter how correctly it read: this suite could not load
+ * the path T1 added at all, offer included.
+ */
+function readFlow(wanted) {
+  return `(async () => {
+    const wanted = ${JSON.stringify(wanted)};
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const overview = document.getElementById('overview');
+      const doc = document.getElementById('doc');
+      if (overview && doc && !doc.hidden) return '';
+
+      const error = document.getElementById('error');
+      if (error && !error.hidden) {
+        return [
+          document.getElementById('error-headline')?.textContent,
+          document.getElementById('error-hint')?.textContent,
+          document.getElementById('error-where')?.textContent,
+        ].filter(Boolean).join(' — ');
+      }
+
+      // Not JSON:API, but valid JSON — the paste view names the shape and
+      // offers a choice instead of reading straight through. Take the
+      // plain-JSON reading, the one this suite exists to protect now that
+      // it has its own path through the app.
+      const offer = document.getElementById('shape-offer');
+      const offerPlain = document.getElementById('shape-offer-plain');
+      if (offer && !offer.hidden && offerPlain) {
+        offerPlain.click();
+        await new Promise((r) => setTimeout(r, 250));
+        continue;
+      }
+
+      const input = document.getElementById('input');
+      const parse = document.getElementById('parse');
+      if (input && parse) {
+        if (input.value !== wanted) {
+          input.value = wanted;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        parse.click();
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return '';
+  })()`;
+}
+
 /** Poll the page until `expression` is truthy, so nothing races the render. */
 async function waitFor(page, expression, what, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
@@ -179,6 +244,22 @@ const chrome = spawn(
 
 let page;
 let failed = 0;
+let total = 0;
+
+/**
+ * One result line, and the two counters the summary is built from.
+ *
+ * Every check goes through this rather than a hand-maintained denominator: the
+ * runner-level checks around the scenarios are exactly the ones an addition
+ * forgets to count, and an under-counted total is invisible in a green run.
+ */
+function report(ok, metric, name, detail) {
+  total += 1;
+  if (!ok) failed += 1;
+  let line = `${ok ? "pass" : "FAIL"}  ${String(metric).padStart(8)}  ${name}`;
+  if (detail) line += `\n            ${detail}`;
+  console.log(line);
+}
 
 try {
   page = await connect(port);
@@ -187,43 +268,11 @@ try {
   await waitFor(page, "!!document.getElementById('input')", "the paste view");
 
   // Feed the document in through the app's own paste flow rather than reaching
-  // into its internals, so the test exercises what a person does.
-  //
-  // Retried, because the paste view is static markup in index.html: the button
-  // exists long before the module that listens to it has booted, so a single
-  // click can land on nothing and look exactly like a slow render. Clicking
-  // again once it has rendered is harmless, so a loop is the simplest way to be
-  // sure the click took.
+  // into its internals, so the test exercises what a person does. `amtrak.json`
+  // is JSON:API, so this always takes `readFlow`'s straight-through path — the
+  // shape-offer branch exists for the plain-JSON check near the end of this file.
   const text = await readFile(DOC, "utf8");
-  const rejected = await page.evaluate(`(async () => {
-    const wanted = ${JSON.stringify(text)};
-    for (let attempt = 0; attempt < 40; attempt++) {
-      const doc = document.getElementById('doc');
-      const rendered = document.querySelectorAll('.res').length > 0 && doc && !doc.hidden;
-      if (rendered) return '';
-
-      const error = document.getElementById('error');
-      if (error && !error.hidden) {
-        return [
-          document.getElementById('error-headline')?.textContent,
-          document.getElementById('error-hint')?.textContent,
-          document.getElementById('error-where')?.textContent,
-        ].filter(Boolean).join(' \u2014 ');
-      }
-
-      const input = document.getElementById('input');
-      const parse = document.getElementById('parse');
-      if (input && parse) {
-        if (input.value !== wanted) {
-          input.value = wanted;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-        parse.click();
-      }
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    return '';
-  })()`);
+  const rejected = await page.evaluate(readFlow(text));
   if (rejected) throw new Error(`the app rejected ${DOC}: ${rejected}`);
 
   await waitFor(
@@ -293,65 +342,291 @@ try {
   console.log(`running ${keys.length} scenarios\n`);
 
   for (const key of keys) {
-    let line;
     try {
       const raw = await page.evaluate(
         `(async () => JSON.stringify(await SCEN[${JSON.stringify(key)}](NAV)))()`,
       );
       const result = JSON.parse(raw);
-      if (!result.ok) failed += 1;
-      line = `${result.ok ? "pass" : "FAIL"}  ${String(result.driftPx ?? "?").padStart(6)}px  ${result.name ?? key}`;
-      if (!result.ok) line += `\n            ${result.detail ?? ""}`;
+      // Detail on failures only: on 23 passing scenarios it is just noise.
+      report(
+        result.ok,
+        `${result.driftPx ?? "?"}px`,
+        result.name ?? key,
+        result.ok ? null : (result.detail ?? ""),
+      );
     } catch (error) {
-      failed += 1;
-      line = `FAIL       err  ${key}\n            ${error.message}`;
+      report(false, "err", key, error.message);
     }
-    console.log(line);
   }
 
-  // Reload, last, because it destroys the page context the scenarios run in.
+  // Reload, first of the four checks below that need a page load of their own,
+  // because it destroys the page context the scenarios run in — the injected
+  // `NAV`/`SCEN` harness does not survive it, so nothing below this point may
+  // call either again. The three after it (resume, plain JSON, bundle) are
+  // ordered so each only needs what the one before it leaves behind.
   //
   // This is the case the old absolute-offset restoration got most wrong — -1215px
   // — and the reason is worth keeping in front of whoever changes this next: on a
   // fresh load nothing has been measured yet, so the page is at its shortest and
   // a saved pixel offset means the least it will ever mean. Restoring a place
   // instead survives it, and the restored offset is expected to differ.
-  const probe = await page.evaluate(`(async () => {
-    await NAV.fresh();
-    await NAV.open(...SCEN.ID.mc);
-    await NAV.open(...SCEN.ID.c5);
-    await NAV.scrollToFraction(0.55);
-    const watch = NAV.topmostVisible();
-    return JSON.stringify({ id: watch.id, top: NAV.top(watch), y: Math.round(scrollY), h: NAV.height() });
-  })()`);
-  const saved = JSON.parse(probe);
+  try {
+    const probe = await page.evaluate(`(async () => {
+      await NAV.fresh();
+      await NAV.open(...SCEN.ID.mc);
+      await NAV.open(...SCEN.ID.c5);
+      await NAV.scrollToFraction(0.55);
+      const watch = NAV.topmostVisible();
+      return JSON.stringify({ id: watch.id, top: NAV.top(watch), y: Math.round(scrollY), h: NAV.height() });
+    })()`);
+    const saved = JSON.parse(probe);
+
+    await page.evaluate("location.reload(); undefined").catch(() => {});
+    await waitFor(
+      page,
+      "document.querySelectorAll('.res').length > 0 && !document.getElementById('doc').hidden",
+      "the document to come back after a reload",
+    );
+    const landed = JSON.parse(
+      await page.evaluate(`(async () => {
+        await new Promise((r) => setTimeout(r, 1200));
+        const el = document.getElementById(${JSON.stringify(saved.id)});
+        return JSON.stringify({
+          top: el ? Math.round(el.getBoundingClientRect().top) : null,
+          y: Math.round(scrollY),
+          h: document.documentElement.scrollHeight,
+        });
+      })()`),
+    );
+    const reloadDrift = landed.top === null ? NaN : landed.top - saved.top;
+    report(
+      Math.abs(reloadDrift) <= 2,
+      `${reloadDrift}px`,
+      "reload restores the same place",
+      `top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
+    );
+  } catch (error) {
+    report(false, "err", "reload restores the same place", error.message);
+  }
+
+  // Resuming a stored document from the paste view, which needs a page load of
+  // its own and so cannot be a scenario — every `SCEN.*` runs in one page
+  // context, and a load destroys it.
+  //
+  // `boot()` parses a stored document so that "Back to document" is instant but
+  // deliberately stays on the paste view, so a loaded document and an empty
+  // `#doc` is a normal state. Revealing the document view without building it
+  // first showed a blank page below the topbar, and "leave the tab, come back
+  // later, click the button" is an ordinary way to use the app.
+  try {
+    await page.navigate(`${ORIGIN}/`);
+    // The button clause first: `Page.navigate` resolves at navigation commit,
+    // when the parser may not have reached `#resume` yet, and reading `.hidden`
+    // off the null that gets you throws out of the run instead of polling again.
+    await waitFor(
+      page,
+      "!!document.querySelector('#resume button') && !document.getElementById('resume').hidden",
+      "the resume button offering the stored document",
+    );
+    const resumed = JSON.parse(
+      await page.evaluate(`(async () => {
+        const doc = document.getElementById('doc');
+        // Nothing built yet is the state under test: if the document view were
+        // already there, clicking would prove nothing about building it.
+        const before = doc.childElementCount;
+        // Reaching this button often means scrolling the paste view, and the
+        // built document inherits whatever offset that left behind — so the
+        // click has to be made from somewhere other than the top.
+        window.scrollTo(0, 400);
+        await new Promise((r) => setTimeout(r, 250));
+        const beforeY = Math.round(scrollY);
+        document.querySelector('#resume button').click();
+        // Polled rather than slept: the handler is synchronous today, so this
+        // returns at once, and a fixed wait would quietly become the assertion
+        // if that ever changed.
+        for (let i = 0; i < 50 && doc.childElementCount === 0; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return JSON.stringify({
+          before,
+          beforeY,
+          path: location.pathname,
+          hidden: doc.hidden,
+          children: doc.childElementCount,
+          sections: document.querySelectorAll('.res').length,
+          y: Math.round(scrollY),
+        });
+      })()`),
+    );
+    // `before === 0` is load-bearing, not commentary: if some later change
+    // builds `#doc` at boot, this check would pass while proving nothing, and
+    // the fix it guards could be reverted under a green run.
+    const resumeOk =
+      resumed.before === 0 &&
+      resumed.path === "/view" &&
+      !resumed.hidden &&
+      resumed.children > 0 &&
+      resumed.sections > 0 &&
+      // Built and revealed is not enough: inheriting the paste view's offset
+      // drops you into the middle of a document you have not seen yet.
+      resumed.y === 0;
+    report(
+      resumeOk,
+      resumed.sections,
+      "resume renders the stored document",
+      `#doc children ${resumed.before}->${resumed.children} at ${resumed.path}, y ${resumed.beforeY}->${resumed.y}` +
+        (resumed.before > 0 ? " — already built before the click, so this proved nothing" : ""),
+    );
+  } catch (error) {
+    report(false, "err", "resume renders the stored document", error.message);
+  }
+
+  // Plain JSON: a reference nested deeper than `AUTO_OPEN_DEPTH` must still be
+  // *visibly* open after a reload, not merely present in the DOM. This is the
+  // one check in this suite that can see that class of regression at all —
+  // `nav-harness.js`'s `NAV` and every `SCEN.*` scenario above are built
+  // entirely around `.res`/`.res__d`, and `amtrak.json` is JSON:API, so none
+  // of them ever take the branch this exercises. Run last, after the
+  // JSON:API reload probe above, for the same reason that one runs last: it
+  // replaces the loaded document and reloads the page, which nothing here
+  // needs to survive afterward.
+  await page.navigate(`${ORIGIN}/`);
+  await waitFor(page, "!!document.getElementById('input')", "the paste view, for the plain-JSON check");
+  // Let `boot()`'s own IndexedDB read (of whichever document `amtrak.json`'s
+  // run above persisted) settle before submitting a fresh paste — otherwise
+  // this check would also be exercising the boot()/pendingOffer race, which
+  // is a different, already-covered bug, not the one this block exists for.
+  await sleep(500);
+
+  const plainJsonDoc = '{ "a": { "b": { "c": { "id": 4 } } }, "c_id": 4 }';
+  const plainRejected = await page.evaluate(readFlow(plainJsonDoc));
+  if (plainRejected) {
+    throw new Error(`the app rejected the plain-JSON reload fixture: ${plainRejected}`);
+  }
+
+  // The offer button's click handler fires `load(..., { persist: true })`
+  // without awaiting it, so the IndexedDB write can still be in flight the
+  // instant `readFlow` sees `#overview` appear — reloading immediately after
+  // can lose the document entirely. Margin here, not a flaky check.
+  await sleep(800);
+
+  const before = JSON.parse(
+    await page.evaluate(`(async () => {
+      const link = document.querySelector('a.v--ref');
+      if (!link) return JSON.stringify({ error: 'no resolved reference link rendered' });
+      link.click();
+      await new Promise((r) => setTimeout(r, 300));
+      const id = location.hash.slice(1);
+      const el = document.getElementById(id);
+      if (!el) return JSON.stringify({ error: 'link target ' + id + ' missing from the DOM' });
+      const chain = [];
+      for (let n = el; n; n = n.parentElement) if (n.tagName === 'DETAILS') chain.push(n.open);
+      return JSON.stringify({ id, chain, height: Math.round(el.getBoundingClientRect().height) });
+    })()`),
+  );
+  if (before.error) throw new Error(`plain-JSON reload check: ${before.error}`);
 
   await page.evaluate("location.reload(); undefined").catch(() => {});
   await waitFor(
     page,
-    "document.querySelectorAll('.res').length > 0 && !document.getElementById('doc').hidden",
-    "the document to come back after a reload",
+    `!!document.getElementById(${JSON.stringify(before.id)})`,
+    "the plain-JSON document to come back after a reload",
   );
-  const landed = JSON.parse(
+  const after = JSON.parse(
     await page.evaluate(`(async () => {
-      await new Promise((r) => setTimeout(r, 1200));
-      const el = document.getElementById(${JSON.stringify(saved.id)});
-      return JSON.stringify({
-        top: el ? Math.round(el.getBoundingClientRect().top) : null,
-        y: Math.round(scrollY),
-        h: document.documentElement.scrollHeight,
-      });
+      await new Promise((r) => setTimeout(r, 800));
+      const el = document.getElementById(${JSON.stringify(before.id)});
+      const chain = [];
+      for (let n = el; n; n = n.parentElement) if (n.tagName === 'DETAILS') chain.push(n.open);
+      return JSON.stringify({ chain, height: Math.round(el.getBoundingClientRect().height) });
     })()`),
   );
-  const reloadDrift = landed.top === null ? NaN : landed.top - saved.top;
-  const reloadOk = Math.abs(reloadDrift) <= 2;
-  if (!reloadOk) failed += 1;
-  console.log(
-    `${reloadOk ? "pass" : "FAIL"}  ${String(reloadDrift).padStart(6)}px  reload restores the same place` +
-      `\n            top ${saved.top}->${landed.top}, y ${saved.y}->${landed.y}, h ${saved.h}->${landed.h}`,
+
+  // Three halves, not two: `clickWorked` is the precondition (the link itself
+  // still resolves and opens its target) so a broken click path fails loudly
+  // as itself, not as a confusing false pass on the reload comparison. The
+  // other two are the state and the place, checked separately on purpose —
+  // this project's own founding defect was a restoration that landed on the
+  // right pixel while the row underneath had silently stopped expanding, a
+  // place assertion passing over a broken state. This scenario is that
+  // lesson's exact mirror, so it does not get to make the same mistake in
+  // the other direction: `chain` is the state (every ancestor open), `height`
+  // is the place (the same box, not a collapsed one at the same scroll
+  // position). Both must hold, and `height` was already being collected and
+  // printed here before this was fixed to actually assert it.
+  const clickWorked = before.chain.length > 0 && before.chain.every((open) => open === true);
+  const chainSurvived = after.chain.length === before.chain.length && after.chain.every((open) => open === true);
+  const heightSurvived = Math.abs(after.height - before.height) <= 2;
+  const plainOk = clickWorked && chainSurvived && heightSurvived;
+  report(
+    plainOk,
+    `${after.height}px`,
+    "28 plain JSON: a reference 2+ levels deep survives reload",
+    `chain ${JSON.stringify(before.chain)}->${JSON.stringify(after.chain)}, height ${before.height}->${after.height}, clickWorked=${clickWorked}, chainSurvived=${chainSurvived}, heightSurvived=${heightSurvived}`,
   );
 
-  console.log(`\n${keys.length + 1 - failed}/${keys.length + 1} passed`);
+  // One more reload, genuinely last, closing a coverage gap PR #5 review
+  // round 2 found (S9): `isBundleEntryShowing`'s `bundleImportEl.hasChildNodes()`
+  // half — main.ts, just above `markBundleEntry` — had no test anywhere that
+  // could fail. Deleting it and keeping only `state?.bundle === true` left
+  // the entire suite green: 265/265 vitest and every scenario above. What it
+  // guards is a plain F5 on a bundle-marked /view entry: a real browser keeps
+  // an entry's `history.state` across `location.reload()`, but the secret and
+  // the bundle's rendered content do not survive it — a fresh page load
+  // starts `bundleImportEl` empty, and nothing in this session re-populates
+  // it. Without the guard, `applyRoute` reads the stale marker alone, calls
+  // `showView("bundle")`, and shows that empty container: B1's blank page,
+  // reached by a different route. The marker is stamped by hand rather than
+  // run through s27's `fetch` stub and a real share round trip — the guard
+  // only ever reads `history.state` and `bundleImportEl`'s children, and
+  // neither cares how the entry came to be marked, so a hand-stamped one
+  // exercises the exact same mechanism far more cheaply. Placed after the
+  // reload above, not before it, because this one needs no `NAV`/`SCEN` call
+  // of its own — only raw DOM queries — so it does not need the harness
+  // re-injected after destroying the page context a second time.
+  //
+  // `bundleImportEl` carries no id or class (see its own comment in
+  // main.ts), so it is found the same way `showView` distinguishes it from
+  // its four static siblings: the one child of #view whose id is not one of
+  // theirs.
+  await page.evaluate("history.pushState({ bundle: true }, '', '/view'); undefined");
+  await page.evaluate("location.reload(); undefined").catch(() => {});
+  await waitFor(
+    page,
+    "!!document.getElementById('boot') && document.getElementById('boot').hidden === true",
+    "the app to leave the boot view after a bundle-marked reload",
+  );
+  await sleep(1200); // boot() awaits IndexedDB before it settles on a view.
+  const bundleReload = JSON.parse(
+    await page.evaluate(`JSON.stringify((() => {
+      const view = document.getElementById('view');
+      const known = new Set(['boot', 'paste', 'doc', 'legal']);
+      const extra = [...view.children].find((el) => !known.has(el.id));
+      return {
+        path: location.pathname,
+        pasteShowing: !document.getElementById('paste').hidden,
+        docShowing: !document.getElementById('doc').hidden,
+        bundleContainerShowing: extra ? !extra.hidden : null,
+        bundleContainerHasChildren: extra ? extra.hasChildNodes() : null,
+      };
+    })())`),
+  );
+  const bundleReloadOk =
+    bundleReload.bundleContainerShowing === false &&
+    (bundleReload.pasteShowing || bundleReload.docShowing);
+  report(
+    bundleReloadOk,
+    "-",
+    "a cold reload of a bundle-marked entry is not blank",
+    JSON.stringify(bundleReload),
+  );
+
+  // `total` is whatever `report` was actually called with, rather than a
+  // hand-maintained `keys.length + n`: every check added since this line was
+  // written was added outside `SCEN`, and each one silently widened the gap
+  // between the denominator and the run. An under-counted total is invisible
+  // in a green run — see `report`'s own comment.
+  console.log(`\n${total - failed}/${total} passed`);
 } finally {
   page?.close();
   chrome.kill();

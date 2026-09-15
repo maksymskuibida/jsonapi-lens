@@ -77,23 +77,39 @@ If you write your own, two rules matter more than the rest:
 
 ## What is covered
 
-24 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
+26 scenarios run entirely in the page: single relationship hops in both directions, a four-deep chain
 unwound one Back at a time, Back-then-Forward, rapid double Backs, Back/Forward hammering, returning
 to the very top and the very bottom, a type filter active, "Expand all" on a 36-row group, a position
 deep inside a tall expanded row, a reverse pointer out of "Referenced by", the jump modal, collapsing
 the row you landed on before leaving, "Expand all" reading the rows rather than its own memory, and arriving at a resource opening it by
-every route there is.
+every route there is. The last one, `s27`, is different in kind from the rest: it shares two saved
+documents as a bundle, opens the resulting link, and confirms Back/Forward toggle correctly between
+the paste view and the bundle import view with the secret gone from the URL and `history.state` — a
+state/URL-correctness check rather than a pixel one, included here anyway because it needs the same
+real `popstate` machinery jsdom cannot provide, and it patches `window.fetch` for `/api/shares` in the
+page for its own lifetime, since this harness's origin does not serve that endpoint (see the note
+above). It restores the amtrak document itself afterward, since it is the one scenario that replaces
+the document view with a different one entirely.
+
+**`s27` must run last, and that is a convention, not something the harness enforces.**
+`run.mjs` discovers scenarios with `Object.keys(SCEN).sort()`, so today `s27` sorts after everything
+else purely because it has the highest number — a future `s28` would inherit "the one scenario that
+replaces the document view and re-seeds the library" whether or not that is what it wants. If you add
+a scenario numbered above 27, either give it the same restore-the-document responsibility `s27` has
+in its own `finally` block, or renumber so `s27` still sorts last. Nothing here will fail loudly if
+you don't — the symptom is the *other* new scenario failing in a way that looks unrelated to it.
 
 That last one is worth its own note. Every scenario that follows a relationship also asserts the row
 it landed on is open, because a position-only assertion cannot see that failing — the landing is in
 exactly the right place whether or not the row expanded, and a regression there is unmissable in use
 and invisible in the numbers.
 
-Every one of them runs at whatever `--width` is given, so narrow layouts are the same 22 scenarios
+Every one of them runs at whatever `--width` is given, so narrow layouts are the same 23 scenarios
 rather than a separate list. 390, 768 and 1512 are the widths worth trying; fractional row heights at
 390 are what caught the rounding fault.
 
-Two more the runner does itself, around the scenarios, because both need a page load:
+Three more the runner does itself, around the scenarios, because each needs a page load — and a load
+destroys the context every `SCEN.*` runs in, which is why they cannot be scenarios:
 
 - **Reload restores the same place** — the case the old absolute-offset restoration got most wrong,
   at -1215px, because a fresh load has measured nothing and is therefore at its shortest.
@@ -101,6 +117,14 @@ Two more the runner does itself, around the scenarios, because both need a page 
   an `await` and used to call `showView("paste")` regardless of what had happened meanwhile, so a
   document pasted before that read finished was replaced by the paste view a moment later. Rendering
   once is not proof.
+- **"Back to document" renders it.** Landing on `/` with a document stored, `boot()` parses it so the
+  resume button is instant but stays on the paste view — so a loaded document and an empty `#doc` is
+  a normal state, and every path that reveals the document view has to build it rather than assume
+  someone else did. Revealing it unbuilt gave a blank page below the topbar, with the right URL and
+  the right title and no console error. It also clicks from a scrolled paste view and asserts the
+  landing is at the top, because a built document that inherits the previous view's offset drops you
+  into the middle of one you have not seen. The line prints `#doc children 0->2`; starting at
+  anything but 0 is a *failure*, not a note — the click would have proved nothing.
 
 Two are still by hand, both needing a second page load mid-scenario: Back *after* a reload-restored
 position, and a cold deep link followed out and then back. Drive them from the console in two steps,

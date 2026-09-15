@@ -2756,6 +2756,91 @@ body.has-modal {
   text-wrap: pretty;
 }
 
+/* T6's selection mode: a row's Open/Rename/Delete controls are replaced by
+   one checkbox+label, reusing .library__row/__name/__meta/__shape as-is —
+   only the clickable area itself needs a layout of its own, since a
+   <label> wrapping a checkbox plus a name/meta column is not the single
+   grid .library__open lays out for a plain button. */
+.library__select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  cursor: pointer;
+}
+
+.library__select-text {
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.library__checkbox {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Why a control is disabled — "Create link" with nothing ticked, "Import
+   selected" with nothing ticked — shown as text, not left to a title
+   tooltip nobody can reach by keyboard or touch. */
+.bundle-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+/* -------------------------------------------------------- bundle import --- */
+
+/* The view reached when a share link decrypts to a bundle (`crypto.ts`'s
+   version 3) — a sibling of .paste/.doc/.legal-view, not a modal, because it
+   replaces the document view for the load that landed here. */
+.bundle-import {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--sp-6);
+  width: min(48rem, 100%);
+  margin-inline: auto;
+  padding: var(--sp-9) var(--sp-6) var(--sp-10);
+}
+
+.bundle-import__head {
+  flex: none;
+}
+
+.bundle-import__title {
+  font-family: var(--font-display);
+  font-size: clamp(var(--fs-lg), 4vw, var(--fs-2xl));
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  color: var(--text);
+}
+
+.bundle-import__subtitle {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-wrap: pretty;
+}
+
+/* A capped height so 50 rows scroll inside this list rather than stretching
+   the page — the list is the one part of this view with unbounded content. */
+.bundle-import__list {
+  flex: 1;
+  min-height: 0;
+  max-height: min(58dvh, 34rem);
+  overflow: auto;
+  align-content: start;
+}
+
+.bundle-import__foot {
+  flex: none;
+}
+
 /* ---------------------------------------------------------------- save --- */
 
 .field {
@@ -3323,4 +3408,125 @@ body.has-modal {
   font-weight: 600;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
+}
+
+/* ================================================== plain JSON — T1 ===
+   The paste-view offer, the identity graph's own value states, and the
+   collection-row shell — see docs/task-specs/T1.md. Everything else a
+   plain-JSON document renders (the tree, the rail, the overview stats) reuses
+   the classes above unchanged.
+   ======================================================================== */
+
+/* An informational branch point, not an error — `--accent`, not `--danger`,
+   is what tells the two apart at a glance next to `.paste__error`. */
+.shape-offer {
+  margin-top: var(--sp-7);
+  padding: var(--sp-6);
+  border: 1px solid var(--accent-line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.shape-offer__headline {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.shape-offer__hint {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  max-width: var(--measure);
+}
+
+.shape-offer__actions {
+  margin-top: var(--sp-5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+
+/* One collection member: the generic tree's own row (`.tree`/`.kv__val`) or a
+   bare-array scalar (`.v--top-level`), just given a little vertical rhythm
+   between members. Deliberately not `.res` — this row is not part of the
+   `.res`-section scroll-restoration model in main.ts, so it must not be
+   picked up by `indexSections()`'s `.group .res` query. */
+.node-row {
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: 1px solid var(--line);
+  /* A rough estimate, not measured the way `.res`'s figure is (see its own
+     comment) — there is no lazy body to defer here, so an off-screen row
+     still has its full detail built; this only skips layout and paint for
+     it. Revisit with a real measurement if very large collections turn out
+     to matter in practice. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 42px;
+}
+
+.node-row:last-child {
+  border-bottom: 0;
+}
+
+.group__truncated-note {
+  padding: var(--sp-4) var(--sp-6);
+  font-family: var(--font-mono);
+  font-size: var(--fs-3xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A bare-scalar document's one value, or a bare-array collection's scalar
+   member — `renderTopLevelValue`'s wrapper, since a plain `renderScalar`
+   result has nowhere to carry an anchor id or the copy actions. */
+.v--top-level {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+}
+
+.block--root-scalar {
+  padding: var(--sp-6);
+}
+
+/* A resolved identity reference: a real link, styled like the values around
+   it rather than like a chip, since it sits inline in the same tree a date or
+   a UUID does. */
+.v--ref {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  text-decoration-style: dotted;
+}
+
+/* Three reasons a value is text instead of a link: more than one candidate
+   definition, no definition at all, or a definition that exists but was cut
+   from the render (a collection past `EAGER_BODY_LIMIT`) — the `title`
+   attribute is what tells them apart, not colour. */
+.v--ref-ambiguous,
+.v--ref-dangling,
+.v--ref-unrendered {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--absent-text);
+  text-decoration: underline dotted;
+  text-decoration-color: var(--absent);
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
+/* The cross-reference `render-value.ts` shows in place of a collection it
+   already renders as its own `.group` section — see `render-json.ts`'s
+   header for why that collection is not also expanded here. */
+.v--collapsed-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+}
+
+.v--collapsed-ref {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
 }

@@ -357,6 +357,212 @@
       const drift = N.top(watch) - before;
       return { name: '21 jump modal navigation, Back', ok: Math.abs(drift) <= TOL, driftPx: drift, detail: `top ${before}->${N.top(watch)}` };
     },
+
+    /* 27 T6: share two library documents as a bundle, open the resulting
+       link, and confirm Back/Forward toggle correctly between the paste
+       view and the bundle import view — with the secret gone from both the
+       URL and history.state before the import view ever renders.
+       Regression coverage for a real bug caught in manual evidence-gathering:
+       Cancel and the per-row "Open" handler used to clear the in-memory
+       `bundleView` flag, so Back to that same /view entry could no longer
+       tell "a bundle was here" from "nothing was" and fell through to the
+       paste view a second time instead of restoring the import screen.
+       Runs last (highest scenario number) and restores #doc/`current`
+       itself afterward, because this harness's own post-scenario reload
+       probe (in run.mjs) needs the amtrak document showing again — this is
+       the one scenario that replaces the document view with a different one
+       entirely, so it is the one responsible for putting it back.
+       No real `/api/shares` exists under a plain `vite dev` origin (see
+       test/browser/README.md), so this patches `window.fetch` for exactly
+       that path, in-page, for the scenario's own lifetime only. */
+    async s27(N) {
+      const name = '27 share a bundle, open it — Back/Forward restore paste and import';
+
+      // No version pinned, and no `onupgradeneeded` (PR #5 review, S7): the
+      // harness's own setup already pasted and saved a document through the
+      // real app before any scenario runs, so `store.ts`'s own `open()` has
+      // already created this database at whatever `DB_VERSION` currently is,
+      // with both stores in place. Opening at a hardcoded version here would
+      // `VersionError` the moment `DB_VERSION` moves past it, or — on some
+      // future fresh profile where this scenario ran first — silently create
+      // the database at *this* version without whatever a later version
+      // adds. Letting the app own its own schema and simply connecting to it
+      // is what a real Save through the UI would do too.
+      const seedLibrary = (entries) =>
+        new Promise((resolve, reject) => {
+          const req = indexedDB.open('jsonapi-lens');
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('library', 'readwrite');
+            for (const e of entries) tx.objectStore('library').add(e);
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => reject(tx.error);
+          };
+          req.onerror = () => reject(req.error);
+        });
+
+      await seedLibrary([
+        { label: 's27-one.json', text: '{"a":1}', savedAt: Date.now(), bytes: 7 },
+        { label: 's27-two.json', text: '{"b":2}', savedAt: Date.now(), bytes: 7 },
+      ]);
+
+      const blobs = new Map();
+      let nextId = 100001; // clear of anything a real deployment could ever assign
+      const realFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.startsWith('/api/shares') && init && init.method === 'POST') {
+          const id = nextId++;
+          const body = init.body;
+          const bytes = body instanceof Uint8Array ? body : new Uint8Array(await new Response(body).arrayBuffer());
+          blobs.set(id, bytes);
+          return new Response(JSON.stringify({ id, expiresAt: null }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        const m = url.match(/^\/api\/shares\/(\d+)$/);
+        if (m) {
+          const bytes = blobs.get(Number(m[1]));
+          return bytes ? new Response(bytes, { status: 200 }) : new Response('not found', { status: 404 });
+        }
+        return realFetch(input, init);
+      };
+
+      const importShowing = () => {
+        const el = document.querySelector('.bundle-import');
+        return !!el && el.closest('[hidden]') === null;
+      };
+
+      const seen = {};
+      let disturbed = false;
+      // Captured before this scenario touches anything, so the `finally`
+      // block below can restore it after the S3/B3 leak check pastes its own
+      // throwaway document over #input's value.
+      const origInputValue = document.getElementById('input')?.value;
+
+      try {
+        document.getElementById('open-library').click();
+        await N.settle(200);
+        const shareBtn = document.querySelector('[data-role="library-share"]');
+        if (!shareBtn) return { name, ok: false, driftPx: 0, detail: 'no Share button — library seed failed?' };
+        shareBtn.click();
+        await N.settle(150);
+
+        const boxes = [...document.querySelectorAll('.library__checkbox')].filter((b) =>
+          b.closest('.library__row')?.querySelector('.library__name')?.textContent?.startsWith('s27-'),
+        );
+        if (boxes.length < 2) {
+          return { name, ok: false, driftPx: 0, detail: `expected 2 seeded rows, found ${boxes.length}` };
+        }
+        boxes.forEach((b) => b.click());
+        document.querySelector('[data-role="library-create-link"]').click();
+        await N.settle(250);
+
+        disturbed = true; // from here on, #doc/current may get replaced
+
+        document.querySelector('.share__actions button')?.click();
+        await N.settle(1600); // PBKDF2 at 1,000,000 iterations, plus the (stubbed) upload
+
+        const url = document.querySelector('.share__url')?.value;
+        if (!url) return { name, ok: false, driftPx: 0, detail: 'no link produced' };
+        const path = new URL(url).pathname; // "/d/<id>:<secret>"
+        // PR #5 review round 2, N15: this used to fall back to a NUL sentinel
+        // (`|| '\u0000'`) when the split found nothing, which would make both
+        // `secretGoneFromUrl` and `secretStillGoneAfterTraversals` below pass
+        // by testing for a byte that was never in the URL to begin with,
+        // rather than failing on the URL shape that produced it. Failing loudly
+        // here instead — exactly like the missing-`url` check two lines up —
+        // is what makes those two assertions mean something.
+        const secret = path.split(':')[1];
+        if (!secret) return { name, ok: false, driftPx: 0, detail: `no secret in link path ${path}` };
+
+        document.querySelector('.modal__close')?.click();
+
+        history.pushState(null, '', path);
+        window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+        await N.settle(1600); // fetch (stubbed) + PBKDF2 + gunzip
+
+        seen.loadedImportView = importShowing();
+        seen.secretGoneFromUrl = !location.href.includes(secret);
+        seen.secretGoneFromState = !JSON.stringify(history.state || null).includes(secret);
+
+        document.querySelector('[data-role="bundle-cancel"]')?.click();
+        await N.settle(300);
+        seen.cancelShowsPaste = location.pathname === '/' && !document.getElementById('paste').hidden;
+
+        await N.back();
+        seen.backShowsImportView = importShowing();
+
+        await N.forward();
+        seen.forwardShowsPaste = location.pathname === '/' && !document.getElementById('paste').hidden;
+
+        await N.back();
+        seen.secondBackShowsImportView = importShowing();
+        // The first check (right after load) only proves the replace worked
+        // once; re-checking here is what actually backs up the scenario's
+        // own name — the secret must still be absent after two round trips
+        // through history, not just on arrival.
+        seen.secretStillGoneAfterTraversals =
+          !location.href.includes(secret) && !JSON.stringify(history.state || null).includes(secret);
+
+        // PR #5 review, S3, escalated to a blocker: a *later, unrelated*
+        // navigation must not resurrect the import view. Repro as found:
+        // bundle -> Cancel -> paste -> paste a document -> New document ->
+        // Back used to show the stale import view where the document used
+        // to be, because the old code tracked "is this a bundle" as a plain
+        // sticky module flag with no notion of which history entry it was
+        // ever about. Continues from the import-view entry this scenario is
+        // already sitting on (after the second Back above).
+        document.querySelector('[data-role="bundle-cancel"]')?.click();
+        await N.settle(300);
+
+        const input = document.getElementById('input');
+        const parseBtn = document.getElementById('parse');
+        // A minimal but genuinely valid JSON:API document — this branch has
+        // no plain-JSON reading (that is T1's, on a separate, not-yet-merged
+        // branch), so anything not JSON:API-shaped would fail to parse here
+        // and never reach the doc view at all.
+        input.value = '{"data":null}';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        parseBtn.click();
+        await N.settle(500);
+        seen.leakCheckPastedDocShowing = !document.getElementById('doc').hidden;
+
+        document.getElementById('new-doc')?.click();
+        await N.settle(300);
+
+        await N.back();
+        // The entry Back lands on is the just-pasted document's, not the
+        // original bundle's, so it must never be the stale bundle view —
+        // that is the regression this whole block exists to catch. It is
+        // *not* required to be the pasted document itself: "New document"
+        // (just clicked) calls `clearDocument()`, which deletes the
+        // persisted "current document" this same entry would otherwise
+        // restore, so falling through to the paste view here is correct,
+        // pre-existing behaviour, unrelated to this fix — the same coarse
+        // "there is one current document, and only one" model the rest of
+        // this app already has for any two documents loaded in sequence.
+        seen.leakCheckBackDoesNotShowImportView = !importShowing();
+        seen.leakCheckBackShowsDocOrPaste =
+          !document.getElementById('doc').hidden || !document.getElementById('paste').hidden;
+
+        const ok = Object.values(seen).every(Boolean);
+        return { name, ok, driftPx: 0, detail: JSON.stringify(seen) };
+      } finally {
+        window.fetch = realFetch;
+        // Put the amtrak document back: run.mjs's own post-scenario reload
+        // probe needs #doc showing and `current` set, and this is the one
+        // scenario that replaced them with a different view entirely. The
+        // leak check above pastes its own throwaway document over #input's
+        // value, so restore the original text first — `origInputValue` was
+        // captured before this scenario touched anything.
+        if (disturbed) {
+          const input = document.getElementById('input');
+          if (input && origInputValue !== undefined) input.value = origInputValue;
+          history.replaceState(null, '', '/view');
+          document.getElementById('parse')?.click();
+          await N.settle(700);
+        }
+      }
+    },
   };
 
   window.SCEN = SCEN;
