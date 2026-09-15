@@ -38,8 +38,10 @@ export const de: Messages = {
     savedTitleCount: (n) => `Gespeicherte Dokumente (${f.n(n)})`,
     shortcuts: "Tastaturkürzel",
     themeLabel: "Design:",
-    themeName: (theme) =>
-      theme === "auto" ? "automatisch" : theme === "light" ? "hell" : "dunkel",
+    // "auto", not "automatisch": this sits in a fixed-height bar beside four
+    // other controls, and the long form is what pushed the next button off a
+    // 375px screen entirely. English and Ukrainian already use the short form.
+    themeName: (theme) => (theme === "auto" ? "auto" : theme === "light" ? "hell" : "dunkel"),
     themeTitle: (name) => `Design: ${name}. Zum Wechseln klicken.`,
     newDocument: "Neues",
     newDocumentRest: " Dokument",

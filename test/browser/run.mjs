@@ -621,6 +621,107 @@ try {
     JSON.stringify(bundleReload),
   );
 
+  /*
+   * Layout, measured rather than eyeballed. Both of these shipped to
+   * production and were found by a QA pass, and neither is expressible in
+   * jsdom — it has no layout engine, which is why the preflight forbids
+   * layout assertions there.
+   *
+   * Run in a same-origin iframe sized to a phone, so the width is real without
+   * disturbing the metrics override the scenarios above depend on.
+   */
+  try {
+    const narrow = await page.evaluate(`(async () => {
+      const widths = {};
+      for (const lang of ["en", "de", "uk"]) {
+        const frame = document.createElement("iframe");
+        frame.style.cssText = "position:fixed;left:-9999px;top:0;width:375px;height:812px;border:0";
+        frame.src = location.origin + "/?lang=" + lang;
+        document.body.appendChild(frame);
+        await new Promise((resolve) => {
+          frame.addEventListener("load", resolve, { once: true });
+          setTimeout(resolve, 4000);
+        });
+        await new Promise((r) => setTimeout(r, 600));
+        const d = frame.contentDocument;
+        const input = d.getElementById("input");
+        input.value = '{"data":{"type":"a","id":"1"}}';
+        input.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
+        d.getElementById("parse").click();
+        await new Promise((r) => setTimeout(r, 1200));
+        const root = d.documentElement;
+        const reachable = [...d.querySelectorAll(".topbar button")].every(
+          (b) => b.getBoundingClientRect().right <= root.clientWidth + 0.5,
+        );
+        widths[lang] = { vw: root.clientWidth, sw: root.scrollWidth, reachable };
+        frame.remove();
+      }
+      return widths;
+    })()`);
+
+    const fits = Object.values(narrow).every((w) => w.sw <= w.vw && w.reachable);
+    report(
+      fits,
+      "375px",
+      "the topbar fits a phone in every language, with every control reachable",
+      Object.entries(narrow)
+        .map(([lang, w]) => `${lang} ${w.sw}/${w.vw}${w.reachable ? "" : " UNREACHABLE"}`)
+        .join(", "),
+    );
+  } catch (error) {
+    report(false, "err", "the topbar fits a phone in every language, with every control reachable", error.message);
+  }
+
+  try {
+    // 1024px, in an iframe, because this suite runs at 1512 and seven levels
+    // of nesting do not overflow there — measured at the default width this
+    // check passed even with the fix reverted, which is the only thing worse
+    // than not having it.
+    const deep = await page.evaluate(`(async () => {
+      const frame = document.createElement("iframe");
+      frame.style.cssText = "position:fixed;left:-9999px;top:0;width:1024px;height:900px;border:0";
+      frame.src = location.origin + "/";
+      document.body.appendChild(frame);
+      await new Promise((resolve) => {
+        frame.addEventListener("load", resolve, { once: true });
+        setTimeout(resolve, 4000);
+      });
+      await new Promise((r) => setTimeout(r, 600));
+      const d = frame.contentDocument;
+      const input = d.getElementById("input");
+      input.value = '{"a":{"b":{"c":{"d":{"e":{"f":{"g":"deep value"}}}}}},"z":1}';
+      input.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
+      d.getElementById("parse").click();
+      await new Promise((r) => setTimeout(r, 900));
+      d.getElementById("shape-offer-plain")?.click();
+      await new Promise((r) => setTimeout(r, 1000));
+      for (let i = 0; i < 8; i++) {
+        d.querySelectorAll("details:not([open])").forEach((el) => (el.open = true));
+        await new Promise((r) => setTimeout(r, 120));
+      }
+      const root = d.documentElement;
+      const block = d.querySelector(".block");
+      const out = {
+        pageVw: root.clientWidth,
+        pageSw: root.scrollWidth,
+        blockScrolls: block ? block.scrollWidth > block.clientWidth : false,
+      };
+      frame.remove();
+      return out;
+    })()`);
+
+    // The page must not scroll sideways. The block carrying the tree may —
+    // that is where wide content is supposed to go.
+    report(
+      deep.pageSw <= deep.pageVw,
+      `${deep.pageSw - deep.pageVw}px`,
+      "deep nesting scrolls inside its own block, not the page",
+      `page ${deep.pageSw}/${deep.pageVw} at 1024, block scrolls its own overflow: ${deep.blockScrolls}`,
+    );
+  } catch (error) {
+    report(false, "err", "deep nesting scrolls inside its own block, not the page", error.message);
+  }
+
   // `total` is whatever `report` was actually called with, rather than a
   // hand-maintained `keys.length + n`: every check added since this line was
   // written was added outside `SCEN`, and each one silently widened the gap
