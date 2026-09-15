@@ -8,7 +8,8 @@ import type { KeyHint } from "./platform.js";
 import { openBundleShareModal, openShareModal } from "./share.js";
 import { deleteFromLibrary, listLibrary, renameInLibrary } from "./store.js";
 import type { LibraryEntry } from "./store.js";
-import { openModal, toast } from "./ui.js";
+import { confirmModal, openModal, promptModal, toast } from "./ui.js";
+import type { ModalHandle } from "./ui.js";
 
 /* ------------------------------------------------------------- raw view --- */
 
@@ -142,8 +143,24 @@ export async function openLibraryModal(
     else openBundleShareModal(found);
   }
 
+  // Assigned by the `openModal` call below; `render` only ever runs after it,
+  // and reads it through the optional chain above for the one call that does
+  // not — the initial render that builds the body `openModal` is given.
+  let handle: ModalHandle | undefined;
+
   const render = (list: LibraryEntry[]): void => {
     latestList = list;
+
+    // The header count is part of what `render` renders. Binding it once at
+    // open left "1 in this browser" sitting above "Nothing saved yet." the
+    // moment the last row was deleted — the subtitle described the list this
+    // modal opened with, not the list on screen.
+    const subtitle = handle?.root.querySelector(".modal__subtitle");
+    if (subtitle) {
+      subtitle.textContent = list.length
+        ? t().library.countInBrowser(list.length)
+        : t().library.storedLocally;
+    }
 
     if (!list.length) {
       body.replaceChildren(
@@ -182,10 +199,16 @@ export async function openLibraryModal(
           text: t().library.rename,
         });
         rename.addEventListener("click", async () => {
-          const next = window.prompt(t().library.renamePrompt, entry.label);
-          if (next === null) return;
-          const trimmed = next.trim();
-          if (!trimmed) return;
+          const trimmed = await promptModal({
+            title: t().library.renameTitle,
+            label: t().library.renamePrompt,
+            value: entry.label,
+            confirmLabel: t().library.renameTitle,
+            cancelLabel: t().modal.cancel,
+          });
+          // `null` covers every way out: cancel, Escape, the ✕, the backdrop,
+          // and a name cleared to nothing.
+          if (trimmed === null) return;
           if (entry.id !== undefined && (await renameInLibrary(entry.id, trimmed))) {
             entry.label = trimmed;
             render(list);
@@ -204,7 +227,14 @@ export async function openLibraryModal(
           text: t().library.delete,
         });
         remove.addEventListener("click", async () => {
-          if (!window.confirm(t().library.deleteConfirm(entry.label))) return;
+          const confirmed = await confirmModal({
+            title: t().library.deleteTitle,
+            message: t().library.deleteConfirm(entry.label),
+            confirmLabel: t().library.deleteTitle,
+            cancelLabel: t().modal.cancel,
+            tone: "danger",
+          });
+          if (!confirmed) return;
           if (entry.id !== undefined && (await deleteFromLibrary(entry.id))) {
             const remaining = list.filter((e) => e.id !== entry.id);
             render(remaining);
@@ -310,7 +340,7 @@ export async function openLibraryModal(
   };
   document.addEventListener("keydown", onKeydownCapture, true);
 
-  const handle = openModal({
+  handle = openModal({
     title: t().library.title,
     subtitle: entries.length
       ? t().library.countInBrowser(entries.length)

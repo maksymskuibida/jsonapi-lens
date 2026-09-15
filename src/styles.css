@@ -401,6 +401,22 @@ code {
   color: var(--bg);
 }
 
+.btn--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.btn--danger:hover {
+  /* No `--danger-hover` token exists; the border darkening alone is enough of
+     a hover signal, and inventing a shade here would put a colour outside the
+     palette on the one button that must not look improvised. */
+  background: var(--danger);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
 .btn--ghost {
   background: transparent;
   border-color: transparent;
@@ -2517,6 +2533,23 @@ body.has-modal {
   padding: var(--sp-5) var(--sp-6);
   border-top: 1px solid var(--line);
   background: var(--surface-2);
+}
+
+.ask {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.ask__label {
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+}
+
+.ask__message {
+  margin: 0;
+  max-width: 52ch;
+  line-height: 1.5;
+  color: var(--text);
 }
 
 .modal__actions {

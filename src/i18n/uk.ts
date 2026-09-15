@@ -515,6 +515,7 @@ export const uk: Messages = {
 
   modal: {
     close: "Закрити",
+    cancel: "Скасувати",
   },
 
   share: {
