@@ -308,7 +308,7 @@ describe("the library uses them, and never the native dialogs", () => {
     const changes: { kind: string }[] = [];
     await openLibraryModal(
       () => {},
-      (change) => change && changes.push(change),
+      (change) => changes.push(change),
     );
 
     button("delete", panels()[0]!).click();

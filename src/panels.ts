@@ -101,7 +101,7 @@ export type LibraryChange =
 
 export async function openLibraryModal(
   onOpen: (entry: LibraryEntry) => void,
-  onChange: (change?: LibraryChange) => void = () => {},
+  onChange: (change: LibraryChange) => void = () => {},
 ): Promise<void> {
   const entries = await listLibrary();
 

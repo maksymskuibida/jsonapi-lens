@@ -632,9 +632,6 @@ try {
 
     const renamed = await page.evaluate(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const byText = (text, root) =>
-        [...(root || document).querySelectorAll("button")].find((b) => b.textContent.trim() === text);
-
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true }));
       await wait(500);
       const save = [...document.querySelectorAll(".modal__panel button")].pop();
