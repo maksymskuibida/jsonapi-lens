@@ -482,7 +482,11 @@ describe("the plain-JSON unresolved panel does not talk about JSON:API", () => {
 
     for (const [lang, catalogue] of [["en", en], ["de", de], ["uk", uk]] as const) {
       const note = catalogue.dangling.noteJson.toLowerCase();
-      for (const jsonApiOnly of ["included", "include parameter", "server", "server"]) {
+      // Latin terms alone let Ukrainian through: it transliterates rather than
+      // borrowing, so "сервер" is the one spelling of the banned sentence the
+      // guard could not see — in the language it was added for. A guard that
+      // silently exempts a locale reads as coverage and is not.
+      for (const jsonApiOnly of ["included", "include parameter", "server", "сервер", "включ"]) {
         expect(note, `${lang}: ${jsonApiOnly}`).not.toContain(jsonApiOnly.toLowerCase());
       }
       expect(catalogue.dangling.noteJson, lang).not.toBe(catalogue.dangling.note);

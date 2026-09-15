@@ -374,20 +374,21 @@ export const en = {
     note: "These are referenced by relationships but were not sent in data or included. Usually that means the request was missing an include parameter — or the server dropped something it should have sent.",
     /**
      * The plain-JSON panel's own note.
-      *
+     *
      * It used to share the JSON:API one above, which talks about `included`,
      * an `include` parameter and what the server should have sent — none of
      * which exists for a plain-JSON document. So a key like `androidId`, read
      * as a reference to a collection called `android` that the document does
      * not have, produced "the server dropped something it should have sent"
      * about a payload with no server in the story at all.
-      *
-     * This says what actually happened: a key was read as a reference, and
-     * nothing with that identity turned up in a matching collection. It is a
-     * reading, and it says so.
-      */
+     *
+     * This says what actually happened: a key was read as a reference and
+     * nothing under a matching name turned up — and names all three ways that
+     * can happen, including the one where the two names simply did not pair
+     * up. It is a reading, and it says so.
+     */
     noteJson:
-      "Each of these keys reads like a reference — a name ending in `id` — but nothing under a matching name turned up. The document may not carry the other half; the names may not line up the way this reading reduces them (`houses` and `house_id` do not); or the key may not be a reference at all.",
+      "Each of these keys reads like a reference — a name ending in `id` — but nothing under a matching name turned up. The document may not carry the other half; the two names may not match the way this reading pairs them up; or the key may not be a reference at all.",
   },
 
   errors: {
