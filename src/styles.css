@@ -1817,18 +1817,6 @@ kbd {
   display: grid;
   gap: var(--sp-4);
   align-content: start;
-  /* Deep nesting scrolls inside the block rather than taking the page with it.
-     Each level of `.tree` adds a border, an indent and a column gap, and those
-     accumulate whatever the columns do — the grid tracks below already shrink
-     to zero, so past six or seven levels it is the indent alone that runs off
-     the edge. The page body must never scroll sideways; wide content scrolls
-     in its own container, the same rule the raw view and wide tables follow.
-
-     `min-width: 0` is what makes the scroll actually happen: without it this
-     grid item takes its min-content width from the tree inside it and simply
-     grows, and `overflow-x` never has anything to do. */
-  min-width: 0;
-  overflow-x: auto;
 }
 
 .block__title {
@@ -1871,17 +1859,6 @@ kbd {
   grid-template-columns: minmax(6rem, 12rem) minmax(0, 1fr);
   gap: 1px var(--sp-5);
   align-items: baseline;
-}
-
-/* A nested key column may shrink to nothing; only the outermost keeps a floor.
-   Each `.kv` inside another `.kv` used to contribute its own 6rem *minimum*,
-   and those floors accumulate: by the fifth level of nesting the value column
-   had no room left at 1024px — measured at width 0, its copy buttons past the
-   right edge — and the page body itself scrolled sideways, which it must never
-   do. The floor is what makes a top-level key column readable; it is the
-   repetition of the floor, not the floor, that overflows. */
-.kv .kv {
-  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
 }
 
 .kv__key {
@@ -3420,9 +3397,6 @@ body.has-modal {
     grid-template-columns: minmax(8rem, 18rem) minmax(0, 1fr);
   }
 
-  .kv .kv {
-    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
-  }
 
   /* Keep prose at a readable measure even when the column is wide. */
   .overview__note,
