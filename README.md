@@ -342,7 +342,7 @@ npm run build
 npm run fixtures
 ```
 
-`npm test` runs 259 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
+`npm test` runs 618 tests over encoding, parsing, indexing, pointers, routing, the reverse index,
 the encryption round trip (a single document or a bundle), storage (including the saved-documents
 selection flow and the bundle import view) and the bulk-render escaping.
 
@@ -353,9 +353,10 @@ machine, and the suite's result depended on who ran it rather than on the code.
 [`test/locale-pin.test.ts`](test/locale-pin.test.ts) holds that pin in place, and proves the hazard
 is real rather than assuming it: [`test/locale-probe.mjs`](test/locale-probe.mjs) reads
 `navigator.language` out of a bare Node process started under `LANG=de_DE.UTF-8`. The probe is plain
-JavaScript, like [`test/browser/run.mjs`](test/browser/run.mjs), so that Node's types stay out of the
-tsconfig that covers `src` — installing `@types/node` puts `process` and `node:fs` within reach of
-every file in the app, because Vite's own types pull them in by reference.
+JavaScript, like [`test/browser/run.mjs`](test/browser/run.mjs) — a convention here, not a guard:
+`@types/node` is already a devDependency (the `mcp/` tree needs it), and a file under `src/` that
+imports `node:child_process` typechecks clean today. Keeping Node's APIs out of the app is a rule
+nothing currently enforces.
 
 To exercise German or Ukrainian through `t()` in a test, lift the pin — `stored()` is consulted
 before `navigator`, so stubbing the browser's languages alone will still answer English.
@@ -386,8 +387,8 @@ incompatible globals and its own program. Run that one yourself before shipping:
 ```bash
 npx wrangler types && npx tsc -p tsconfig.worker.json --noEmit
 ```
- `npm run fixtures` writes
-`fixtures/large-50k.json`; it takes an optional count and path.
+
+`npm run fixtures` writes `fixtures/large-50k.json`; it takes an optional count and path.
 
 ## Deploying
 

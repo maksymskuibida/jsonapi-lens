@@ -4,13 +4,15 @@
  * This is the positive control behind `test/locale-pin.test.ts`: it proves the
  * hazard that `test/setup.ts` pins against is real, rather than describing it.
  *
- * It is plain JavaScript for the same reason `test/browser/run.mjs` is — it
- * needs Node's own APIs, and the tsconfig covering `src` and `test`
- * deliberately carries no Node types, so that nothing under `src/` can reach
- * for a Node API and still typecheck. `locale-probe.d.mts` gives the one
- * exported function a type, which is all the TypeScript side needs; the
- * alternative was `@types/node` plus a whole second `tsc` program for one
- * `spawn`.
+ * It is plain JavaScript for the same reason `test/browser/run.mjs` is: it
+ * needs Node's own APIs, and this file predates the `mcp/` tree. Note the
+ * original reasoning here — that the tsconfig covering `src` carries no Node
+ * types, so nothing under `src/` could reach a Node API and still typecheck —
+ * is **no longer true**, and was not true by the time this branch merged
+ * `main`: `@types/node` is a devDependency for `mcp/`, and a file under `src/`
+ * importing `node:child_process` typechecks clean. The `.mjs`/`.d.mts` pair is
+ * kept because it works and matches `run.mjs`, not because it enforces
+ * anything. Restoring that boundary is a real task and is not this one.
  */
 import { spawn } from "node:child_process";
 

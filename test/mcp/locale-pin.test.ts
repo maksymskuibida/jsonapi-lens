@@ -78,14 +78,19 @@ describe("the locale pin holds under a hostile host environment", () => {
     // no-op — if this ever stopped being true (a Node behaviour change), the
     // two tests below would pass vacuously.
     const { stdout } = await new Promise<{ stdout: string }>((resolveRun) => {
-      // `LC_ALL` and `LC_MESSAGES` are dropped rather than merely overridden
+      // `LC_ALL`, `LC_MESSAGES` and `LANGUAGE` are dropped rather than merely overridden
       // by `LANG`: POSIX gives `LC_ALL` precedence over `LANG`, so inheriting
       // the runner's own `LC_ALL` is what decided the child's language, not
       // the `LANG` this test sets. That made the control fail on any machine
       // whose `LC_ALL` was set to anything but German — including `C`, which
       // is what CI uses — so the one assertion proving the hazard is real was
       // itself the least portable thing in the suite.
-      const { LC_ALL: _ignoredAll, LC_MESSAGES: _ignoredMessages, ...env } = process.env;
+      const {
+        LC_ALL: _ignoredAll,
+        LC_MESSAGES: _ignoredMessages,
+        LANGUAGE: _ignoredLanguage,
+        ...env
+      } = process.env;
       const child = spawn(
         process.execPath,
         ["-e", "process.stdout.write(navigator.language)"],
