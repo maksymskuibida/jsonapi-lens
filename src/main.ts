@@ -339,7 +339,7 @@ function showError(error: unknown): void {
             error instanceof Error ? error.message : String(error),
           );
 
-  errorHeadlineEl.textContent = documentError.headline;
+  setRichText(errorHeadlineEl, documentError.headline);
   setRichText(errorHintEl, documentError.hint);
   if (documentError.line !== undefined) {
     errorWhereEl.textContent = t().paste.errorWhere(documentError.line);

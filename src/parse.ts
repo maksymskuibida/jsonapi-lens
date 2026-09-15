@@ -124,7 +124,12 @@ export function assertJsonApi(value: JsonValue): JsonObject {
 
   if (!hasData && !hasErrors && !hasMeta) {
     const keys = Object.keys(value);
-    const preview = keys.slice(0, 6).map((k) => `\`${k}\``).join(", ");
+    // Quoted, not backticked. These keys come out of the document, and the
+    // hint they land in is rendered by `setRichText`, where a backtick is the
+    // marker that opens a `code` span — so a key containing one would shift
+    // the pairing and display as something other than what the document says.
+    // Backticks stay for the member names the catalogue itself owns.
+    const preview = keys.slice(0, 6).map((k) => `\u201c${k}\u201d`).join(", ");
     throw new DocumentError(
       t().parseErrors.notJsonApi.headline,
       keys.length

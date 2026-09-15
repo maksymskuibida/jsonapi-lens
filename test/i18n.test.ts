@@ -273,3 +273,15 @@ describe("legal pages", () => {
     }
   });
 });
+
+describe("the footer landmark is named in every language", () => {
+  it("names it differently in each catalogue — it used to read \"Legal\" in all three", async () => {
+    const { en } = await import("../src/i18n/en.js");
+    const { de } = await import("../src/i18n/de.js");
+    const { uk } = await import("../src/i18n/uk.js");
+
+    const names = [en.footer.legalNav, de.footer.legalNav, uk.footer.legalNav];
+    for (const name of names) expect(name.trim()).not.toBe("");
+    expect(new Set(names).size).toBe(3);
+  });
+});

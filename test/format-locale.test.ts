@@ -72,12 +72,10 @@ describe("values are formatted in the app's language, not the browser's", () => 
     // The stat chips go through the catalogue's `f.n`; values go through
     // `formatNumber`. Before this, one followed the app and the other the
     // browser, so a single English page showed both `2,100` and `1 500`.
-    const { t } = await import("../src/i18n/index.js");
     const en = await formatIn("en");
-    const { t: tEn } = await import("../src/i18n/index.js");
-    void t;
+    const { t } = await import("../src/i18n/index.js");
     expect(en.formatNumber(2100)).toBe("2,100");
-    expect(tEn().library.resources(2100)).toContain("2,100");
+    expect(t().library.resources(2100)).toContain("2,100");
   });
 
   it("a non-finite number is passed through untouched", async () => {

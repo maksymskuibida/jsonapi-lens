@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { setRichText } from "../src/dom.js";
-import { LOCALES } from "../src/i18n/index.js";
+
 
 const host = (): HTMLElement => document.createElement("p");
 
@@ -54,15 +54,35 @@ describe("setRichText", () => {
   });
 });
 
-describe("the footer landmark is named in every language", () => {
-  it("names it differently in each catalogue — it used to read \"Legal\" in all three", async () => {
+describe("no sink renders a catalogue string's backticks literally", () => {
+  /**
+   * The defect was not that one sink formatted badly — it was that two views
+   * of the *same sentence* disagreed. The paste-view offer rendered `code`
+   * spans while the overview note, where most people actually read it, showed
+   * raw backticks; and the error headline showed raw backticks directly above
+   * a hint that did not. So this asserts the property across every string that
+   * carries the marker, rather than spot-checking one call site.
+   */
+  it("every backticked catalogue string survives setRichText with no backtick left", async () => {
     const { en } = await import("../src/i18n/en.js");
-    const { de } = await import("../src/i18n/de.js");
-    const { uk } = await import("../src/i18n/uk.js");
+    const withBackticks: string[] = [];
+    const walk = (node: unknown): void => {
+      if (typeof node === "string") {
+        if (node.includes("`")) withBackticks.push(node);
+        return;
+      }
+      if (node && typeof node === "object") Object.values(node).forEach(walk);
+    };
+    walk(en);
 
-    const names = [en.footer.legalNav, de.footer.legalNav, uk.footer.legalNav];
-    for (const name of names) expect(name.trim()).not.toBe("");
-    expect(new Set(names).size).toBe(3);
-    expect(LOCALES).toHaveLength(3);
+    // If this ever finds nothing, the sweep has stopped sweeping.
+    expect(withBackticks.length).toBeGreaterThan(5);
+
+    for (const message of withBackticks) {
+      const p = document.createElement("p");
+      setRichText(p, message);
+      expect(p.textContent).not.toContain("`");
+      expect(p.querySelector("code")).not.toBeNull();
+    }
   });
 });

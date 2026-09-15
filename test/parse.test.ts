@@ -62,8 +62,26 @@ describe("assertJsonApi", () => {
     } catch (error) {
       message = (error as DocumentError).hint;
     }
-    expect(message).toContain("`results`");
-    expect(message).toContain("`page`");
+    // Quoted, not backticked. The hint is rendered by `setRichText`, where a
+    // backtick opens a `code` span — and these keys come from the document, so
+    // one containing a backtick would shift the pairing and display as
+    // something the document does not say. The catalogue's own member names
+    // (`data`, `errors`, `meta`) keep their backticks; interpolated keys do not.
+    expect(message).toContain("\u201cresults\u201d");
+    expect(message).toContain("\u201cpage\u201d");
+    expect(message).toContain("`data`");
+  });
+
+  it("shows a key containing a backtick exactly as the document spells it", () => {
+    let message = "";
+    try {
+      assertJsonApi({ "a`b": 1 });
+    } catch (error) {
+      message = (error as DocumentError).hint;
+    }
+    // The defect this guards: wrapped in backticks, `a`b` rendered as "ab"
+    // with the separator styled as a member name.
+    expect(message).toContain("a`b");
   });
 
   it("rejects data and errors together", () => {
