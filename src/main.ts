@@ -4,7 +4,8 @@ import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
 
 import { copyBlob, copyText, downloadText } from "./clipboard.js";
-import { el, setRichText } from "./dom.js";
+import { el } from "./dom.js";
+import { renderErrorCard, renderShapeOffer } from "./render-error.js";
 import { formatBytes, formatDuration } from "./format.js";
 import {
   applyDocumentLanguage,
@@ -336,16 +337,13 @@ function showError(error: unknown): void {
         ? new DocumentError(error.headline, error.hint)
         : new DocumentError(
             t().parseErrors.unknown.headline,
-            error instanceof Error ? error.message : String(error),
+            // A value, not a catalogue string: this is the fallback for a
+            // genuinely unexpected error, and its message is not ours.
+            [{ verbatim: error instanceof Error ? error.message : String(error) }],
           );
 
-  setRichText(errorHeadlineEl, documentError.headline);
-  setRichText(errorHintEl, documentError.hint);
-  if (documentError.line !== undefined) {
-    errorWhereEl.textContent = t().paste.errorWhere(documentError.line);
-    errorWhereEl.hidden = false;
-  } else {
-    errorWhereEl.hidden = true;
+  renderErrorCard(errorHeadlineEl, errorHintEl, errorWhereEl, documentError);
+  {
   }
   errorEl.hidden = false;
   errorEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -378,9 +376,7 @@ function hideShapeOffer(): void {
  */
 function showShapeOffer(text: string, label: string, index: JsonIndex): void {
   pendingOffer = { text, label };
-  const shape = t().shape;
-  shapeOfferHeadlineEl.textContent = shape.offerHeadline(shape.name(index.shape));
-  setRichText(shapeOfferHintEl, shape.evidence(index.shapeEvidence));
+  renderShapeOffer(shapeOfferHeadlineEl, shapeOfferHintEl, index.shape, index.shapeEvidence);
   shapeOfferEl.hidden = false;
   shapeOfferEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }

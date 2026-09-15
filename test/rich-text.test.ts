@@ -8,6 +8,7 @@ import { setRichText } from "../src/dom.js";
 import type { RichPart } from "../src/dom.js";
 import { DocumentError, readAny, readDocument } from "../src/parse.js";
 import { renderJsonOverview } from "../src/render-document.js";
+import { renderErrorCard, renderShapeOffer } from "../src/render-error.js";
 import { t } from "../src/i18n/index.js";
 import type { ShapeEvidence } from "../src/types.js";
 
@@ -109,6 +110,7 @@ describe("the sinks render, not just the helper", () => {
     // was never in the helper, it was in a sink that bypassed it, so a test
     // that calls `setRichText` itself cannot see it. Reverting that sink must
     // turn this red.
+    let checked = 0;
     for (const [text, kind] of [
       ['{"_links":{"self":{"href":"/x"}}}', "hal"],
       ['{"value":[],"@odata.context":"x"}', "odata"],
@@ -121,7 +123,11 @@ describe("the sinks render, not just the helper", () => {
       const note = overview.querySelector(".overview__note");
       expect(note, kind).not.toBeNull();
       expect(note!.textContent, kind).not.toContain("`");
+      checked += 1;
     }
+    // Without this the `continue` above is a silent escape hatch: a shape
+    // reclassification would skip every fixture and report green.
+    expect(checked).toBe(4);
   });
 
   it("every shape-detection sentence renders with code spans and no literal backtick", () => {
@@ -159,6 +165,43 @@ describe("the sinks render, not just the helper", () => {
     expect(sawACodeSpan).toBe(true);
   });
 
+  it("the real error-card sink fills both elements, for an error whose hint is parts", () => {
+    // Calls `renderErrorCard`, not `setRichText`. With `hint` widened to
+    // `string | RichPart[]`, a sink that mishandles the union renders nothing
+    // at all — a headline with no hint under it — for exactly the two errors
+    // this PR is about.
+    for (const text of ['{"a": `x` , "b`c": 1}', '{"results":[],"page":1}']) {
+      let thrown: DocumentError | null = null;
+      try {
+        readDocument(text);
+      } catch (error) {
+        thrown = error as DocumentError;
+      }
+      expect(thrown, text).not.toBeNull();
+
+      const headline = host();
+      const hint = host();
+      const where = host();
+      renderErrorCard(headline, hint, where, thrown!);
+
+      expect(headline.textContent!.length, text).toBeGreaterThan(0);
+      // The half that goes empty when the union is mishandled.
+      expect(hint.textContent!.length, text).toBeGreaterThan(0);
+      expect(hint.textContent, text).not.toContain("undefined");
+      expect(hint.textContent, text).not.toContain("[object Object]");
+    }
+  });
+
+  it("the real shape-offer sink fills both elements", () => {
+    const headline = host();
+    const hint = host();
+    renderShapeOffer(headline, hint, "hal", { kind: "hal-links" });
+
+    expect(headline.textContent!.length).toBeGreaterThan(0);
+    expect(hint.textContent).not.toContain("`");
+    expect(hint.querySelector("code")!.textContent).toBe("_links");
+  });
+
   it("the error card renders both its headline and its hint through the same path", () => {
     let thrown: DocumentError | null = null;
     try {
@@ -180,8 +223,12 @@ describe("the sinks render, not just the helper", () => {
     expect(hint.textContent).not.toContain("`");
   });
 
-  it("every static catalogue string carrying a marker is balanced and renders", async () => {
+  it("every static catalogue string carrying a marker is balanced and renders, in all three languages", async () => {
+    // All three: an unpaired marker is most likely to arrive in a translation
+    // and least likely to be noticed, because it is deleted rather than shown.
     const { en } = await import("../src/i18n/en.js");
+    const { de } = await import("../src/i18n/de.js");
+    const { uk } = await import("../src/i18n/uk.js");
     const found: string[] = [];
     const walk = (node: unknown): void => {
       if (typeof node === "string") {
@@ -190,9 +237,9 @@ describe("the sinks render, not just the helper", () => {
       }
       if (node && typeof node === "object") Object.values(node).forEach(walk);
     };
-    walk(en);
+    [en, de, uk].forEach(walk);
 
-    expect(found.length).toBeGreaterThan(5);
+    expect(found.length).toBeGreaterThan(15);
     for (const message of found) {
       // An unpaired backtick is deleted rather than displayed, which
       // `not.toContain` alone cannot see — so assert the parity too.
