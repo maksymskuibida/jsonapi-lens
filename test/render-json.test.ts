@@ -4,6 +4,8 @@ import { buildJsonIndex } from "../src/json-index.js";
 import { buildIndex } from "../src/parse.js";
 import { EAGER_BODY_LIMIT, librarySummary } from "../src/render-document.js";
 import { buildAnnotations, renderJsonGroups, renderJsonLeftover } from "../src/render-json.js";
+import { renderJsonDangling } from "../src/render-document.js";
+import { t } from "../src/i18n/index.js";
 import type { JsonObject, JsonValue } from "../src/types.js";
 
 const doc = (value: unknown): JsonObject => value as JsonObject;
@@ -434,5 +436,41 @@ describe("librarySummary — the LibraryEntry projection, for either Lens kind",
     const index = buildJsonIndex(42 as JsonValue, "plain", { kind: "plain-scalar" });
     const summary = librarySummary({ kind: "json", index });
     expect(summary).toEqual({ resources: 0, types: 0, shape: "plain" });
+  });
+});
+
+describe("the plain-JSON unresolved panel does not talk about JSON:API", () => {
+  /**
+   * Found by a blind QA pass. `{"androidId": 1}` with no `android` collection
+   * produced a chip saying the resource was "not in document" under a note
+   * reading "…were not sent in `data` or `included`. Usually that means the
+   * request was missing an `include` parameter — or the server dropped
+   * something it should have sent."
+   *
+   * None of that exists for a plain-JSON document: no `included`, no `include`
+   * parameter, and no server in the story. The reading itself is kept — a key
+   * ending in `id` whose identity is absent is worth surfacing, and
+   * `json-index.test.ts` pins the cases where it must not link — but the note
+   * now describes the reading rather than blaming a sender.
+   */
+  it("uses its own note, and never the JSON:API one", () => {
+    const index = buildJsonIndex(
+      { androidId: 1, note: "no android collection exists here" } as JsonValue,
+      "plain",
+      { kind: "plain-object" },
+    );
+    const panel = renderJsonDangling(index);
+    expect(panel).not.toBeNull();
+
+    const note = panel!.querySelector(".absent-list__note")!.textContent!;
+    expect(note).toBe(t().dangling.noteJson);
+    for (const jsonApiOnly of ["included", "include parameter", "server"]) {
+      expect(note.toLowerCase()).not.toContain(jsonApiOnly.toLowerCase());
+    }
+  });
+
+  it("the JSON:API panel keeps its own note, which is right there", () => {
+    expect(t().dangling.note).toContain("included");
+    expect(t().dangling.noteJson).not.toBe(t().dangling.note);
   });
 });

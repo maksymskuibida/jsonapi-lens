@@ -427,7 +427,7 @@ export function renderJsonDangling(index: JsonIndex): HTMLElement | null {
   );
 
   const body = el("div", { class: "absent-list__body" });
-  body.append(el("p", { class: "absent-list__note", text: t().dangling.note }));
+  body.append(el("p", { class: "absent-list__note", text: t().dangling.noteJson }));
 
   const list = el("ul", { class: "absent-list__items" });
   for (const target of index.dangling) {

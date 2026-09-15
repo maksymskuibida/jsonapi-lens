@@ -372,6 +372,22 @@ export const en = {
       `${f.n(n)} distinct ${f.plural(n, { one: "pointer resolves", other: "pointers resolve" })} to nothing in this document`,
     total: (n: number) => `${f.n(n)} total`,
     note: "These are referenced by relationships but were not sent in data or included. Usually that means the request was missing an include parameter — or the server dropped something it should have sent.",
+    /**
+      * The plain-JSON panel's own note.
+      *
+      * It used to share the JSON:API one above, which talks about `included`,
+      * an `include` parameter and what the server should have sent — none of
+      * which exists for a plain-JSON document. So a key like `androidId`, read
+      * as a reference to a collection called `android` that the document does
+      * not have, produced "the server dropped something it should have sent"
+      * about a payload with no server in the story at all.
+      *
+      * This says what actually happened: a key was read as a reference, and
+      * nothing with that identity turned up in a matching collection. It is a
+      * reading, and it says so.
+      */
+    noteJson:
+      "Each of these keys reads like a reference — a name ending in `id` — but no collection of that name holds a matching identity. Either the document does not carry the other half, or the key is not a reference at all and this reading is wrong.",
   },
 
   errors: {
