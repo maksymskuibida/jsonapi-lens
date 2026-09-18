@@ -102,7 +102,17 @@ export function renderRail(entries: RailEntry[]): HTMLElement {
           el(
             "span",
             { class: "railrow__bar" },
-            el("span", { class: "railrow__bar-fill", style: `--share:${share}%` }),
+            // The width is set through the CSSOM rather than as a `style`
+            // attribute, which is the one thing in this app that a
+            // `style-src` without `'unsafe-inline'` would block — and it is
+            // the only reason the Content-Security-Policy in `public/_headers`
+            // can stay closed. CSP does not govern property sets made this
+            // way. `share` is a computed percentage, never payload text.
+            (() => {
+              const fill = el("span", { class: "railrow__bar-fill" });
+              fill.style.setProperty("--share", `${share}%`);
+              return fill;
+            })(),
           ),
         ),
       ),

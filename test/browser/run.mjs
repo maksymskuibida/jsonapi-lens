@@ -961,6 +961,102 @@ try {
     );
   }
 
+  /*
+   * Pointer target size, WCAG 2.2 SC 2.5.8: at least 24x24 CSS px. Measured at
+   * 375px, on a real document with resources and nested values expanded, so
+   * the row controls actually exist to measure.
+   *
+   * Every one of these is wide enough and was short — 19px for `.act--mini`,
+   * 22px for the rest, 23.5px for a chip. They sit directly against each other
+   * in a row, so the spacing exception that forgives a small isolated target
+   * does not apply.
+   *
+   * The `- 0.01` matters: a chip measured 23.5px, and rounding before comparing
+   * reported it as a compliant 24. The first version of this check did exactly
+   * that and passed while two kinds of target were still too small.
+   *
+   * The anti-vacuity guard is that all three kinds of control are actually
+   * present: `.act` (the per-resource row buttons), `.act--mini` (the per-value
+   * copies, the shortest kind at 18.5px) and `.chip` (a link to another
+   * resource, the 23.5px kind). An empty sweep passes trivially, and each of
+   * these was a distinct offender, so the check has to prove it saw all three.
+   * Note `.res` is a `<section>`, not a `<details>` — resources render
+   * expanded, so there is nothing to open for them.
+   */
+  try {
+    const targets = await page.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const frame = document.createElement("iframe");
+      frame.style.cssText = "position:fixed;left:-9999px;top:0;width:375px;height:812px;border:0";
+      frame.src = location.origin + "/?lang=en";
+      document.body.appendChild(frame);
+      await new Promise((resolve) => {
+        frame.addEventListener("load", resolve, { once: true });
+        setTimeout(resolve, 5000);
+      });
+      await wait(600);
+      const d = frame.contentDocument;
+      const input = d.getElementById("input");
+      input.value = JSON.stringify({
+        data: [
+          { type: "a", id: "1", attributes: { deep: { inner: 1 } }, relationships: { b: { data: { type: "b", id: "2" } } } },
+          { type: "b", id: "2", attributes: { n: 2 } },
+        ],
+      });
+      input.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
+      d.getElementById("parse").click();
+      await wait(1500);
+      // Nested values are behind a disclosure; the per-value copies only exist
+      // once one is open.
+      [...d.querySelectorAll("details.tree")].forEach((t) => (t.open = true));
+      await wait(700);
+
+      const small = {};
+      let measured = 0;
+      for (const el of d.querySelectorAll("button, a[href], summary, [role=button]")) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        measured++;
+        if (r.height >= 24 - 0.01 && r.width >= 24 - 0.01) continue;
+        const key =
+          el.tagName.toLowerCase() +
+          "." +
+          (el.className || "").toString().trim().split(/\s+/).filter(Boolean).join(".");
+        const prev = small[key];
+        const h = Math.round(r.height * 10) / 10;
+        const w = Math.round(r.width * 10) / 10;
+        small[key] = prev ? { n: prev.n + 1, h: Math.min(prev.h, h), w: Math.min(prev.w, w) } : { n: 1, h, w };
+      }
+      const out = {
+        measured,
+        rows: d.querySelectorAll(".act").length,
+        minis: d.querySelectorAll(".act--mini").length,
+        chips: d.querySelectorAll(".chip").length,
+        offenders: Object.entries(small).map(
+          ([sel, v]) => sel + " " + v.n + "x " + v.w + "x" + v.h,
+        ),
+      };
+      frame.remove();
+      return out;
+    })()`);
+
+    const held =
+      targets.rows > 0 &&
+      targets.minis > 0 &&
+      targets.chips > 0 &&
+      targets.offenders.length === 0;
+    report(
+      held,
+      "375px",
+      "every pointer target is at least 24x24, the WCAG 2.2 minimum",
+      targets.offenders.length
+        ? `${targets.offenders.length} kind(s) too small: ${targets.offenders.join("; ")}`
+        : `${targets.measured} measured — ${targets.rows} row controls, ${targets.minis} per-value copies, ${targets.chips} chips`,
+    );
+  } catch (error) {
+    report(false, "err", "every pointer target is at least 24x24, the WCAG 2.2 minimum", error.message);
+  }
+
   // `total` is whatever `report` was actually called with, rather than a
   // hand-maintained `keys.length + n`: every check added since this line was
   // written was added outside `SCEN`, and each one silently widened the gap

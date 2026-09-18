@@ -111,9 +111,18 @@ async function readShare(id: number, env: Env): Promise<Response> {
   return new Response(object.body, {
     headers: {
       "content-type": "application/octet-stream",
-      // Ciphertext for a given id never changes, but it can be deleted, so let
-      // the browser cache it briefly and revalidate.
-      "cache-control": "private, max-age=60, must-revalidate",
+      // `no-store`, matching every other `/api/` response and the promise
+      // `robots.txt` already makes about this path.
+      //
+      // This used to be `private, max-age=60, must-revalidate`, on the
+      // reasoning that ciphertext for a given id never changes. It does not
+      // change, but it does get *deleted* — and the lazy expiry a few lines
+      // above is what this file calls the thing that "actually guarantees an
+      // expired link stops working on time". A minute of the visitor's own
+      // cache is a minute in which a link that has expired, or been swept,
+      // still opens. The guarantee is worth more than one avoided round trip
+      // on the rare second open of the same link.
+      "cache-control": "no-store",
       "content-length": String(object.size),
     },
   });

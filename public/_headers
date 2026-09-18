@@ -3,10 +3,42 @@
 # `robots.txt` asks crawlers to stay out of the two paths below; these headers
 # tell the ones that arrive anyway not to index what they found. A Disallow is a
 # request, an `X-Robots-Tag` is an instruction to the indexer.
+#
+# ## The Content-Security-Policy
+#
+# This app renders JSON that people paste from production systems, so a policy
+# is worth having even though every render path builds DOM or escapes on the way
+# into markup. It is defence in depth: the thing that stops the *next* injection
+# bug from becoming an exfiltration.
+#
+# It can be this tight because the app loads nothing from anywhere else. Every
+# font is self-hosted under `/assets`, there is no analytics, no CDN and no
+# third-party anything.
+#
+#   default-src 'none'    deny by default; every allowed kind is listed below
+#   script-src 'self'     one module from /assets. The JSON-LD block in
+#                         index.html is a data block, not executable script,
+#                         so it is not subject to this
+#   style-src 'self'      one stylesheet. No 'unsafe-inline': the single inline
+#                         style attribute this document used to carry (the
+#                         noscript fallback) now lives in styles.css, precisely
+#                         so this can stay closed. `clipboard.ts` sets `.style`
+#                         through the CSSOM, which CSP does not govern
+#   font-src 'self'       the self-hosted woff2 faces
+#   img-src 'self' data:  icons and the OG image; `data:` for inline SVG
+#   connect-src 'self'    /api/shares, the only request the client ever makes
+#   base-uri 'none'       nothing may retarget relative URLs
+#   form-action 'none'    there is no form that submits anywhere
+#   frame-ancestors 'none'  nobody frames a tool that renders your payloads
+#
+# `X-Frame-Options: DENY` alongside `frame-ancestors` for anything too old to
+# honour the latter. Where they disagree, `frame-ancestors` wins.
 
 /*
   Referrer-Policy: strict-origin-when-cross-origin
   X-Content-Type-Options: nosniff
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Frame-Options: DENY
 
 # A share link carries its decryption key in the URL. Nothing about it should
 # reach an index, and nothing should follow it further.
