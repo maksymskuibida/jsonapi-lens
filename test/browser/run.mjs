@@ -99,41 +99,67 @@ async function connect(port) {
       socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
 
-  const { targetId } = await send("Target.createTarget", { url: "about:blank" });
-  const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
-  await send("Page.enable", {}, sessionId);
-  await send("Runtime.enable", {}, sessionId);
+  /**
+   * One page target, with its own viewport.
+   *
+   * A separate target rather than a same-origin iframe, which is what the
+   * width-specific checks below used to use. A deployment sends
+   * `frame-ancestors 'none'` and `X-Frame-Options: DENY` — correctly; it is a
+   * tool that renders other people's payloads — so an iframe pointed at one
+   * loads nothing at all, and `contentDocument` comes back `null`. That broke
+   * every one of those checks against `--url https://…` while leaving them
+   * green against a local `vite` dev server, which serves no `_headers` at
+   * all. A target has its own viewport for the same reason an iframe did, and
+   * no opinion about who is allowed to frame it.
+   */
+  const attachPage = async (width, height) => {
+    const { targetId } = await send("Target.createTarget", { url: "about:blank" });
+    const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+    await send("Page.enable", {}, sessionId);
+    await send("Runtime.enable", {}, sessionId);
 
-  // `--window-size` is not enough: headless Chrome refuses to make a window
-  // narrower than about 500px, so asking for a phone width silently gave you 500
-  // and the narrow-layout scenarios were not testing a narrow layout at all.
-  // Overriding the metrics sets the viewport itself, which has no such floor.
-  await send(
-    "Emulation.setDeviceMetricsOverride",
-    // `mobile: true` would also apply a page scale derived from the viewport meta
-    // tag, so `innerWidth` would stop matching the width asked for. What these
-    // scenarios need is a narrow layout, not touch emulation.
-    { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false },
-    sessionId,
-  );
-
-  /** Evaluate in the page and hand back the value, awaiting any promise. */
-  const evaluate = async (expression) => {
-    const result = await send(
-      "Runtime.evaluate",
-      { expression, awaitPromise: true, returnByValue: true },
+    // `--window-size` is not enough: headless Chrome refuses to make a window
+    // narrower than about 500px, so asking for a phone width silently gave you
+    // 500 and the narrow-layout scenarios were not testing a narrow layout at
+    // all. Overriding the metrics sets the viewport itself, which has no such
+    // floor.
+    await send(
+      "Emulation.setDeviceMetricsOverride",
+      // `mobile: true` would also apply a page scale derived from the viewport
+      // meta tag, so `innerWidth` would stop matching the width asked for. What
+      // these scenarios need is a narrow layout, not touch emulation.
+      { width, height, deviceScaleFactor: 1, mobile: false },
       sessionId,
     );
-    if (result.exceptionDetails) {
-      const thrown = result.exceptionDetails.exception;
-      throw new Error(thrown?.description ?? thrown?.value ?? "page threw");
-    }
-    return result.result.value;
+
+    /** Evaluate in the page and hand back the value, awaiting any promise. */
+    const evaluate = async (expression) => {
+      const result = await send(
+        "Runtime.evaluate",
+        { expression, awaitPromise: true, returnByValue: true },
+        sessionId,
+      );
+      if (result.exceptionDetails) {
+        const thrown = result.exceptionDetails.exception;
+        throw new Error(thrown?.description ?? thrown?.value ?? "page threw");
+      }
+      return result.result.value;
+    };
+
+    return {
+      evaluate,
+      navigate: (url) => send("Page.navigate", { url }, sessionId),
+      /** Close this target. The socket belongs to the connection, not to a page. */
+      dispose: () => send("Target.closeTarget", { targetId }),
+    };
   };
 
+  const main = await attachPage(WIDTH, HEIGHT);
+
   return {
-    evaluate,
-    navigate: (url) => send("Page.navigate", { url }, sessionId),
+    ...main,
+    /** A second page at its own size, for a check that measures a layout. */
+    openSized: attachPage,
     close: () => socket.close(),
   };
 }
@@ -720,24 +746,17 @@ try {
    * disturbing the metrics override the scenarios above depend on.
    */
   try {
-    const narrow = await page.evaluate(`(async () => {
-      const widths = {};
-      for (const lang of ["en", "de", "uk"]) {
-        const frame = document.createElement("iframe");
-        frame.style.cssText = "position:fixed;left:-9999px;top:0;width:375px;height:812px;border:0";
-        frame.src = location.origin + "/?lang=" + lang;
-        document.body.appendChild(frame);
-        await new Promise((resolve) => {
-          frame.addEventListener("load", resolve, { once: true });
-          setTimeout(resolve, 4000);
-        });
-        await new Promise((r) => setTimeout(r, 600));
-        const d = frame.contentDocument;
-        const input = d.getElementById("input");
-        input.value = '{"data":{"type":"a","id":"1"}}';
-        input.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
-        d.getElementById("parse").click();
-        await new Promise((r) => setTimeout(r, 1200));
+    const narrow = {};
+    const topbarPage = await page.openSized(375, 812);
+    for (const lang of ["en", "de", "uk"]) {
+      await topbarPage.navigate(`${ORIGIN}/?lang=${lang}`);
+      // `readFlow`, not a single click: the paste view is static markup, so the
+      // button exists long before the module listening to it has booted.
+      await topbarPage.evaluate(readFlow('{"data":{"type":"a","id":"1"}}'));
+      narrow[lang] = await topbarPage.evaluate(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        await wait(400);
+        const d = document;
         const root = d.documentElement;
         const buttons = [...d.querySelectorAll(".topbar button")];
         const reachable = buttons.every(
@@ -747,17 +766,16 @@ try {
         // document is open. A hidden element measures all zeros, so without
         // this the check would quietly stop measuring what overflowed.
         const newDoc = d.getElementById("new-doc");
-        widths[lang] = {
+        return {
           vw: root.clientWidth,
           sw: root.scrollWidth,
           reachable,
           buttons: buttons.length,
           newDocShown: !!newDoc && newDoc.offsetParent !== null,
         };
-        frame.remove();
-      }
-      return widths;
-    })()`);
+      })()`);
+    }
+    await topbarPage.dispose();
 
     const fits = Object.values(narrow).every(
       (w) => w.sw <= w.vw && w.reachable && w.newDocShown && w.buttons >= 4,
@@ -797,28 +815,16 @@ try {
    * drives the paste flow and writes to the shared `documents` store.
    */
   try {
-    const deep = await page.evaluate(`(async () => {
+    const wide = await page.openSized(1024, 900);
+    await wide.navigate(`${ORIGIN}/?lang=en`);
+    // `readFlow` handles both the boot race and the shape offer — this payload
+    // is not JSON:API, so the app asks rather than reading straight through,
+    // and the plain-JSON reading is the shape that nests.
+    await wide.evaluate(readFlow('{"a":{"b":{"c":{"d":{"e":{"f":{"g":"deep value"}}}}}},"z":1}'));
+    const deep = await wide.evaluate(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const frame = document.createElement("iframe");
-      frame.style.cssText = "position:fixed;left:-9999px;top:0;width:1024px;height:900px;border:0";
-      frame.src = location.origin + "/?lang=en";
-      document.body.appendChild(frame);
-      await new Promise((resolve) => {
-        frame.addEventListener("load", resolve, { once: true });
-        setTimeout(resolve, 5000);
-      });
-      await wait(600);
-      const d = frame.contentDocument;
-      const input = d.getElementById("input");
-      input.value = '{"a":{"b":{"c":{"d":{"e":{"f":{"g":"deep value"}}}}}},"z":1}';
-      input.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
-      d.getElementById("parse").click();
-      await wait(900);
-      // Not JSON:API, so the app offers a choice rather than reading straight
-      // through. Take the plain-JSON reading — that is the shape that nests.
-      const plain = d.getElementById("shape-offer-plain");
-      if (plain) plain.click();
-      await wait(1200);
+      const d = document;
+      await wait(400);
       for (let i = 0; i < 12; i++) {
         const shut = [...d.querySelectorAll("details.tree:not([open])")];
         if (!shut.length) break;
@@ -837,9 +843,9 @@ try {
         values: values.length,
         narrowest: values.length ? Math.round(Math.min(...values)) : -1,
       };
-      frame.remove();
       return out;
     })()`);
+    await wide.dispose();
 
     const held = deep.depth > 0 && deep.sw <= deep.vw && deep.narrowest > 0;
     report(
@@ -875,26 +881,14 @@ try {
    * it writes to the shared `documents` store.
    */
   try {
-    const band = await page.evaluate(`(async () => {
+    const band1 = await page.openSized(1200, 900);
+    await band1.navigate(`${ORIGIN}/?lang=en`);
+    // JSON:API, so the render path is `renderDocumentView`.
+    await band1.evaluate(readFlow('{"data":{"type":"a","id":"1","attributes":{"n":1}}}'));
+    const bandFirst = await band1.evaluate(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const frame = document.createElement("iframe");
-      frame.style.cssText = "position:fixed;left:-9999px;top:0;width:1200px;height:900px;border:0";
-      frame.src = location.origin + "/?lang=en";
-      document.body.appendChild(frame);
-      await new Promise((resolve) => {
-        frame.addEventListener("load", resolve, { once: true });
-        setTimeout(resolve, 5000);
-      });
-      await wait(600);
-      const d = frame.contentDocument;
-      const w = frame.contentWindow;
-
-      // Read a JSON:API document, so the render path is renderDocumentView.
-      const input = d.getElementById("input");
-      input.value = '{"data":{"type":"a","id":"1","attributes":{"n":1}}}';
-      input.dispatchEvent(new w.Event("input", { bubbles: true }));
-      d.getElementById("parse").click();
-      await wait(1200);
+      const d = document;
+      await wait(400);
 
       // Attach an exchange through the real form, then let it persist.
       d.getElementById("edit-request")?.click();
@@ -902,31 +896,28 @@ try {
       const url = d.querySelector(".xform__url-input");
       if (!url) return { reason: "no request form" };
       url.value = "https://api.example.com/a";
-      url.dispatchEvent(new w.Event("input", { bubbles: true }));
+      url.dispatchEvent(new Event("input", { bubbles: true }));
       const save = [...d.querySelectorAll(".modal__actions button")].pop();
       save.click();
       await wait(1200);
 
-      const attachedNow = !!d.getElementById("exchange-band");
+      return { attachedNow: !!d.getElementById("exchange-band") };
+    })()`);
 
-      // Reload. The stored document carries the exchange, and boot parses it
-      // without rendering — so the click below is what builds the view.
-      frame.src = location.origin + "/?lang=en";
-      await new Promise((resolve) => {
-        frame.addEventListener("load", resolve, { once: true });
-        setTimeout(resolve, 5000);
-      });
-      await wait(900);
-      const d2 = frame.contentDocument;
-
+    // Reload in the same target. The stored document carries the exchange, and
+    // boot parses it without rendering — so the click below is what builds the
+    // view, through `renderDocumentView`.
+    await band1.navigate(`${ORIGIN}/?lang=en`);
+    const bandAfter = await band1.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 40 && !document.querySelector("#resume button"); i++) await wait(250);
+      const d2 = document;
       const resume = d2.querySelector("#resume button");
-      if (!resume) return { attachedNow, reason: "no resume button" };
+      if (!resume) return { reason: "no resume button" };
       const builtBefore = d2.getElementById("doc").childElementCount;
       resume.click();
       await wait(1500);
-
-      const out = {
-        attachedNow,
+      return {
         builtBefore,
         built: d2.getElementById("doc").childElementCount,
         bandAfterResume: !!d2.getElementById("exchange-band"),
@@ -934,9 +925,9 @@ try {
         // means "not rendered" rather than "nothing to render".
         editLabel: (d2.querySelector(".overview__actions")?.textContent || "").trim().slice(0, 80),
       };
-      frame.remove();
-      return out;
     })()`);
+    await band1.dispose();
+    const band = { ...bandFirst, ...bandAfter };
 
     const held =
       !band.reason &&
@@ -984,28 +975,27 @@ try {
    * expanded, so there is nothing to open for them.
    */
   try {
-    const targets = await page.evaluate(`(async () => {
+    const phone = await page.openSized(375, 812);
+    await phone.navigate(`${ORIGIN}/?lang=en`);
+    await phone.evaluate(
+      readFlow(
+        JSON.stringify({
+          data: [
+            {
+              type: "a",
+              id: "1",
+              attributes: { deep: { inner: 1 } },
+              relationships: { b: { data: { type: "b", id: "2" } } },
+            },
+            { type: "b", id: "2", attributes: { n: 2 } },
+          ],
+        }),
+      ),
+    );
+    const targets = await phone.evaluate(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const frame = document.createElement("iframe");
-      frame.style.cssText = "position:fixed;left:-9999px;top:0;width:375px;height:812px;border:0";
-      frame.src = location.origin + "/?lang=en";
-      document.body.appendChild(frame);
-      await new Promise((resolve) => {
-        frame.addEventListener("load", resolve, { once: true });
-        setTimeout(resolve, 5000);
-      });
-      await wait(600);
-      const d = frame.contentDocument;
-      const input = d.getElementById("input");
-      input.value = JSON.stringify({
-        data: [
-          { type: "a", id: "1", attributes: { deep: { inner: 1 } }, relationships: { b: { data: { type: "b", id: "2" } } } },
-          { type: "b", id: "2", attributes: { n: 2 } },
-        ],
-      });
-      input.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
-      d.getElementById("parse").click();
-      await wait(1500);
+      const d = document;
+      await wait(400);
       // Nested values are behind a disclosure; the per-value copies only exist
       // once one is open.
       [...d.querySelectorAll("details.tree")].forEach((t) => (t.open = true));
@@ -1036,9 +1026,9 @@ try {
           ([sel, v]) => sel + " " + v.n + "x " + v.w + "x" + v.h,
         ),
       };
-      frame.remove();
       return out;
     })()`);
+    await phone.dispose();
 
     const held =
       targets.rows > 0 &&
