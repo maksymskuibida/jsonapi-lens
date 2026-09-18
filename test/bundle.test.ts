@@ -24,6 +24,7 @@ import {
   ShareError,
 } from "../src/crypto.js";
 import type { BundleEntry, BundlePayload, SharePayload } from "../src/crypto.js";
+import { headerSet } from "../src/headers.js";
 import { listLibrary, renameInLibrary, saveToLibrary } from "../src/store.js";
 import type { LibraryEntry } from "../src/store.js";
 
@@ -114,6 +115,68 @@ describe("mintShareEnvelope", () => {
     const opened = await openSealed(blob, secret);
     expect(isBundlePayload(opened)).toBe(true);
     if (isBundlePayload(opened)) expect(opened.documents).toEqual(documents);
+  });
+
+  /*
+   * Driven through the real chain, deliberately: `mintShareEnvelope` is handed
+   * a **raw** exchange, the way `panels.ts` hands it one straight off a
+   * `LibraryEntry`, and the assertion is on what comes back out of the sealed
+   * blob.
+   *
+   * `test/exchange-redaction.test.ts` calls `redactExchange` itself and then
+   * seals the result it just redacted, so it proves that function works while
+   * saying nothing about whether anything calls it. That is exactly the gap
+   * this pair closes: with the redaction removed from `mintShareEnvelope`,
+   * that file stays green and these two go red.
+   */
+  it("redacts a secret an entry carries, on the single-document path", async () => {
+    const token = "s3cr3t-token-that-must-not-survive";
+    const secret = generateSecret();
+    const blob = await mintShareEnvelope(
+      [
+        {
+          label: "a.json",
+          text: "{}",
+          exchange: {
+            request: {
+              headers: headerSet([{ name: "Authorization", value: `Bearer ${token}` }]),
+              cookies: { entries: [{ name: "session", value: token }] },
+            },
+          },
+        },
+      ],
+      secret,
+    );
+
+    const opened = await openSealed(blob, secret);
+    expect(isBundlePayload(opened)).toBe(false);
+    expect(JSON.stringify(opened)).not.toContain(token);
+    expect(JSON.stringify(opened)).toContain("[REDACTED]");
+  });
+
+  it("redacts a secret every entry carries, on the bundle path", async () => {
+    const token = "s3cr3t-token-that-must-not-survive";
+    const secret = generateSecret();
+    const withSecret = (label: string): BundleEntry => ({
+      label,
+      text: "{}",
+      exchange: {
+        request: { headers: headerSet([{ name: "Authorization", value: `Bearer ${token}` }]) },
+      },
+    });
+
+    const blob = await mintShareEnvelope([withSecret("a.json"), withSecret("b.json")], secret);
+
+    const opened = await openSealed(blob, secret);
+    expect(isBundlePayload(opened)).toBe(true);
+    expect(JSON.stringify(opened)).not.toContain(token);
+    // Both entries, not just the first — the bundle path maps over the list.
+    if (isBundlePayload(opened)) {
+      expect(opened.documents).toHaveLength(2);
+      for (const entry of opened.documents) {
+        expect(JSON.stringify(entry.exchange)).toContain("[REDACTED]");
+      }
+    }
   });
 
   it("refuses a selection whose sealed size exceeds the cap, naming the largest documents", async () => {

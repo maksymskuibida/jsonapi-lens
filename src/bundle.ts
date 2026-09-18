@@ -43,6 +43,7 @@ import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
 import type { BundleEntry, BundlePayload } from "./crypto.js";
 import { seal, sealBundle } from "./crypto.js";
+import { redactExchange } from "./secrets.js";
 import { getFromLibrary, listLibrary, saveToLibrary } from "./store.js";
 import type { LibraryEntry } from "./store.js";
 
@@ -56,23 +57,38 @@ export async function mintShareEnvelope(
   documents: BundleEntry[],
   secret: string,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  if (documents.length === 1) {
-    const [only] = documents;
-    // `exchange` rides into the sealed blob and up to /api/shares unredacted
-    // (PR #5 review, S5). Harmless today — nothing in this codebase writes an
-    // `exchange` onto a `LibraryEntry` yet, so it is always absent here — but
-    // this is the line that goes live the moment T2 starts populating it.
-    // Redaction has to run *before* this call once that happens; it does not
-    // exist anywhere in this codebase yet, which is exactly why it cannot
-    // happen here. See docs/DECISIONS.md D5.
+  // The warning this replaces (PR #5 review, S5; docs/DECISIONS.md D5) said an
+  // `exchange` would ride into the sealed blob and up to /api/shares
+  // unredacted, and that it was harmless only for as long as nothing wrote one
+  // onto a `LibraryEntry`. T2b is what started writing one, so redaction runs
+  // here now.
+  //
+  // Here rather than at the call sites because this is the one function every
+  // share path already funnels through — `openShareModal`, the bundle modal,
+  // and anything added later — and a secret that escapes because a *new* caller
+  // forgot to redact is exactly the failure this placement rules out. It costs
+  // a pass over an exchange that is at most a few dozen headers.
+  const sealed = documents.map(redactEntryExchange);
+
+  if (sealed.length === 1) {
+    const [only] = sealed;
     return seal(
       { text: only!.text, label: only!.label, savedAt: Date.now(), exchange: only!.exchange },
       secret,
     );
   }
-  // Same warning as above, for every entry in a bundle: each carries its own
-  // `exchange` (BundleEntry, unredacted) into `sealBundle` untouched.
-  return sealBundle({ kind: "bundle", savedAt: Date.now(), documents }, secret);
+  return sealBundle({ kind: "bundle", savedAt: Date.now(), documents: sealed }, secret);
+}
+
+/**
+ * One entry with its exchange's secrets masked, or the entry untouched when it
+ * carries no exchange at all. The count `redactExchange` also returns is
+ * deliberately dropped: what the sharer is told is a UI question, and every
+ * caller here is already inside a modal of its own.
+ */
+function redactEntryExchange(entry: BundleEntry): BundleEntry {
+  if (!entry.exchange || Object.keys(entry.exchange).length === 0) return entry;
+  return { ...entry, exchange: redactExchange(entry.exchange).exchange };
 }
 
 /**
