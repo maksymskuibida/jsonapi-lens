@@ -745,9 +745,12 @@ try {
    * Run in a same-origin iframe sized to a phone, so the width is real without
    * disturbing the metrics override the scenarios above depend on.
    */
+  /* Declared out here and disposed in `finally`: a check that throws must not
+     leave a renderer process alive for the rest of the run. */
+  let topbarPage = null;
   try {
     const narrow = {};
-    const topbarPage = await page.openSized(375, 812);
+    topbarPage = await page.openSized(375, 812);
     for (const lang of ["en", "de", "uk"]) {
       await topbarPage.navigate(`${ORIGIN}/?lang=${lang}`);
       // `readFlow`, not a single click: the paste view is static markup, so the
@@ -775,7 +778,6 @@ try {
         };
       })()`);
     }
-    await topbarPage.dispose();
 
     const fits = Object.values(narrow).every(
       (w) => w.sw <= w.vw && w.reachable && w.newDocShown && w.buttons >= 4,
@@ -793,6 +795,8 @@ try {
     );
   } catch (error) {
     report(false, "err", "the topbar fits a phone in every language, with every control reachable", error.message);
+  } finally {
+    await topbarPage?.dispose();
   }
 
   /*
@@ -814,8 +818,11 @@ try {
    * Also last in the file, for the same reason as the check above it: this
    * drives the paste flow and writes to the shared `documents` store.
    */
+  /* Declared out here and disposed in `finally`: a check that throws must not
+     leave a renderer process alive for the rest of the run. */
+  let wide = null;
   try {
-    const wide = await page.openSized(1024, 900);
+    wide = await page.openSized(1024, 900);
     await wide.navigate(`${ORIGIN}/?lang=en`);
     // `readFlow` handles both the boot race and the shape offer — this payload
     // is not JSON:API, so the app asks rather than reading straight through,
@@ -845,7 +852,6 @@ try {
       };
       return out;
     })()`);
-    await wide.dispose();
 
     const held = deep.depth > 0 && deep.sw <= deep.vw && deep.narrowest > 0;
     report(
@@ -861,6 +867,8 @@ try {
       "deeply nested values keep their width without the page scrolling sideways",
       error.message,
     );
+  } finally {
+    await wide?.dispose();
   }
 
   /*
@@ -880,8 +888,11 @@ try {
    * Last in the file, with the other paste-flow checks, for the same reason:
    * it writes to the shared `documents` store.
    */
+  /* Declared out here and disposed in `finally`: a check that throws must not
+     leave a renderer process alive for the rest of the run. */
+  let band1 = null;
   try {
-    const band1 = await page.openSized(1200, 900);
+    band1 = await page.openSized(1200, 900);
     await band1.navigate(`${ORIGIN}/?lang=en`);
     // JSON:API, so the render path is `renderDocumentView`.
     await band1.evaluate(readFlow('{"data":{"type":"a","id":"1","attributes":{"n":1}}}'));
@@ -926,7 +937,6 @@ try {
         editLabel: (d2.querySelector(".overview__actions")?.textContent || "").trim().slice(0, 80),
       };
     })()`);
-    await band1.dispose();
     const band = { ...bandFirst, ...bandAfter };
 
     const held =
@@ -950,6 +960,8 @@ try {
       "a JSON:API document resumed with an exchange already attached still renders the band",
       error.message,
     );
+  } finally {
+    await band1?.dispose();
   }
 
   /*
@@ -974,8 +986,11 @@ try {
    * Note `.res` is a `<section>`, not a `<details>` — resources render
    * expanded, so there is nothing to open for them.
    */
+  /* Declared out here and disposed in `finally`: a check that throws must not
+     leave a renderer process alive for the rest of the run. */
+  let phone = null;
   try {
-    const phone = await page.openSized(375, 812);
+    phone = await page.openSized(375, 812);
     await phone.navigate(`${ORIGIN}/?lang=en`);
     await phone.evaluate(
       readFlow(
@@ -1028,7 +1043,6 @@ try {
       };
       return out;
     })()`);
-    await phone.dispose();
 
     const held =
       targets.rows > 0 &&
@@ -1045,6 +1059,8 @@ try {
     );
   } catch (error) {
     report(false, "err", "every pointer target is at least 24x24, the WCAG 2.2 minimum", error.message);
+  } finally {
+    await phone?.dispose();
   }
 
   // `total` is whatever `report` was actually called with, rather than a
