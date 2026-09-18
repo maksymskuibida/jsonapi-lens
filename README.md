@@ -69,6 +69,15 @@ called — so it matches the rest of the UI. `/imprint`, `/legal`, `/datenschutz
   replace every other UTF-16 code unit with `_` + four hex digits — which is injective, reversible,
   emits only `[A-Za-z0-9_]`, and always starts with a letter. `__` joins the two segments and
   cannot occur inside either. Covered by tests, including emoji and a type containing the joiner.
+- **A second document on the page needs its own namespace, not just unique encoding.** A request
+  body is often itself a JSON:API document, and it will frequently want the exact same `type`/`id`
+  as the response — updating the resource it just fetched is the common case, not an edge one. Every
+  id [`ident.ts`](src/ident.ts) mints is `<scope><body>`, where the scope is a two-character prefix
+  (`r_` a response resource, `g_` a response type group, `n_` a plain-JSON response node, `q_` a
+  request field, `b_` a resource in a request body, `d_` a plain-JSON request-body node) whose first
+  letter is unique across every scope — so two ids from different scopes differ before their bodies
+  are even compared, proved over a hostile corpus rather than merely asserted. See
+  [DECISIONS.md](docs/DECISIONS.md) D1.
 - **Reload into a hash is a race.** On load the sections do not exist until the payload has been
   read back from IndexedDB, so the browser's initial scroll-to-fragment hits nothing. The app
   rebuilds first, then resolves `location.hash` itself. (`:target` needs no help — it starts
@@ -208,6 +217,31 @@ visitor.
 - Back and Forward return you to the exact point you left — the same content in the same place on
   screen, not the same pixel offset, which is a different and much weaker promise on a page whose
   rows are measured lazily. Which rows were expanded is restored with it.
+
+**Attaching the request** — optional, and never required
+- **Attach request** (next to Share) opens a form for the request that produced the response —
+  method, URL, query parameters, headers, cookies and body — and the response's own status, headers,
+  `Set-Cookie` entries, elapsed time and body. Every field is independently fillable; leave
+  everything blank and the page is byte-for-byte today's document view. Come back to the form later
+  and it picks up exactly where you left it.
+- The URL field and the query-parameter table stay in sync both ways: type a query string into the
+  URL and the table fills in; edit a row and the URL rewrites itself.
+- A band appears above the overview, collapsed to one line (method, URL, status, counts) until you
+  open it. Open, it is a three-mode review — **Response** · **Request** · **Both** — with the
+  parameter table naming which encoding convention it read a value with (`a=1,2` as a JSON:API list,
+  `a[]=1&a[]=2` as a bracket list, ...) and offering the alternative reading. A request body that is
+  itself a JSON:API document gets the same full resource treatment a pasted document does, anchored
+  under its own scope so it never collides with the response even when both share a `type`/`id`.
+- `Authorization`, cookies, and anything shaped like a credential (a JWT, a long hex/base64 run, a
+  `sk_`/`pk_`-prefixed key) are masked on arrival; click to reveal, one at a time. A `Bearer` JWT is
+  decoded locally — header and payload, never the signature, never a network call — with `exp` shown
+  relative to the response's own `Date` header when there is one.
+- **Copy** and **Download** redact by default and say how many values they found and hid — a count of
+  what was found, never a claim that nothing else remains. The pass covers header and cookie values
+  shaped like credentials; it does not scan the body or the URL, and says so next to the buttons.
+  **Share does not yet carry the request/response into the encrypted link** — sharing a document
+  behaves exactly as it always has, and simply does not include the attached exchange either; see
+  [STATUS.md](docs/STATUS.md) for the small follow-up that closes this.
 
 **Keyboard** — `?` lists them all. `/` or `g` finds a resource by type or id, `s` saves, `r` raw,
 `e` exports, `l` opens saved documents, `Shift+Esc` leaves the document, `Esc` closes a dialog.

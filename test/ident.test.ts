@@ -14,6 +14,13 @@ import {
   nodeHref,
   parseAnchorId,
   parseDomId,
+  parseRequestResourceId,
+  requestFieldDomId,
+  requestFieldHref,
+  requestNodeDomId,
+  requestNodeHref,
+  requestResourceDomId,
+  requestResourceHref,
   resourceHref,
   resourceSelector,
   scopeTable,
@@ -57,6 +64,17 @@ const HOSTILE = [
   "--",
   "__",
   "_0000",
+  // Prototype-pollution-shaped values. Every scope-minting function here
+  // treats a segment as opaque text — never as an object key on a plain
+  // object — but T2's request feature is the first place a hostile value
+  // this shaped is actually rendered (a header name, a param name, a
+  // request-body `type`), and a hostile corpus that only tries markup
+  // misses exactly this class. See `test/render-request.test.ts` for where
+  // these are exercised against actual rendering, not just id-minting.
+  "__proto__",
+  "constructor",
+  "prototype",
+  "constructor.prototype",
 ];
 
 describe("segment encoding", () => {
@@ -360,6 +378,49 @@ describe("D1 — the anchor scope table", () => {
       expect(groupDomId(text)).not.toBe(domId(text, ""));
       expect(nodeDomId(text)).not.toBe(domId(text, ""));
       expect(groupDomId(text)).not.toBe(nodeDomId(text));
+    });
+  });
+
+  /** T2b's own wrapper functions — the `q_`/`b_`/`d_` sibling of the block above. */
+  describe("requestFieldDomId / requestResourceDomId / requestNodeDomId and their hrefs", () => {
+    it("requestFieldDomId matches the q_ scope directly, keyed by kind and name", () => {
+      for (const kind of ["reqHeader", "resHeader", "reqCookie", "resCookie", "reqParam"]) {
+        for (const name of HOSTILE) {
+          expect(requestFieldDomId(kind, name)).toBe(mintAnchorId("requestField", [kind, name]));
+          expect(requestFieldHref(kind, name)).toBe("#" + requestFieldDomId(kind, name));
+        }
+      }
+    });
+
+    it("requestResourceDomId matches the b_ scope directly, and parses back", () => {
+      for (const type of HOSTILE) {
+        for (const id of HOSTILE.slice(0, 8)) {
+          expect(requestResourceDomId(type, id)).toBe(mintAnchorId("requestResource", [type, id]));
+          expect(requestResourceHref(type, id)).toBe("#" + requestResourceDomId(type, id));
+          expect(parseRequestResourceId(requestResourceDomId(type, id))).toEqual({ type, id });
+        }
+      }
+    });
+
+    it("parseRequestResourceId returns null for anything it did not produce", () => {
+      expect(parseRequestResourceId("overview")).toBeNull();
+      expect(parseRequestResourceId(domId("articles", "1"))).toBeNull(); // a real r_ id
+      expect(parseRequestResourceId(mintAnchorId("group", ["articles"]))).toBeNull();
+    });
+
+    it("requestNodeDomId matches the d_ scope directly, keyed by the whole pointer as one segment", () => {
+      for (const pointer of ["/data/users/0", "/a~1b/0", ""]) {
+        expect(requestNodeDomId(pointer)).toBe(mintAnchorId("requestNode", [pointer]));
+        expect(requestNodeHref(pointer)).toBe("#" + requestNodeDomId(pointer));
+      }
+    });
+
+    it("never collides with the response's r_/g_/n_ ids for the same type/id/pointer text", () => {
+      const text = "articles/1";
+      expect(requestResourceDomId(text, "")).not.toBe(domId(text, ""));
+      expect(requestResourceDomId(text, "")).not.toBe(groupDomId(text));
+      expect(requestNodeDomId(text)).not.toBe(nodeDomId(text));
+      expect(requestFieldDomId("reqHeader", text)).not.toBe(domId(text, ""));
     });
   });
 });

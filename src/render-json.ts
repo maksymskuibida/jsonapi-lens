@@ -70,13 +70,29 @@ function topLevelMemberIndex(
   return null;
 }
 
+/** Which scope's ids `buildAnnotations` mints — see that function's own comment. */
+export interface JsonAnchorScope {
+  domId: (pointer: string) => string;
+  href: (pointer: string) => string;
+}
+
+const RESPONSE_ANCHOR_SCOPE: JsonAnchorScope = { domId: nodeDomId, href: nodeHref };
+
 /**
  * Turn a `JsonIndex` into the lookups `render-value.ts` needs, without that
  * module ever having to know what a collection or an identity is. Built once
  * per document and shared between `renderJsonGroups` and `renderJsonLeftover`
  * so a pointer resolves to the same anchor id wherever it is asked about.
+ *
+ * `scope` defaults to the response's own `n_` ids (`nodeDomId`/`nodeHref`), so
+ * every pre-existing caller — `main.ts`'s response rendering — is unaffected.
+ * T2b's request-body rendering passes `{ domId: requestNodeDomId, href:
+ * requestNodeHref }` instead, so a plain-JSON request body anchors under `d_`
+ * and cannot collide with the response's own anchors even when both carry the
+ * exact same JSON Pointer — see DECISIONS.md D1.
  */
-export function buildAnnotations(index: JsonIndex): TreeAnnotations {
+export function buildAnnotations(index: JsonIndex, scope: JsonAnchorScope = RESPONSE_ANCHOR_SCOPE): TreeAnnotations {
+  const { domId: mintDomId, href: mintHref } = scope;
   const topLevelByPointer = new Map(
     index.collections.filter((c) => c.topLevel).map((c) => [c.pointer, c] as const),
   );
@@ -109,11 +125,11 @@ export function buildAnnotations(index: JsonIndex): TreeAnnotations {
       if (collection) {
         return {
           kind: "collapsed",
-          href: nodeHref(pointer),
+          href: mintHref(pointer),
           text: t().identity.seeCollection(collectionLabel(collection), collection.memberPointers.length),
         };
       }
-      if (anchorPointers.has(pointer)) return { kind: "anchor", id: nodeDomId(pointer) };
+      if (anchorPointers.has(pointer)) return { kind: "anchor", id: mintDomId(pointer) };
       return null;
     },
     scalarAt(pointer: string): ScalarAnnotation | null {
@@ -122,7 +138,7 @@ export function buildAnnotations(index: JsonIndex): TreeAnnotations {
       switch (reference.resolution) {
         case "resolved":
           return targetIsRendered(reference.targetPointer)
-            ? { kind: "resolved", href: nodeHref(reference.targetPointer) }
+            ? { kind: "resolved", href: mintHref(reference.targetPointer) }
             : { kind: "unrendered" };
         case "ambiguous":
           return { kind: "ambiguous", count: reference.candidates };
