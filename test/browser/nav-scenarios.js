@@ -367,11 +367,15 @@
        `bundleView` flag, so Back to that same /view entry could no longer
        tell "a bundle was here" from "nothing was" and fell through to the
        paste view a second time instead of restoring the import screen.
-       Runs last (highest scenario number) and restores #doc/`current`
-       itself afterward, because this harness's own post-scenario reload
-       probe (in run.mjs) needs the amtrak document showing again — this is
-       the one scenario that replaces the document view with a different one
-       entirely, so it is the one responsible for putting it back.
+       Restores #doc/`current` itself afterward, in a `finally`, because this
+       harness's own post-scenario reload probe (in run.mjs) needs the amtrak
+       document showing again — this is the one scenario that replaces the
+       document view with a different one entirely, so it is the one
+       responsible for putting it back. It used to be last by number as well;
+       s29/s30 now sort after it, which is safe precisely because that restore
+       is unconditional rather than because of where this sits in the order.
+       Keep it that way: a version of this that only restored on the happy
+       path would strand every scenario after it.
        No real `/api/shares` exists under a plain `vite dev` origin (see
        test/browser/README.md), so this patches `window.fetch` for exactly
        that path, in-page, for the scenario's own lifetime only. */

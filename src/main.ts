@@ -47,6 +47,7 @@ import {
   REQ_OBJECT_ACTION_ATTR,
   REQ_ROOT_ATTR,
   REVEAL_ATTR,
+  hasExchangeContent,
   parseReqResourceMarker,
   renderExchangeBand,
   requestBodyJsonApiIndex,
@@ -1208,7 +1209,10 @@ function documentActions(): HTMLElement {
 
   const m = t().overview;
   const rm = t().request.band;
-  const attached = current ? Object.keys(current.exchange).length > 0 : false;
+  // The same test the band's own visibility uses, deliberately: an exchange
+  // carrying only `origin` has nothing to show, and this button must not offer
+  // to "edit" what is not on screen. `Object.keys(...).length` would count it.
+  const attached = current ? hasExchangeContent(current.exchange) : false;
 
   return el(
     "div",
@@ -1350,7 +1354,11 @@ function showDocument(): void {
   // `/view` shows a document held in this browser alone, so the head stops
   // claiming to be an indexable page for as long as one is open.
   applyPageMeta(documentMeta(current.label));
-  refreshExchangeBand();
+  // No `refreshExchangeBand()` here: the branch above either rebuilds the view
+  // — and both `renderDocumentView` and `renderJsonView` end by refreshing the
+  // band themselves — or finds one already built, whose band is already current
+  // (every edit goes through `openExchangeEditor`, which refreshes it). A call
+  // here only re-rendered the same band a second time.
 }
 
 /**
