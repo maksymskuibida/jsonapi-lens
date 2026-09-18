@@ -25,8 +25,11 @@
 #                         so this can stay closed. `clipboard.ts` sets `.style`
 #                         through the CSSOM, which CSP does not govern
 #   font-src 'self'       the self-hosted woff2 faces
-#   img-src 'self' data:  icons and the OG image; `data:` for inline SVG
+#   img-src 'self'        the icons and the OG image. No `data:`: nothing uses
+#                         one, and `assetsInlineLimit: 0` in vite.config.ts
+#                         means the build never inlines an asset as one either
 #   connect-src 'self'    /api/shares, the only request the client ever makes
+#   manifest-src 'self'   site.webmanifest, linked from index.html
 #   base-uri 'none'       nothing may retarget relative URLs
 #   form-action 'none'    there is no form that submits anywhere
 #   frame-ancestors 'none'  nobody frames a tool that renders your payloads
@@ -37,7 +40,7 @@
 /*
   Referrer-Policy: strict-origin-when-cross-origin
   X-Content-Type-Options: nosniff
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   X-Frame-Options: DENY
 
 # A share link carries its decryption key in the URL. Nothing about it should
