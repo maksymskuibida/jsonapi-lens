@@ -1325,6 +1325,15 @@ function renderDocumentView(loaded: LoadedView<DocumentIndex>, parseMs: number):
     render: formatDuration(renderMs),
     bodies: eager ? "eager" : "lazy (on expand)",
   });
+
+  // Fill the slot created above. `renderJsonView` ends the same way, and the
+  // symmetry is the point: this used to be done for both paths by
+  // `showDocument` instead, which meant *this* function never filled its own
+  // slot and nobody could tell, because the caller always covered for it. It
+  // stopped being covered for the moment that call was removed as redundant,
+  // and a JSON:API document opened with an exchange already attached rendered
+  // no band at all.
+  refreshExchangeBand();
 }
 
 /**
