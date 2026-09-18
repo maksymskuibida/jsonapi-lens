@@ -777,6 +777,86 @@ try {
     report(false, "err", "the topbar fits a phone in every language, with every control reachable", error.message);
   }
 
+  /*
+   * Deep nesting, measured at 1024px rather than this suite's own 1512px.
+   * Every nesting level spends another key column, so the depth at which the
+   * value runs out of room depends on the width: at 1512 seven levels still
+   * fit, and this check passed with the fix reverted. 1024 is where it bites,
+   * and `/orders/0/meta/audit/trail/actor/userId` is that deep in real data.
+   *
+   * Three assertions, because each one alone can be satisfied while the bug is
+   * present. "The page does not scroll sideways" is true of a tree that has
+   * been clipped instead of made reachable — the first attempt at this fix
+   * scored 1024/1024 with the deepest value still 0px wide. "The value has
+   * width" is true of a page that scrolls the whole body instead. And both are
+   * vacuously true of a page with nothing on it: a `?.` miss on the shape-offer
+   * button leaves the paste view up and every measurement trivially passes, so
+   * the nesting has to be shown to have rendered at all.
+   *
+   * Also last in the file, for the same reason as the check above it: this
+   * drives the paste flow and writes to the shared `documents` store.
+   */
+  try {
+    const deep = await page.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const frame = document.createElement("iframe");
+      frame.style.cssText = "position:fixed;left:-9999px;top:0;width:1024px;height:900px;border:0";
+      frame.src = location.origin + "/?lang=en";
+      document.body.appendChild(frame);
+      await new Promise((resolve) => {
+        frame.addEventListener("load", resolve, { once: true });
+        setTimeout(resolve, 5000);
+      });
+      await wait(600);
+      const d = frame.contentDocument;
+      const input = d.getElementById("input");
+      input.value = '{"a":{"b":{"c":{"d":{"e":{"f":{"g":"deep value"}}}}}},"z":1}';
+      input.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
+      d.getElementById("parse").click();
+      await wait(900);
+      // Not JSON:API, so the app offers a choice rather than reading straight
+      // through. Take the plain-JSON reading — that is the shape that nests.
+      const plain = d.getElementById("shape-offer-plain");
+      if (plain) plain.click();
+      await wait(1200);
+      for (let i = 0; i < 12; i++) {
+        const shut = [...d.querySelectorAll("details.tree:not([open])")];
+        if (!shut.length) break;
+        shut.forEach((tree) => (tree.open = true));
+        await wait(200);
+      }
+      await wait(400);
+      const root = d.documentElement;
+      const values = [...d.querySelectorAll(".kv__val")].map(
+        (v) => v.getBoundingClientRect().width,
+      );
+      const out = {
+        vw: root.clientWidth,
+        sw: root.scrollWidth,
+        depth: d.querySelectorAll(".kv .kv .kv .kv .kv").length,
+        values: values.length,
+        narrowest: values.length ? Math.round(Math.min(...values)) : -1,
+      };
+      frame.remove();
+      return out;
+    })()`);
+
+    const held = deep.depth > 0 && deep.sw <= deep.vw && deep.narrowest > 0;
+    report(
+      held,
+      "1024px",
+      "deeply nested values keep their width without the page scrolling sideways",
+      `page ${deep.sw}/${deep.vw}, narrowest value ${deep.narrowest}px, nested rows ${deep.depth}, values ${deep.values}`,
+    );
+  } catch (error) {
+    report(
+      false,
+      "err",
+      "deeply nested values keep their width without the page scrolling sideways",
+      error.message,
+    );
+  }
+
   // `total` is whatever `report` was actually called with, rather than a
   // hand-maintained `keys.length + n`: every check added since this line was
   // written was added outside `SCEN`, and each one silently widened the gap

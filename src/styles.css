@@ -1859,10 +1859,28 @@ kbd {
 
 /* Blocks: attributes / relationships / links / meta */
 
+/* Deeply nested values are wider than the column they sit in — every nesting
+   level spends another key column, and by about the fifth the value has no
+   room left. The tree is allowed to exceed this box and scroll inside it, so
+   that the *page* never scrolls sideways (see `.kv`'s value floor, which is
+   what makes the content exceed rather than collapse).
+
+   `overflow-x: auto` computes `overflow-y: auto` as well, so this box clips on
+   all four sides. Several row actions sit flush with the inline end and a
+   focus ring is ink, not scrollable content, so it would be shaved off without
+   a little room to draw into.
+
+   `overscroll-behavior-x` because a new horizontal scroller chains its
+   overscroll into the browser's back gesture: swiping past the end of a wide
+   block would navigate away, and in this app navigating away loses the place
+   you had scrolled to. */
 .block {
   display: grid;
   gap: var(--sp-4);
   align-content: start;
+  overflow-x: auto;
+  padding-right: var(--sp-2);
+  overscroll-behavior-x: contain;
 }
 
 .block__title {
@@ -1900,9 +1918,15 @@ kbd {
 
 /* Key/value grid */
 
+/* The value column carries a floor rather than `minmax(0, 1fr)`. A `1fr` track
+   sizes to its container, so a nested row inside a nested row inside a nested
+   row kept handing the value whatever was left — which, from roughly the fifth
+   level, was nothing: the value measured 0px wide and its copy buttons sat past
+   the edge of the screen. With a floor the nested grid overflows its cell
+   instead of collapsing, and `.block` above scrolls to reach it. */
 .kv {
   display: grid;
-  grid-template-columns: minmax(6rem, 12rem) minmax(0, 1fr);
+  grid-template-columns: minmax(6rem, 12rem) minmax(16rem, 1fr);
   gap: 1px var(--sp-5);
   align-items: baseline;
 }
@@ -3457,7 +3481,7 @@ body.has-modal {
   /* Attribute rows spend the extra width on the key column rather than
      stretching the value away from it. */
   .kv {
-    grid-template-columns: minmax(8rem, 18rem) minmax(0, 1fr);
+    grid-template-columns: minmax(8rem, 18rem) minmax(16rem, 1fr);
   }
 
   /* Keep prose at a readable measure even when the column is wide. */
