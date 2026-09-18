@@ -22,6 +22,7 @@ import { quoted } from "./quote.js";
 import { el, frag } from "../dom.js";
 import { intlFor } from "./intl.js";
 import type { Shape, ShapeEvidence } from "../types.js";
+import type { ParamConvention } from "../params.js";
 
 const f = intlFor("en");
 
@@ -786,6 +787,203 @@ export const en = {
        */
       reloaded:
         "Those shared documents are no longer loaded. The link's key is dropped from the address bar as soon as it opens, so a reload cannot fetch them again — open the original link to import them.",
+    },
+  },
+
+  /* ----------------------------------------------------------- request --- */
+
+  request: {
+    band: {
+      attach: "Attach request",
+      attachTitle: "Attach the request that produced this response",
+      edit: "Edit request",
+      editTitle: "Edit the attached request and response details",
+      copyTitle: "Copy the request and response as JSON",
+      download: "Download",
+      downloadTitle: "Download the request and response as a JSON file",
+      share: "Share",
+      shareTitle: "Share this document",
+      copyKind: "the exchange",
+      copyKindRedacted: (n: number) => `the exchange — ${f.n(n)} redacted`,
+      redactedCount: (n: number) =>
+        f.plural(n, {
+          one: "1 value found and redacted before downloading.",
+          other: `${f.n(n)} values found and redacted before downloading.`,
+        }),
+      /**
+       * Shown next to Copy/Download/Share, always — not only after a redaction
+       * finds something. The count above says what redaction *found*; this
+       * says what it does not look at, so a `0`-count is never mistaken for
+       * "this is safe to share" when the secret risk actually lives in a
+       * field this pass does not scan. See `secrets.ts#redactExchange`'s own
+       * header for the exact, evolving coverage list this deliberately does
+       * not repeat verbatim — restating it here would drift the moment that
+       * list changes and this file did not.
+       */
+      redactionCaveat:
+        "Redaction targets header and cookie values shaped like credentials. It does not scan the body or the URL — review those yourself before sharing.",
+      saved: "Request saved.",
+      modeResponse: "Response",
+      modeRequest: "Request",
+      modeBoth: "Both",
+      modeGroupLabel: "Which side to review",
+      summaryParams: (n: number) => f.plural(n, { one: "1 param", other: `${f.n(n)} params` }),
+      summaryHeaders: (n: number) => f.plural(n, { one: "1 header", other: `${f.n(n)} headers` }),
+      summaryCookies: (n: number) => f.plural(n, { one: "1 cookie", other: `${f.n(n)} cookies` }),
+      responseOnly: "Response only",
+    },
+
+    review: {
+      noMethod: "no method",
+      noUrl: "No URL entered.",
+      urlUnparseable: "This does not parse as a URL. Kept as text.",
+      assumedScheme: (scheme: string) => `No scheme was given — assumed ${scheme}.`,
+      noStatus: "no status",
+      elapsed: (ms: number) => `${f.n(ms)} ms`,
+      queryTitle: "Query parameters",
+      headersTitle: "Headers",
+      cookiesTitle: "Cookies",
+      bodyTitle: "Body",
+      headersEmpty: "No headers.",
+      cookiesEmpty: "No cookies.",
+      duplicateHeader: (n: number) => `sent ${f.n(n)} times`,
+      unnamedCookie: (n: number) => `cookie ${f.n(n)}`,
+      noResponse: "No response entered.",
+      reveal: "reveal",
+      revealLabel: "Reveal this value",
+      revealTitle: "Masked because it looks like a credential — click to reveal",
+
+      jwt: {
+        title: "Decoded JWT (signature not verified)",
+        sub: "sub",
+        iss: "iss",
+        scope: "scope",
+        exp: "exp",
+        notAJwt: "Looks like a bearer token, but is not three base64url segments — not decoded.",
+      },
+
+      cookieAttrs: {
+        domain: (v: string) => `Domain=${v}`,
+        path: (v: string) => `Path=${v}`,
+        maxAge: (n: number) => `Max-Age=${f.n(n)}`,
+        sameSite: (v: string) => `SameSite=${v}`,
+        secure: "Secure",
+        httpOnly: "HttpOnly",
+        unrecognizedTitle: "This attribute was not recognised and is kept exactly as written.",
+      },
+
+      params: {
+        /** The wire encoding a parameter reading is named after — see `docs/task-specs/T2.md`'s Parameters table. */
+        convention: (c: ParamConvention): string => {
+          switch (c) {
+            case "plain":
+              return "plain text";
+            case "valueless":
+              return "no value";
+            case "repeated-key":
+              return "repeated key";
+            case "bracket-list":
+              return "bracket list";
+            case "indexed":
+              return "indexed list";
+            case "comma":
+              return "comma list";
+            case "space-delimited":
+              return "space-delimited list";
+            case "pipe-delimited":
+              return "pipe-delimited list";
+            case "bracket-object":
+              return "bracket object";
+            case "dot-path":
+              return "dot path";
+            case "json-value":
+              return "JSON value";
+            case "base64url-json":
+              return "base64url JSON";
+            case "truncated":
+              return "nested too deeply to decode";
+          }
+        },
+        alternatives: "Other readings",
+        rawWire: "raw:",
+        conflict: "Conflicting encodings for this name — neither chosen:",
+        empty: "No query parameters.",
+        emptyValue: "(empty)",
+        novalue: "(no value)",
+      },
+
+      body: {
+        noContentType: "no content type given",
+        copyObjectTitle: "Copy this resource as JSON",
+        copyPointerTitle: (pointer: string) => `Copy the JSON Pointer to this resource (${pointer})`,
+      },
+
+      responseBody: {
+        none: "No response body.",
+        jsonApiSummary: (resources: number, types: number) =>
+          `JSON:API document · ${f.n(resources)} resources, ${f.n(types)} types`,
+        plainSummary: (shapeName: string, count: number) => `${shapeName} · ${f.n(count)} items`,
+        jumpLink: "jump to the document below",
+      },
+    },
+
+    /** How long a value has been, or will be, from a reference point — a cookie's `Expires` relative to now, a JWT's `exp` relative to the response's own `Date` header. The bucketing (which unit, which threshold) lives in `render-request.ts`; each language only supplies the words. */
+    relative: {
+      now: "just now",
+      atCallTime: "at the time of this call",
+      unit: (value: number, unit: "second" | "minute" | "hour" | "day"): string => {
+        const forms: Record<typeof unit, { one: string; other: string }> = {
+          second: { one: "1 second", other: `${f.n(value)} seconds` },
+          minute: { one: "1 minute", other: `${f.n(value)} minutes` },
+          hour: { one: "1 hour", other: `${f.n(value)} hours` },
+          day: { one: "1 day", other: `${f.n(value)} days` },
+        };
+        return f.plural(value, forms[unit]);
+      },
+      inFuture: (duration: string) => `in ${duration}`,
+      inPast: (duration: string) => `${duration} ago`,
+      beforeCall: (duration: string) => `${duration} before this call`,
+      afterCall: (duration: string) => `${duration} after this call`,
+    },
+
+    form: {
+      title: "Request and response",
+      subtitle: "Attach the request that produced this document, and any response details.",
+      save: "Save",
+      requestTitle: "Request",
+      responseTitle: "Response",
+      methodLabel: "Method",
+      methodUnset: "— not set —",
+      methodOther: "Other…",
+      methodOtherLabel: "Custom method",
+      urlLabel: "URL",
+      urlPlaceholder: "https://api.example.com/trips",
+      urlSyncHint: "The query table below stays in sync with this URL — edit either one.",
+      queryLabel: "Query parameters",
+      paramName: "Parameter name",
+      headersLabel: "Headers",
+      headerName: "Header name",
+      cookiesLabel: "Cookies",
+      cookieName: "Cookie name",
+      setCookieHint: "Each row is one full Set-Cookie value, exactly as the server sent it.",
+      setCookiePlaceholder: "name=value; Path=/; HttpOnly",
+      setCookieAria: "Set-Cookie value",
+      statusLabel: "Status",
+      statusPlaceholder: "200",
+      statusTextLabel: "Status text",
+      statusTextPlaceholder: "OK",
+      elapsedLabel: "Elapsed (ms)",
+      elapsedPlaceholder: "milliseconds",
+      contentTypeLabel: "Content type",
+      contentTypePlaceholder: "application/json",
+      bodyLabel: "Body",
+      addRow: "Add row",
+      removeRow: "Remove this row",
+      disableRowLabel: "disabled",
+      disableRowTitle: "Take this row out of consideration without deleting it",
+      rowName: "Field name",
+      rowValue: "Field value",
+      rowValuePlaceholder: "value",
     },
   },
 

@@ -857,6 +857,110 @@ try {
     );
   }
 
+  /*
+   * A document that arrives with an exchange *already attached* — rather than
+   * one attached through the form in this same page load.
+   *
+   * This is the gap `s29`/`s30` cannot cover: both of them fill the form and
+   * save it, and saving refreshes the band explicitly, so the band is on screen
+   * because of the edit rather than because the render put it there. A document
+   * loaded from storage with an exchange on it takes neither of those paths —
+   * it goes straight through `renderDocumentView`, which is exactly the
+   * function that turned out never to fill its own band slot.
+   *
+   * JSON:API rather than plain JSON on purpose: `renderJsonView` always did
+   * refresh the band, so the plain-JSON path would have passed throughout.
+   *
+   * Last in the file, with the other paste-flow checks, for the same reason:
+   * it writes to the shared `documents` store.
+   */
+  try {
+    const band = await page.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const frame = document.createElement("iframe");
+      frame.style.cssText = "position:fixed;left:-9999px;top:0;width:1200px;height:900px;border:0";
+      frame.src = location.origin + "/?lang=en";
+      document.body.appendChild(frame);
+      await new Promise((resolve) => {
+        frame.addEventListener("load", resolve, { once: true });
+        setTimeout(resolve, 5000);
+      });
+      await wait(600);
+      const d = frame.contentDocument;
+      const w = frame.contentWindow;
+
+      // Read a JSON:API document, so the render path is renderDocumentView.
+      const input = d.getElementById("input");
+      input.value = '{"data":{"type":"a","id":"1","attributes":{"n":1}}}';
+      input.dispatchEvent(new w.Event("input", { bubbles: true }));
+      d.getElementById("parse").click();
+      await wait(1200);
+
+      // Attach an exchange through the real form, then let it persist.
+      d.getElementById("edit-request")?.click();
+      await wait(700);
+      const url = d.querySelector(".xform__url-input");
+      if (!url) return { reason: "no request form" };
+      url.value = "https://api.example.com/a";
+      url.dispatchEvent(new w.Event("input", { bubbles: true }));
+      const save = [...d.querySelectorAll(".modal__actions button")].pop();
+      save.click();
+      await wait(1200);
+
+      const attachedNow = !!d.getElementById("exchange-band");
+
+      // Reload. The stored document carries the exchange, and boot parses it
+      // without rendering — so the click below is what builds the view.
+      frame.src = location.origin + "/?lang=en";
+      await new Promise((resolve) => {
+        frame.addEventListener("load", resolve, { once: true });
+        setTimeout(resolve, 5000);
+      });
+      await wait(900);
+      const d2 = frame.contentDocument;
+
+      const resume = d2.querySelector("#resume button");
+      if (!resume) return { attachedNow, reason: "no resume button" };
+      const builtBefore = d2.getElementById("doc").childElementCount;
+      resume.click();
+      await wait(1500);
+
+      const out = {
+        attachedNow,
+        builtBefore,
+        built: d2.getElementById("doc").childElementCount,
+        bandAfterResume: !!d2.getElementById("exchange-band"),
+        // Proves the exchange really did survive the reload, so a missing band
+        // means "not rendered" rather than "nothing to render".
+        editLabel: (d2.querySelector(".overview__actions")?.textContent || "").trim().slice(0, 80),
+      };
+      frame.remove();
+      return out;
+    })()`);
+
+    const held =
+      !band.reason &&
+      band.attachedNow === true &&
+      band.builtBefore === 0 &&
+      band.built > 0 &&
+      band.bandAfterResume === true;
+    report(
+      held,
+      "-",
+      "a JSON:API document resumed with an exchange already attached still renders the band",
+      band.reason
+        ? band.reason
+        : `band on attach ${band.attachedNow}, #doc ${band.builtBefore}->${band.built}, band after resume ${band.bandAfterResume}`,
+    );
+  } catch (error) {
+    report(
+      false,
+      "err",
+      "a JSON:API document resumed with an exchange already attached still renders the band",
+      error.message,
+    );
+  }
+
   // `total` is whatever `report` was actually called with, rather than a
   // hand-maintained `keys.length + n`: every check added since this line was
   // written was added outside `SCEN`, and each one silently widened the gap

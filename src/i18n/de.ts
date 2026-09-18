@@ -688,6 +688,189 @@ export const de: Messages = {
     },
   },
 
+  request: {
+    band: {
+      attach: "Request hinzufügen",
+      attachTitle: "Den Request hinzufügen, der diese Response erzeugt hat",
+      edit: "Request bearbeiten",
+      editTitle: "Die hinterlegten Angaben zu Request und Response bearbeiten",
+      copyTitle: "Request und Response als JSON kopieren",
+      download: "Herunterladen",
+      downloadTitle: "Request und Response als JSON-Datei herunterladen",
+      share: "Teilen",
+      shareTitle: "Dieses Dokument teilen",
+      copyKind: "den Exchange",
+      copyKindRedacted: (n) => `den Exchange — ${f.n(n)} geschwärzt`,
+      redactedCount: (n) =>
+        f.plural(n, {
+          one: "1 Wert gefunden und vor dem Download geschwärzt.",
+          other: `${f.n(n)} Werte gefunden und vor dem Download geschwärzt.`,
+        }),
+      redactionCaveat:
+        "Die Schwärzung erfasst Header- und Cookie-Werte, die wie Zugangsdaten aussehen. Body und URL werden nicht durchsucht — prüfen Sie diese vor dem Teilen selbst.",
+      saved: "Request gespeichert.",
+      modeResponse: "Response",
+      modeRequest: "Request",
+      modeBoth: "Beide",
+      modeGroupLabel: "Welche Seite angezeigt wird",
+      summaryParams: (n) => f.plural(n, { one: "1 Parameter", other: `${f.n(n)} Parameter` }),
+      summaryHeaders: (n) => f.plural(n, { one: "1 Header", other: `${f.n(n)} Header` }),
+      summaryCookies: (n) => f.plural(n, { one: "1 Cookie", other: `${f.n(n)} Cookies` }),
+      responseOnly: "Nur Response",
+    },
+
+    review: {
+      noMethod: "keine Methode",
+      noUrl: "Keine URL eingetragen.",
+      urlUnparseable: "Das lässt sich nicht als URL lesen und wird als Text angezeigt.",
+      assumedScheme: (scheme) => `Kein Schema angegeben — ${scheme} wurde angenommen.`,
+      noStatus: "kein Status",
+      elapsed: (ms) => `${f.n(ms)} ms`,
+      queryTitle: "Query-Parameter",
+      headersTitle: "Header",
+      cookiesTitle: "Cookies",
+      bodyTitle: "Body",
+      headersEmpty: "Keine Header.",
+      cookiesEmpty: "Keine Cookies.",
+      duplicateHeader: (n) => `${f.n(n)}× gesendet`,
+      unnamedCookie: (n) => `Cookie ${f.n(n)}`,
+      noResponse: "Keine Response eingetragen.",
+      reveal: "anzeigen",
+      revealLabel: "Diesen Wert anzeigen",
+      revealTitle: "Geschwärzt, weil es wie ein Zugangsdatum aussieht — zum Anzeigen klicken",
+
+      jwt: {
+        title: "Dekodiertes JWT (Signatur nicht geprüft)",
+        sub: "sub",
+        iss: "iss",
+        scope: "scope",
+        exp: "exp",
+        notAJwt: "Sieht wie ein Bearer-Token aus, besteht aber nicht aus drei base64url-Segmenten — nicht dekodiert.",
+      },
+
+      cookieAttrs: {
+        domain: (v) => `Domain=${v}`,
+        path: (v) => `Path=${v}`,
+        maxAge: (n) => `Max-Age=${f.n(n)}`,
+        sameSite: (v) => `SameSite=${v}`,
+        secure: "Secure",
+        httpOnly: "HttpOnly",
+        unrecognizedTitle: "Dieses Attribut wurde nicht erkannt und wird unverändert angezeigt.",
+      },
+
+      params: {
+        convention: (c) => {
+          switch (c) {
+            case "plain":
+              return "reiner Text";
+            case "valueless":
+              return "ohne Wert";
+            case "repeated-key":
+              return "wiederholter Schlüssel";
+            case "bracket-list":
+              return "Klammer-Liste";
+            case "indexed":
+              return "indizierte Liste";
+            case "comma":
+              return "kommagetrennte Liste";
+            case "space-delimited":
+              return "leerzeichengetrennte Liste";
+            case "pipe-delimited":
+              return "pipegetrennte Liste";
+            case "bracket-object":
+              return "Klammer-Objekt";
+            case "dot-path":
+              return "Punktpfad";
+            case "json-value":
+              return "JSON-Wert";
+            case "base64url-json":
+              return "base64url-JSON";
+            case "truncated":
+              return "zu tief verschachtelt zum Dekodieren";
+          }
+        },
+        alternatives: "Andere Lesarten",
+        rawWire: "roh:",
+        conflict: "Widersprüchliche Kodierungen für diesen Namen — keine wurde gewählt:",
+        empty: "Keine Query-Parameter.",
+        emptyValue: "(leer)",
+        novalue: "(kein Wert)",
+      },
+
+      body: {
+        noContentType: "kein Content-Type angegeben",
+        copyObjectTitle: "Diese Ressource als JSON kopieren",
+        copyPointerTitle: (pointer) => `JSON-Pointer zu dieser Ressource kopieren (${pointer})`,
+      },
+
+      responseBody: {
+        none: "Kein Response-Body.",
+        jsonApiSummary: (resources, types) =>
+          `JSON:API-Dokument · ${f.n(resources)} Ressourcen, ${f.n(types)} Typen`,
+        plainSummary: (shapeName, count) => `${shapeName} · ${f.n(count)} Einträge`,
+        jumpLink: "zum Dokument unten springen",
+      },
+    },
+
+    relative: {
+      now: "gerade eben",
+      atCallTime: "zum Zeitpunkt dieses Aufrufs",
+      unit: (value, unit) => {
+        const forms: Record<typeof unit, { one: string; other: string }> = {
+          second: { one: "1 Sekunde", other: `${f.n(value)} Sekunden` },
+          minute: { one: "1 Minute", other: `${f.n(value)} Minuten` },
+          hour: { one: "1 Stunde", other: `${f.n(value)} Stunden` },
+          day: { one: "1 Tag", other: `${f.n(value)} Tage` },
+        };
+        return f.plural(value, forms[unit]);
+      },
+      inFuture: (duration) => `in ${duration}`,
+      inPast: (duration) => `vor ${duration}`,
+      beforeCall: (duration) => `${duration} vor diesem Aufruf`,
+      afterCall: (duration) => `${duration} nach diesem Aufruf`,
+    },
+
+    form: {
+      title: "Request und Response",
+      subtitle: "Den Request, der dieses Dokument erzeugt hat, sowie etwaige Response-Angaben hinterlegen.",
+      save: "Speichern",
+      requestTitle: "Request",
+      responseTitle: "Response",
+      methodLabel: "Methode",
+      methodUnset: "— nicht gesetzt —",
+      methodOther: "Andere…",
+      methodOtherLabel: "Eigene Methode",
+      urlLabel: "URL",
+      urlPlaceholder: "https://api.example.com/trips",
+      urlSyncHint: "Die Query-Tabelle unten bleibt mit dieser URL synchron — beide Seiten sind editierbar.",
+      queryLabel: "Query-Parameter",
+      paramName: "Parametername",
+      headersLabel: "Header",
+      headerName: "Headername",
+      cookiesLabel: "Cookies",
+      cookieName: "Cookiename",
+      setCookieHint: "Jede Zeile ist ein vollständiger Set-Cookie-Wert, genau wie ihn der Server gesendet hat.",
+      setCookiePlaceholder: "name=wert; Path=/; HttpOnly",
+      setCookieAria: "Set-Cookie-Wert",
+      statusLabel: "Status",
+      statusPlaceholder: "200",
+      statusTextLabel: "Statustext",
+      statusTextPlaceholder: "OK",
+      elapsedLabel: "Dauer (ms)",
+      elapsedPlaceholder: "Millisekunden",
+      contentTypeLabel: "Content-Type",
+      contentTypePlaceholder: "application/json",
+      bodyLabel: "Body",
+      addRow: "Zeile hinzufügen",
+      removeRow: "Diese Zeile entfernen",
+      disableRowLabel: "deaktiviert",
+      disableRowTitle: "Diese Zeile außer Betracht lassen, ohne sie zu löschen",
+      rowName: "Feldname",
+      rowValue: "Feldwert",
+      rowValuePlaceholder: "Wert",
+    },
+  },
+
   labels: {
     pastedDocument: "eingefügtes Dokument",
     storedDocument: "gespeichertes Dokument",
