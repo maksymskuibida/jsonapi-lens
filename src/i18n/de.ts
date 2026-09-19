@@ -515,6 +515,11 @@ export const de: Messages = {
     lede: "Das Dokument wird in diesem Tab gzip-komprimiert und verschlüsselt. Der Schlüssel entsteht hier und steht nur im Link — der Server speichert einen undurchsichtigen Datensatz, den er nicht lesen kann. Erstellen und Öffnen dauern jeweils einen Moment, weil der kurze Schlüssel absichtlich aufwendig abzuleiten ist.",
     lifetimeLabel: "Gültigkeitsdauer",
     note: "Wer den Link hat, kann das Dokument lesen — behandeln Sie ihn also wie den Payload selbst. Der Schlüssel steht im URL-Pfad und landet damit in der Browser-Historie und überall sonst, wo der Link verarbeitet wird. Verschicken Sie ihn so, wie Sie den Payload verschicken würden.",
+    redacting: (n) =>
+      f.plural(n, {
+        one: "1 Wert in der angehängten Anfrage sieht aus wie ein Zugangsdatum und wird entfernt, bevor dieser Link erstellt wird.",
+        other: `${f.n(n)} Werte in der angehängten Anfrage sehen aus wie Zugangsdaten und werden entfernt, bevor dieser Link erstellt wird.`,
+      }),
     create: "Link erstellen",
     deriving: "Schlüssel wird abgeleitet und verschlüsselt …",
     uploading: (size) => `${size} werden hochgeladen …`,
