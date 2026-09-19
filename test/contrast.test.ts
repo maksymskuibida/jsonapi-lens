@@ -110,6 +110,41 @@ describe("text tokens meet AA against the surfaces they sit on", () => {
     expect(luminance(tokenValues("text")[0]!)).toBeLessThan(luminance(tokenValues("text")[1]!));
   });
 
+  /*
+   * `.share__note--redacting` paints its own pair — `--accent-hover` on
+   * `--accent-soft` — so it is not covered by the tiers above, which is exactly
+   * the gap the `SURFACES` comment describes ("every rule that paints them sets
+   * its own `color`"). It does; this is the assertion that the one it sets is
+   * readable.
+   *
+   * The rule shipped once with only `border-left-color` and `background`
+   * overridden, leaving `.share__note`'s amber `--absent-text` on the accent
+   * background. That is what this guards: the pairing, in every theme block,
+   * not just the light one a screenshot would have been taken in.
+   */
+  it("the share redaction note overrides the colour it inherits, not just the box", () => {
+    // The palette assertion below says the pair *chosen* is readable. This says
+    // the rule actually chooses it — without this, deleting `color` from the
+    // rule leaves that assertion green while the note goes back to amber text
+    // on an accent background, which is the exact bug that shipped once.
+    const rule = /\.share__note--redacting\s*\{([^}]*)\}/.exec(CSS);
+    expect(rule, ".share__note--redacting rule").not.toBeNull();
+    expect(rule![1], "declares its own color").toMatch(/(^|[;\s])color:/);
+    expect(rule![1]).toContain("var(--accent-hover)");
+  });
+
+  it("the share redaction note's own colour pair clears AA, in every theme", () => {
+    const fg = tokenValues("accent-hover");
+    const bg = tokenValues("accent-soft");
+    expect(fg, "--accent-hover").toHaveLength(3);
+    expect(bg, "--accent-soft").toHaveLength(3);
+    for (const [i, theme] of ["light", "prefers-color-scheme", "data-theme"].entries()) {
+      expect(contrast(fg[i]!, bg[i]!), `${theme} --accent-hover on --accent-soft`).toBeGreaterThanOrEqual(
+        AA_NORMAL,
+      );
+    }
+  });
+
   it("light theme: every text tier clears AA on every light surface", () => {
     for (const token of TEXT_TOKENS) {
       const fg = tokenValues(token)[0]!;

@@ -2710,6 +2710,10 @@ body.has-modal {
 .share__note--redacting {
   border-left-color: var(--accent);
   background: var(--accent-soft);
+  /* `.share__note` sets `color: var(--absent-text)`, so without this the text
+     stays amber on the accent background — a two-tone box saying neither
+     thing. Overriding all three is what makes the distinction read. */
+  color: var(--accent-hover);
 }
 
 .share__label {

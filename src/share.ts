@@ -291,10 +291,11 @@ function runShareModal(options: {
  * avoided pass over a handful of headers.
  */
 function countRedactions(documents: BundleEntry[]): number {
-  return documents.reduce(
-    (sum, entry) => sum + (entry.exchange ? redactExchange(entry.exchange).count : 0),
-    0,
-  );
+  // No emptiness guard of its own: `redactExchange({})` tallies 0, and a second
+  // copy of `redactEntryExchange`'s check (bundle.ts) is exactly the kind of
+  // duplication that drifts. That one exists to preserve object identity for an
+  // entry with nothing to mask; this only needs the number.
+  return documents.reduce((sum, entry) => sum + redactExchange(entry.exchange ?? {}).count, 0);
 }
 
 /**
