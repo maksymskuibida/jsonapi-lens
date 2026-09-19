@@ -597,6 +597,19 @@ export const en = {
     lede: "The document is gzipped and encrypted in this tab. The key is generated here and lives only in the link — the server stores an opaque blob it cannot read. Creating and opening a link each take a moment, because the short key is deliberately expensive to derive.",
     lifetimeLabel: "Link lifetime",
     note: "Anyone with the link can read the document, so treat it like the payload itself. The key sits in the URL path, so it reaches browser history and anything else that handles the link — send it the way you would send the payload.",
+    /**
+     * Shown before the link is created, when the attached exchange carries
+     * anything redaction will mask. The point is that the person finds out
+     * while they can still decide not to share — `copyKindRedacted` and
+     * `redactedCount` (request.band) say the same thing after the fact for
+     * Copy and Download. A `0` count shows nothing; `redactionCaveat` is what
+     * covers "nothing was found" honestly.
+     */
+    redacting: (n: number) =>
+      f.plural(n, {
+        one: "1 value in the attached request looks like a credential and will be removed before this link is created.",
+        other: `${f.n(n)} values in the attached request look like credentials and will be removed before this link is created.`,
+      }),
     create: "Create link",
     deriving: "Deriving the key and encrypting…",
     uploading: (size: string) => `Uploading ${size}…`,

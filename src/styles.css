@@ -2702,6 +2702,20 @@ body.has-modal {
   color: var(--absent-text);
 }
 
+/* The redaction line sits directly under the warning note and says something
+   different in kind: the note is "be careful what you send", this is "these
+   values are being taken out for you". Amber is the app's colour for a caution,
+   so this takes the accent instead — two stacked amber blocks would read as one
+   long warning and the second would be skimmed past. */
+.share__note--redacting {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  /* `.share__note` sets `color: var(--absent-text)`, so without this the text
+     stays amber on the accent background — a two-tone box saying neither
+     thing. Overriding all three is what makes the distinction read. */
+  color: var(--accent-hover);
+}
+
 .share__label {
   margin-top: var(--sp-6);
   margin-bottom: var(--sp-4);

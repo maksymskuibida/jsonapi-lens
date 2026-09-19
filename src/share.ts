@@ -11,6 +11,7 @@ import {
 } from "./crypto.js";
 import type { BundleEntry, BundlePayload, SharePayload } from "./crypto.js";
 import type { Exchange } from "./exchange.js";
+import { redactExchange } from "./secrets.js";
 import { shareUrl } from "./router.js";
 import { openModal, toast } from "./ui.js";
 
@@ -141,6 +142,13 @@ function expiryNote(expiresAt: number | null): string {
 function runShareModal(options: {
   subtitle: string;
   originalBytes: number;
+  /**
+   * How many values `mintShareEnvelope` will mask on the way into the sealed
+   * blob. Stated before the link exists, so the choice not to share is still
+   * available — Copy and Download say the same thing afterwards, and a share
+   * that said nothing was the one silent mask left in the app.
+   */
+  redacting: number;
   mint: (secret: string) => Promise<Uint8Array<ArrayBuffer>>;
 }): void {
   let lifetime = readLifetime();
@@ -181,9 +189,18 @@ function runShareModal(options: {
     el("h3", { class: "share__label", text: t().share.lifetimeLabel }),
     choices,
     el("p", { class: "share__note" }, t().share.note),
-    status,
-    result,
   );
+
+  // Only when there is something to say. A "0 values redacted" line would read
+  // as a clean bill of health, which redaction cannot give — `redactionCaveat`
+  // in the review band is where the limits of the scan are stated.
+  if (options.redacting > 0) {
+    body.append(
+      el("p", { class: "share__note share__note--redacting" }, t().share.redacting(options.redacting)),
+    );
+  }
+
+  body.append(status, result);
 
   const create = el("button", { class: "btn btn--primary", type: "button", text: t().share.create });
   create.dataset["autofocus"] = "true";
@@ -264,6 +281,24 @@ function runShareModal(options: {
 }
 
 /**
+ * How many values redaction will mask across every entry about to be sealed.
+ *
+ * This runs `redactExchange` a second time — `mintShareEnvelope` does the
+ * masking itself and drops the count — and that duplication is deliberate.
+ * Redaction stays inside `mintShareEnvelope` because it is the one function
+ * every share path funnels through, so a caller added later cannot forget it;
+ * moving it out here to reuse the count would trade that guarantee for one
+ * avoided pass over a handful of headers.
+ */
+function countRedactions(documents: BundleEntry[]): number {
+  // No emptiness guard of its own: `redactExchange({})` tallies 0, and a second
+  // copy of `redactEntryExchange`'s check (bundle.ts) is exactly the kind of
+  // duplication that drifts. That one exists to preserve object identity for an
+  // entry with nothing to mask; this only needs the number.
+  return documents.reduce((sum, entry) => sum + redactExchange(entry.exchange ?? {}).count, 0);
+}
+
+/**
  * Share the currently open document. Unchanged in shape since before
  * bundles existed: routing through `mintShareEnvelope` with a one-document
  * list still calls `seal` underneath (see that function), so this produces
@@ -282,6 +317,7 @@ export function openShareModal(text: string, label: string, exchange?: Exchange)
   runShareModal({
     subtitle: `${label} · ${formatBytes(originalBytes)}`,
     originalBytes,
+    redacting: countRedactions([{ label, text, exchange }]),
     mint: (secret) => mintShareEnvelope([{ label, text, exchange }], secret),
   });
 }
@@ -308,6 +344,7 @@ export function openBundleShareModal(documents: BundleEntry[]): void {
   runShareModal({
     subtitle: t().bundleUi.shareSubtitle(documents.length, formatBytes(originalBytes)),
     originalBytes,
+    redacting: countRedactions(documents),
     mint: (secret) => mintShareEnvelope(documents, secret),
   });
 }
