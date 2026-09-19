@@ -127,7 +127,10 @@ describe("text tokens meet AA against the surfaces they sit on", () => {
     // the rule actually chooses it — without this, deleting `color` from the
     // rule leaves that assertion green while the note goes back to amber text
     // on an accent background, which is the exact bug that shipped once.
-    const rule = /\.share__note--redacting\s*\{([^}]*)\}/.exec(CSS);
+    // Comments stripped first: `/* color: var(--accent-hover); */` left behind
+    // while the real declaration is deleted would otherwise satisfy both
+    // assertions, which is the one way this guard could be fooled.
+    const rule = /\.share__note--redacting\s*\{([^}]*)\}/.exec(CSS.replace(/\/\*[\s\S]*?\*\//g, ""));
     expect(rule, ".share__note--redacting rule").not.toBeNull();
     expect(rule![1], "declares its own color").toMatch(/(^|[;\s])color:/);
     expect(rule![1]).toContain("var(--accent-hover)");
