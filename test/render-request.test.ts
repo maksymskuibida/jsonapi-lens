@@ -81,6 +81,136 @@ describe("parseRequestUrl", () => {
     expect(parseRequestUrl("   ")).toBeNull();
     expect(parseRequestUrl("not a url at all with spaces")).toBeNull();
   });
+
+  /*
+   * A scheme that was given and is invalid is not a missing scheme.
+   * `ht!tp://[not a url]` used to fall through to the assumed-scheme attempt,
+   * where `https://ht!tp://…` parses — so the review showed the origin
+   * `https://ht!tp`, which no request ever went to, captioned "No scheme was
+   * given". The caller renders the raw text with an "unparseable" note when
+   * this returns null, which is the honest answer.
+   */
+  it("does not invent an origin for a malformed scheme", () => {
+    expect(parseRequestUrl("ht!tp://[not a url]:99999/path?a=%ZZ&b")).toBeNull();
+    expect(parseRequestUrl("ht!tp://example.com")).toBeNull();
+    expect(parseRequestUrl("2http://example.com")).toBeNull();
+  });
+
+  it("still assumes a scheme for a bare host, and is not confused by a colon further along", () => {
+    // The other half of the fix: refusing a *claimed* scheme must not stop the
+    // ordinary bare-host case from getting one assumed.
+    expect(parseRequestUrl("api.example.com/x")?.assumedScheme).toBe(true);
+    // A colon inside the query is past the first slash, so it is not a scheme.
+    expect(parseRequestUrl("api.example.com/go?to=https://x")?.assumedScheme).toBe(true);
+    expect(parseRequestUrl("api.example.com/go?to=https://x")?.url.href).toBe(
+      "https://api.example.com/go?to=https://x",
+    );
+  });
+
+  it("assumes a scheme for a bare IPv6 host, whose own colons are not a scheme", () => {
+    // Review of #23, blocker. The first colon in `[::1]:8080` belongs to the
+    // address, not to a port, so reading it as a malformed scheme rejected
+    // every bare IPv6 URL — with or without a port — where both used to work.
+    expect(parseRequestUrl("[::1]/x")?.url.href).toBe("https://[::1]/x");
+    expect(parseRequestUrl("[::1]:8080/x")?.url.href).toBe("https://[::1]:8080/x");
+    expect(parseRequestUrl("[2001:db8::1]:443/v2/articles")?.assumedScheme).toBe(true);
+    // Round two of the same blocker: an empty port ends the authority in a
+    // colon, which is also how `scheme://` ends. The `//` is what tells them
+    // apart, and without requiring it these two regressed while the cases
+    // above were passing.
+    expect(parseRequestUrl("[::1]:")?.url.href).toBe("https://[::1]/");
+    expect(parseRequestUrl("[::1]:/x")?.url.href).toBe("https://[::1]/x");
+  });
+
+  it("does not mistake a URL in the query for the authority", () => {
+    // Review of #23, round three. The authority was taken as everything before
+    // the first `/` — but a bare host with no path has no `/` before its query,
+    // so `example.com?a=http://x` ran into the embedded `://` and the whole
+    // thing was read as claiming a scheme. An OAuth `redirect_uri` is exactly
+    // this shape.
+    expect(parseRequestUrl("example.com?a=http://evil.com")?.url.origin).toBe("https://example.com");
+    expect(parseRequestUrl("example.com#a:b")?.url.origin).toBe("https://example.com");
+    expect(parseRequestUrl("[::1]?to=https://x")?.url.origin).toBe("https://[::1]");
+  });
+
+  /*
+   * The property F5 is actually about, asserted over a generated corpus rather
+   * than a list somebody thought of: **a host that was never named.**
+   *
+   * Three rounds of review went by fixing one input and breaking its neighbour,
+   * because each fix was checked against cases chosen by hand. This is the
+   * invariant those cases were all circling.
+   */
+  it("never returns a host the input did not name", () => {
+    const schemes = ["", "http://", "https://", "HTTP://", "ht!tp://", "2http://", "a+b-c.d://", "mailto:", "http:"];
+    const authorities = [
+      "example.com", "example.com:8080", "example.com:", "example.com:abc", "192.0.2.1",
+      "[::1]", "[::1]:8080", "[::1]:", "[2001:db8::1]:443", "user@example.com",
+      "user:pass@example.com", "xn--80ak6aa92e.com", "example.com.", "", "x",
+    ];
+    const tails = ["", "/", "//", "/p", "?a=1", "?a=http://evil.com", "#f", "#a:b", "/p?a=http://evil.com", "?a=1#f"];
+
+    // Skipping every `null` makes the sweep satisfiable by refusing everything —
+    // reverting the `?`/`#` split left this test green for exactly that reason.
+    // These must come back with an origin, whatever else changes.
+    for (const mustParse of [
+      "example.com?a=http://evil.com",
+      "example.com#a:b",
+      "example.com?a=1#f",
+      "[::1]?to=https://x",
+      "api.example.com/go?to=https://x",
+      "example.com",
+    ]) {
+      expect(parseRequestUrl(mustParse)?.url.origin, mustParse).toBeTruthy();
+    }
+
+    let parsedCount = 0;
+    for (const scheme of schemes) {
+      for (const authority of authorities) {
+        for (const tail of tails) {
+          const input = scheme + authority + tail;
+          const parsed = parseRequestUrl(input);
+          if (!parsed) continue;
+          parsedCount++;
+          // An empty host is an opaque URL (`mailto:`, `api.example.com:8080`),
+          // which names nothing and invents nothing.
+          if (parsed.url.host === "") continue;
+          expect(input.toLowerCase(), input).toContain(parsed.url.host.toLowerCase());
+
+          // Substring is not enough on its own: `ht!tp` *is* a substring of
+          // `ht!tp://x`, so the check above passed while the scheme was being
+          // served as the host — the exact defect. When the text writes
+          // `X://…`, X is a scheme and must not come back as the host. A
+          // bracketed literal is exempt: `[::1]` is an address, not a scheme.
+          const beforeSlashes = input.includes("://") ? input.slice(0, input.indexOf("://")) : null;
+          if (beforeSlashes !== null && beforeSlashes !== "" && !beforeSlashes.startsWith("[")) {
+            expect(parsed.url.host.toLowerCase(), input).not.toBe(beforeSlashes.toLowerCase());
+          }
+        }
+      }
+    }
+    // Guards the loop itself: a corpus that parses nothing asserts nothing.
+    expect(parsedCount).toBeGreaterThan(200);
+  });
+
+  it("reads a bracketed literal as a host, never as a scheme", () => {
+    // `[::1]://` ends its authority in a colon, which is also how `scheme://`
+    // ends — so the scheme branch caught it and an address became unparseable.
+    // An IPv6 literal is a host by definition; nothing else pinned this.
+    expect(parseRequestUrl("[::1]://")?.url.origin).toBe("https://[::1]");
+    expect(parseRequestUrl("[::1]://x")?.url.origin).toBe("https://[::1]");
+  });
+
+  it("leaves `host:port` alone, which the URL parser reads as a scheme", () => {
+    // Not something this fix changes, and worth pinning rather than leaving to
+    // be rediscovered: `api.example.com` is a syntactically valid scheme, so
+    // `new URL` accepts `api.example.com:8080/x` on the first attempt and the
+    // assumed-scheme path — and therefore the malformed-scheme check — is never
+    // reached. The result is an opaque URL whose origin is "null".
+    const parsed = parseRequestUrl("api.example.com:8080/x");
+    expect(parsed?.assumedScheme).toBe(false);
+    expect(parsed?.url.protocol).toBe("api.example.com:");
+  });
 });
 
 describe("responseReferenceTime", () => {
