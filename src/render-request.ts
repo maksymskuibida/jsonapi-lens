@@ -250,8 +250,20 @@ function claimsScheme(text: string): boolean {
   const authority = text.split("/", 1)[0] ?? "";
   const colon = authority.indexOf(":");
   if (colon < 0) return false;
+  // `scheme://…` — everything before the first slash is the scheme and its
+  // colon, whatever that scheme turned out to be.
+  if (authority.endsWith(":")) return true;
+  // Otherwise a colon only means a scheme when what comes before it could be
+  // one. `[::1]:8080` is an IPv6 host and a port, and its *first* colon belongs
+  // to the address — reading that as a malformed scheme rejected every bare
+  // IPv6 URL, with or without a port, which is the same harm F5 was about
+  // coming from the other side.
+  if (!SCHEME_TOKEN.test(authority.slice(0, colon))) return false;
   return !/^\d+$/.test(authority.slice(colon + 1));
 }
+
+/** A scheme, as RFC 3986 spells it: a letter, then letters, digits, `+`, `-` or `.`. */
+const SCHEME_TOKEN = /^[A-Za-z][A-Za-z0-9+.-]*$/;
 
 /* -------------------------------------------------------- masked values --- */
 

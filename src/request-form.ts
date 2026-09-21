@@ -468,7 +468,12 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
   const rebuildUrlFromQuery = (): void => {
     if (syncingUrl) return;
     syncingUrl = true;
-    const rows = readRows(queryList.root).map((r) => ({ name: r.name, value: r.value, disabled: r.disabled }));
+    // `raw` is carried through deliberately. Dropping it here re-encoded every
+    // row — including untouched ones — the moment any single row was edited, so
+    // the URL field showed `a=%25ZZ` for a row nobody had touched. Only the
+    // preview was wrong (Save reads the rows straight off the DOM), but it is
+    // the field somebody is looking at while they decide the value is right.
+    const rows = readRows(queryList.root);
     const split = splitUrlQuery(urlInput.value);
     const query = encodeQueryRows(rows);
     urlInput.value = split.base + (query ? `?${query}` : "") + split.hash;

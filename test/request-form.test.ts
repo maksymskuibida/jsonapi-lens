@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { decodeQueryRows, encodeQueryRows, splitUrlQuery } from "../src/request-form.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import { decodeQueryRows, encodeQueryRows, openRequestForm, splitUrlQuery } from "../src/request-form.js";
 import { decodeParams } from "../src/params.js";
 
 describe("splitUrlQuery", () => {
@@ -133,5 +133,44 @@ describe("decodeQueryRows / encodeQueryRows — the URL <-> table sync", () => {
 
   it("returns an empty row list for an empty query string", () => {
     expect(decodeQueryRows("")).toEqual([]);
+  });
+});
+
+/*
+ * The URL field's live preview, driven through the real dialog.
+ *
+ * Review of #23 found `rebuildUrlFromQuery` stripping each row's origin before
+ * re-encoding, so editing any one row re-encoded *all* of them in the field on
+ * screen — an untouched `a=%ZZ` previewing as `a=%25ZZ`, which is F2's own
+ * failure shown back to the person as they decide whether the value is right.
+ *
+ * Driven through `openRequestForm` rather than `encodeQueryRows`, because the
+ * first version of this test called that helper directly — and the helper was
+ * never the broken part. It passed with the defect reinstated.
+ */
+describe("the URL field's preview keeps untouched rows byte-identical", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="modal-root"></div><div id="toast"></div>';
+  });
+
+  it("re-encodes only the row that changed", () => {
+    openRequestForm(
+      { request: { url: "https://api.example.com/x?a=%ZZ&keep=x%20y&edit=old" } },
+      () => {},
+    );
+
+    const urlInput = document.querySelector<HTMLInputElement>(".xform__url-input");
+    expect(urlInput, "the form rendered").not.toBeNull();
+
+    const rows = [...document.querySelectorAll<HTMLElement>(".xform-rowlist")][0]!.querySelectorAll<HTMLElement>(
+      ".xform-row",
+    );
+    expect(rows.length, "three query rows").toBe(3);
+
+    const editValue = rows[2]!.querySelector<HTMLInputElement>(".xform__value")!;
+    editValue.value = "new";
+    editValue.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(urlInput!.value).toBe("https://api.example.com/x?a=%ZZ&keep=x%20y&edit=new");
   });
 });

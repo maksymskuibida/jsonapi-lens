@@ -107,6 +107,15 @@ describe("parseRequestUrl", () => {
     );
   });
 
+  it("assumes a scheme for a bare IPv6 host, whose own colons are not a scheme", () => {
+    // Review of #23, blocker. The first colon in `[::1]:8080` belongs to the
+    // address, not to a port, so reading it as a malformed scheme rejected
+    // every bare IPv6 URL — with or without a port — where both used to work.
+    expect(parseRequestUrl("[::1]/x")?.url.href).toBe("https://[::1]/x");
+    expect(parseRequestUrl("[::1]:8080/x")?.url.href).toBe("https://[::1]:8080/x");
+    expect(parseRequestUrl("[2001:db8::1]:443/v2/articles")?.assumedScheme).toBe(true);
+  });
+
   it("leaves `host:port` alone, which the URL parser reads as a scheme", () => {
     // Not something this fix changes, and worth pinning rather than leaving to
     // be rediscovered: `api.example.com` is a syntactically valid scheme, so
