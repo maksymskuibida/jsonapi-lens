@@ -303,6 +303,22 @@ describe("removing the exchange", () => {
     expect(document.querySelectorAll(".modal__panel"), "nothing stranded").toHaveLength(0);
   });
 
+  it("leaves focus on the button after the confirmation is declined", async () => {
+    // Disabling the button to stop a double-click blurs it, and does so before
+    // the confirmation captures what to restore focus to — so declining used to
+    // drop focus onto `<body>`, outside the dialog's own trap. Keyboard users
+    // only.
+    openRequestForm({ request: { url: "https://api.example.com/x" } }, () => {});
+    const remove = withText(/remove/i)!;
+    remove.focus();
+    remove.click();
+    await settle();
+    topPanelButtons().find((b) => !b.classList.contains("btn--danger"))!.click();
+    await settle();
+
+    expect(document.activeElement, "not stranded on the body").toBe(remove);
+  });
+
   it("does nothing if the confirmation is declined", async () => {
     // One click and no undo, so it asks — and saying no has to mean no.
     let got: RequestFormResult | null = null;

@@ -702,6 +702,13 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
             onSave({ request: undefined, response: undefined, detach: true });
           } finally {
             detach.disabled = false;
+            // Disabling blurs the button, and it does so *before* the
+            // confirmation captures what to restore focus to — so declining
+            // left focus on `<body>`, outside the dialog's own trap. Putting it
+            // back is this handler's job, since this handler is what moved it.
+            // Skipped once the form has closed: the button is detached then,
+            // and the confirmation's own restore has the floor.
+            if (detach.isConnected) detach.focus();
           }
         });
       }
