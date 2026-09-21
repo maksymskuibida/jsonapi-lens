@@ -122,6 +122,63 @@ describe("parseRequestUrl", () => {
     expect(parseRequestUrl("[::1]:/x")?.url.href).toBe("https://[::1]/x");
   });
 
+  it("does not mistake a URL in the query for the authority", () => {
+    // Review of #23, round three. The authority was taken as everything before
+    // the first `/` — but a bare host with no path has no `/` before its query,
+    // so `example.com?a=http://x` ran into the embedded `://` and the whole
+    // thing was read as claiming a scheme. An OAuth `redirect_uri` is exactly
+    // this shape.
+    expect(parseRequestUrl("example.com?a=http://evil.com")?.url.origin).toBe("https://example.com");
+    expect(parseRequestUrl("example.com#a:b")?.url.origin).toBe("https://example.com");
+    expect(parseRequestUrl("[::1]?to=https://x")?.url.origin).toBe("https://[::1]");
+  });
+
+  /*
+   * The property F5 is actually about, asserted over a generated corpus rather
+   * than a list somebody thought of: **a host that was never named.**
+   *
+   * Three rounds of review went by fixing one input and breaking its neighbour,
+   * because each fix was checked against cases chosen by hand. This is the
+   * invariant those cases were all circling.
+   */
+  it("never returns a host the input did not name", () => {
+    const schemes = ["", "http://", "https://", "HTTP://", "ht!tp://", "2http://", "a+b-c.d://", "mailto:", "http:"];
+    const authorities = [
+      "example.com", "example.com:8080", "example.com:", "example.com:abc", "192.168.1.1",
+      "[::1]", "[::1]:8080", "[::1]:", "[2001:db8::1]:443", "user@example.com",
+      "user:pass@example.com", "xn--80ak6aa92e.com", "example.com.", "", "x",
+    ];
+    const tails = ["", "/", "//", "/p", "?a=1", "?a=http://evil.com", "#f", "#a:b", "/p?a=http://evil.com", "?a=1#f"];
+
+    let parsedCount = 0;
+    for (const scheme of schemes) {
+      for (const authority of authorities) {
+        for (const tail of tails) {
+          const input = scheme + authority + tail;
+          const parsed = parseRequestUrl(input);
+          if (!parsed) continue;
+          parsedCount++;
+          // An empty host is an opaque URL (`mailto:`, `api.example.com:8080`),
+          // which names nothing and invents nothing.
+          if (parsed.url.host === "") continue;
+          expect(input.toLowerCase(), input).toContain(parsed.url.host.toLowerCase());
+
+          // Substring is not enough on its own: `ht!tp` *is* a substring of
+          // `ht!tp://x`, so the check above passed while the scheme was being
+          // served as the host — the exact defect. When the text writes
+          // `X://…`, X is a scheme and must not come back as the host. A
+          // bracketed literal is exempt: `[::1]` is an address, not a scheme.
+          const beforeSlashes = input.includes("://") ? input.slice(0, input.indexOf("://")) : null;
+          if (beforeSlashes !== null && beforeSlashes !== "" && !beforeSlashes.startsWith("[")) {
+            expect(parsed.url.host.toLowerCase(), input).not.toBe(beforeSlashes.toLowerCase());
+          }
+        }
+      }
+    }
+    // Guards the loop itself: a corpus that parses nothing asserts nothing.
+    expect(parsedCount).toBeGreaterThan(200);
+  });
+
   it("leaves `host:port` alone, which the URL parser reads as a scheme", () => {
     // Not something this fix changes, and worth pinning rather than leaving to
     // be rediscovered: `api.example.com` is a syntactically valid scheme, so

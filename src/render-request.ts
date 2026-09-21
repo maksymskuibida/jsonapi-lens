@@ -247,14 +247,18 @@ export function parseRequestUrl(raw: string): ParsedRequestUrl | null {
  * it, it is a broken one.
  */
 function claimsScheme(text: string): boolean {
-  const authority = text.split("/", 1)[0] ?? "";
+  // Up to the first `/`, `?` or `#`. Splitting on `/` alone let a query carrying
+  // a URL of its own supply the colon: `example.com?a=http://x` has no path, so
+  // the split ran into the embedded `://` and the whole thing was read as
+  // claiming a scheme — a bare host that parsed on main stopped parsing.
+  const authority = text.split(/[/?#]/, 1)[0] ?? "";
   const colon = authority.indexOf(":");
   if (colon < 0) return false;
   // `scheme://…` — everything before the first slash is the scheme and its
   // colon, whatever that scheme turned out to be. The `//` is required: without
   // it a bare IPv6 host with an empty port (`[::1]:/x`) ends in a colon too,
   // and was read as a scheme for exactly the reason this branch exists to stop.
-  if (authority.endsWith(":") && text.startsWith(`${authority}//`)) return true;
+  if (authority.endsWith(":") && text.startsWith(`${authority}//`) && !authority.startsWith("[")) return true;
   // Otherwise a colon only means a scheme when what comes before it could be
   // one. `[::1]:8080` is an IPv6 host and a port, and its *first* colon belongs
   // to the address — reading that as a malformed scheme rejected every bare
