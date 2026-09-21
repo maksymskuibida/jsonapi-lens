@@ -48,6 +48,7 @@ import type { HeaderEntry, HeaderSet } from "./headers.js";
 import { parseCookieHeader, parseSetCookie } from "./cookies.js";
 import type { Cookie, CookieSet, SetCookie, SetCookieSet } from "./cookies.js";
 import { decodeParams } from "./params.js";
+import { hasExchangeContent } from "./render-request.js";
 import type { BodyPart, Exchange, RequestPart, ResponsePart } from "./exchange.js";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -384,6 +385,17 @@ function textField(value: string, placeholder: string, ariaLabel: string, type =
 export interface RequestFormResult {
   request: RequestPart | undefined;
   response: ResponsePart | undefined;
+  /**
+   * Take the exchange off the document entirely, rather than merge.
+   *
+   * `undefined` on the two fields above cannot mean this: `mergeExchange`
+   * treats an absent part as "unchanged", which is what makes "open the form,
+   * touch nothing, save" a no-op. Emptying every field therefore did *not*
+   * remove anything — it submitted nothing, and the request survived with its
+   * headers and whatever credentials were in them. Removal has to be said, not
+   * inferred from emptiness.
+   */
+  detach?: true;
 }
 
 /**
@@ -581,12 +593,18 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
     el("p", { class: "xform__hint", text: m.setCookieHint }),
     labeled(m.cookiesLabel, resSetCookieList.root),
     resBody.root,
-    // How to take the whole thing off again. It has always worked — empty every
-    // field and save — but nothing said so, which made it look one-way.
-    el("p", { class: "xform__hint", text: m.detachHint }),
   );
 
-  const save = el("button", { class: "btn btn--primary", type: "button", text: m.save });
+  // `xform__save` is a locale-independent hook for the browser scenarios, which
+  // used to take the first button in the actions row — fine until a second
+  // button appeared beside it.
+  const save = el("button", { class: "btn btn--primary xform__save", type: "button", text: m.save });
+  // Only when there is something to take off. `hasExchangeContent` is the same
+  // test the band's own visibility uses, so the button is there exactly when a
+  // band is.
+  const detach = hasExchangeContent(existing)
+    ? el("button", { class: "btn btn--danger", type: "button", text: m.detach, title: m.detachTitle })
+    : null;
 
   openModal({
     title: m.title,
@@ -657,7 +675,13 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
         handle.close();
         onSave({ request: requestPart, response: responsePart });
       });
-      return el("div", { class: "modal__actions" }, save);
+      if (detach) {
+        detach.addEventListener("click", () => {
+          handle.close();
+          onSave({ request: undefined, response: undefined, detach: true });
+        });
+      }
+      return el("div", { class: "modal__actions" }, detach, save);
     },
   });
 }

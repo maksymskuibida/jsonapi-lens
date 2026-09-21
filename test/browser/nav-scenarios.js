@@ -599,7 +599,10 @@
         statusInput.dispatchEvent(new Event('input', { bubbles: true }));
       }
 
-      const saveButton = document.querySelector('.modal .modal__actions button');
+      // By its own hook, not by position: a `Remove request` button sits beside
+      // it once an exchange is attached, and `:first-of-type` silently became
+      // that instead — this scenario removed the exchange it had just saved.
+      const saveButton = document.querySelector('.modal .modal__actions .xform__save');
       if (!saveButton) throw new Error('no Save button in the request form');
       saveButton.click();
       await N.settle(400);

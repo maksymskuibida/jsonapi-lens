@@ -872,8 +872,8 @@ export const de: Messages = {
       removeRow: "Diese Zeile entfernen",
       disableRowLabel: "deaktiviert",
       disableRowAria: (name) => (name === "" ? "Diese Zeile deaktivieren" : `${name} deaktivieren`),
-      detachHint:
-        "Um Anfrage und Antwort von diesem Dokument zu lösen, leeren Sie alle Felder oben und speichern Sie.",
+      detach: "Anfrage entfernen",
+      detachTitle: "Anfrage und Antwort vollständig von diesem Dokument lösen",
       disableRowTitle: "Diese Zeile außer Betracht lassen, ohne sie zu löschen",
       rowName: "Feldname",
       rowValue: "Feldwert",

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { decodeQueryRows, encodeQueryRows, openRequestForm, splitUrlQuery } from "../src/request-form.js";
+import type { RequestFormResult } from "../src/request-form.js";
+import { headerSet } from "../src/headers.js";
 import { decodeParams } from "../src/params.js";
 
 describe("splitUrlQuery", () => {
@@ -218,5 +220,66 @@ describe("the per-row disable checkbox has a name of its own", () => {
     // Still named — an empty field is not an excuse for an empty label.
     expect(labels()[0]).toBeTruthy();
     expect(labels()[0]).not.toContain("renamed");
+  });
+});
+
+/*
+ * Removing an exchange has to be said, not inferred from emptiness.
+ *
+ * The first attempt at this finding was a hint telling people to "empty every
+ * field and save". That is false: `hasRequest`/`hasResponse` gate on the fields
+ * being non-empty, so emptying them submits *nothing*, and `mergeExchange`
+ * keeps a part the form did not submit — which is exactly what makes "open,
+ * touch nothing, save" a no-op. Following the hint left the request in place
+ * with its headers and whatever credentials were in them, while telling the
+ * person it had been taken off.
+ */
+describe("removing the exchange", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="modal-root"></div><div id="toast"></div>';
+  });
+
+  const actionLabels = (): string[] =>
+    [...document.querySelectorAll(".modal__actions button")].map((b) => (b.textContent ?? "").trim());
+
+  const withText = (re: RegExp): HTMLElement | undefined =>
+    [...document.querySelectorAll<HTMLElement>(".modal__actions button")].find((b) => re.test(b.textContent ?? ""));
+
+  it("says detach explicitly, rather than leaving it to be inferred", () => {
+    let got: RequestFormResult | null = null;
+    openRequestForm(
+      { request: { url: "https://api.example.com/x", headers: headerSet([{ name: "Authorization", value: "Bearer s3cr3t" }]) } },
+      (result) => (got = result),
+    );
+    expect(actionLabels(), "a remove control is offered").toContain("Remove request");
+
+    withText(/remove/i)!.click();
+    expect(got).not.toBeNull();
+    expect(got!.detach, "the result carries the instruction").toBe(true);
+    // And carries no parts, so a caller that ignored `detach` would merge
+    // nothing rather than silently write a half-empty exchange.
+    expect(got!.request).toBeUndefined();
+    expect(got!.response).toBeUndefined();
+  });
+
+  it("offers nothing to remove when nothing is attached", () => {
+    openRequestForm({}, () => {});
+    expect(actionLabels()).not.toContain("Remove request");
+  });
+
+  it("does not treat emptying every field as a removal", () => {
+    // The behaviour the false hint described. Pinned so nobody reintroduces
+    // the claim: emptying submits nothing, which is a no-op, not a removal.
+    let got: RequestFormResult | null = null;
+    openRequestForm({ request: { url: "https://api.example.com/x" } }, (result) => (got = result));
+
+    const url = document.querySelector<HTMLInputElement>(".xform__url-input")!;
+    url.value = "";
+    url.dispatchEvent(new Event("input", { bubbles: true }));
+    for (const row of [...document.querySelectorAll<HTMLElement>(".xform-row")]) row.remove();
+
+    withText(/^save$/i)!.click();
+    expect(got).not.toBeNull();
+    expect(got!.detach, "emptiness is not an instruction").toBeUndefined();
   });
 });
