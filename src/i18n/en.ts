@@ -997,6 +997,7 @@ export const en = {
       disableRowAria: (name: string) => (name === "" ? "Disable this row" : `Disable ${name}`),
       detach: "Remove request",
       detachTitle: "Take the request and response off this document entirely",
+      detachConfirm: "The request and response will be taken off this document. This cannot be undone.",
       disableRowTitle: "Take this row out of consideration without deleting it",
       rowName: "Field name",
       rowValue: "Field value",

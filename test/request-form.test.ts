@@ -245,7 +245,19 @@ describe("removing the exchange", () => {
   const withText = (re: RegExp): HTMLElement | undefined =>
     [...document.querySelectorAll<HTMLElement>(".modal__actions button")].find((b) => re.test(b.textContent ?? ""));
 
-  it("says detach explicitly, rather than leaving it to be inferred", () => {
+  /**
+   * The topmost panel's buttons. Scoped to the last `.modal__panel` on purpose:
+   * the form's own `Remove request` is `btn--danger` too, so a document-wide
+   * selector finds it rather than the confirmation stacked above it.
+   */
+  const topPanelButtons = (): HTMLElement[] => {
+    const panel = [...document.querySelectorAll<HTMLElement>(".modal__panel")].pop();
+    return panel ? [...panel.querySelectorAll<HTMLElement>(".modal__actions .btn")] : [];
+  };
+
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("says detach explicitly, rather than leaving it to be inferred", async () => {
     let got: RequestFormResult | null = null;
     openRequestForm(
       { request: { url: "https://api.example.com/x", headers: headerSet([{ name: "Authorization", value: "Bearer s3cr3t" }]) } },
@@ -254,12 +266,31 @@ describe("removing the exchange", () => {
     expect(actionLabels(), "a remove control is offered").toContain("Remove request");
 
     withText(/remove/i)!.click();
+    await settle();
+    topPanelButtons().find((b) => b.classList.contains("btn--danger"))!.click();
+    await settle();
+
     expect(got).not.toBeNull();
     expect(got!.detach, "the result carries the instruction").toBe(true);
     // And carries no parts, so a caller that ignored `detach` would merge
     // nothing rather than silently write a half-empty exchange.
     expect(got!.request).toBeUndefined();
     expect(got!.response).toBeUndefined();
+  });
+
+  it("does nothing if the confirmation is declined", async () => {
+    // One click and no undo, so it asks — and saying no has to mean no.
+    let got: RequestFormResult | null = null;
+    openRequestForm({ request: { url: "https://api.example.com/x" } }, (result) => (got = result));
+
+    withText(/remove/i)!.click();
+    await settle();
+    const cancel = topPanelButtons().find((b) => !b.classList.contains("btn--danger"));
+    expect(cancel, "a way out of the confirmation").toBeTruthy();
+    cancel!.click();
+    await settle();
+
+    expect(got, "nothing was submitted").toBeNull();
   });
 
   it("offers nothing to remove when nothing is attached", () => {

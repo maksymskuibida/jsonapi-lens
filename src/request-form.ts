@@ -42,7 +42,7 @@
 
 import { el } from "./dom.js";
 import { t } from "./i18n/index.js";
-import { openModal } from "./ui.js";
+import { confirmModal, openModal } from "./ui.js";
 import { headerSet } from "./headers.js";
 import type { HeaderEntry, HeaderSet } from "./headers.js";
 import { parseCookieHeader, parseSetCookie } from "./cookies.js";
@@ -676,7 +676,18 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
         onSave({ request: requestPart, response: responsePart });
       });
       if (detach) {
-        detach.addEventListener("click", () => {
+        detach.addEventListener("click", async () => {
+          // Destructive, one click, and there is no undo — the same shape as
+          // deleting a library entry, which asks first (`panels.ts`). Asking
+          // here too keeps the one pattern rather than inventing a second.
+          const confirmed = await confirmModal({
+            title: m.detach,
+            message: m.detachConfirm,
+            confirmLabel: m.detach,
+            cancelLabel: t().modal.cancel,
+            tone: "danger",
+          });
+          if (!confirmed) return;
           handle.close();
           onSave({ request: undefined, response: undefined, detach: true });
         });

@@ -874,6 +874,7 @@ export const de: Messages = {
       disableRowAria: (name) => (name === "" ? "Diese Zeile deaktivieren" : `${name} deaktivieren`),
       detach: "Anfrage entfernen",
       detachTitle: "Anfrage und Antwort vollständig von diesem Dokument lösen",
+      detachConfirm: "Anfrage und Antwort werden von diesem Dokument entfernt. Das lässt sich nicht rückgängig machen.",
       disableRowTitle: "Diese Zeile außer Betracht lassen, ohne sie zu löschen",
       rowName: "Feldname",
       rowValue: "Feldwert",

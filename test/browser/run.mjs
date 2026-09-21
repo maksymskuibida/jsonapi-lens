@@ -1263,6 +1263,13 @@ try {
       const remove = [...d.querySelectorAll(".modal__actions button")].find((b) => /remove/i.test(b.textContent));
       if (!remove) return { attached, reason: "no remove control" };
       remove.click();
+      await wait(700);
+      // It asks first. Scoped to the topmost panel: the form's own Remove is
+      // btn--danger too, so a document-wide search finds it, not this.
+      const top = [...d.querySelectorAll(".modal__panel")].pop();
+      const yes = top && [...top.querySelectorAll(".modal__actions .btn--danger")][0];
+      if (!yes) return { attached, reason: "no confirmation offered" };
+      yes.click();
       await wait(1500);
 
       const band = d.getElementById("exchange-band");
@@ -1273,15 +1280,36 @@ try {
       };
     })()`);
 
+    // And it stays gone. The removal is persisted, so "the band disappeared"
+    // on its own would be satisfied by a render that simply stopped drawing it
+    // while the exchange sat in IndexedDB waiting for the next load.
+    await gone.navigate(`${ORIGIN}/?lang=en`);
+    const afterReload = await gone.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 40 && !document.querySelector("#resume button"); i++) await wait(250);
+      const resume = document.querySelector("#resume button");
+      if (!resume) return { reason: "no resume button" };
+      resume.click();
+      await wait(1500);
+      const band = document.getElementById("exchange-band");
+      return { built: document.getElementById("doc").childElementCount, backAgain: !!band };
+    })()`);
+
     const held =
-      !removal.reason && removal.attached === true && removal.stillThere === false && removal.stillNamesTheHost === false;
+      !removal.reason &&
+      !afterReload.reason &&
+      removal.attached === true &&
+      removal.stillThere === false &&
+      removal.stillNamesTheHost === false &&
+      afterReload.built > 0 &&
+      afterReload.backAgain === false;
     report(
       held,
       "-",
       "removing an attached exchange takes it off the document",
-      removal.reason
-        ? removal.reason
-        : `attached ${removal.attached}, band after remove ${removal.stillThere ? "STILL THERE" : "gone"}`,
+      removal.reason || afterReload.reason
+        ? removal.reason || afterReload.reason
+        : `attached ${removal.attached}, band after remove ${removal.stillThere ? "STILL THERE" : "gone"}, after reload ${afterReload.backAgain ? "CAME BACK" : "still gone"}`,
     );
     await gone.dispose();
   } catch (error) {
