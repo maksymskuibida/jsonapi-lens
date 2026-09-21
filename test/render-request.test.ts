@@ -144,11 +144,25 @@ describe("parseRequestUrl", () => {
   it("never returns a host the input did not name", () => {
     const schemes = ["", "http://", "https://", "HTTP://", "ht!tp://", "2http://", "a+b-c.d://", "mailto:", "http:"];
     const authorities = [
-      "example.com", "example.com:8080", "example.com:", "example.com:abc", "192.168.1.1",
+      "example.com", "example.com:8080", "example.com:", "example.com:abc", "192.0.2.1",
       "[::1]", "[::1]:8080", "[::1]:", "[2001:db8::1]:443", "user@example.com",
       "user:pass@example.com", "xn--80ak6aa92e.com", "example.com.", "", "x",
     ];
     const tails = ["", "/", "//", "/p", "?a=1", "?a=http://evil.com", "#f", "#a:b", "/p?a=http://evil.com", "?a=1#f"];
+
+    // Skipping every `null` makes the sweep satisfiable by refusing everything —
+    // reverting the `?`/`#` split left this test green for exactly that reason.
+    // These must come back with an origin, whatever else changes.
+    for (const mustParse of [
+      "example.com?a=http://evil.com",
+      "example.com#a:b",
+      "example.com?a=1#f",
+      "[::1]?to=https://x",
+      "api.example.com/go?to=https://x",
+      "example.com",
+    ]) {
+      expect(parseRequestUrl(mustParse)?.url.origin, mustParse).toBeTruthy();
+    }
 
     let parsedCount = 0;
     for (const scheme of schemes) {
@@ -177,6 +191,14 @@ describe("parseRequestUrl", () => {
     }
     // Guards the loop itself: a corpus that parses nothing asserts nothing.
     expect(parsedCount).toBeGreaterThan(200);
+  });
+
+  it("reads a bracketed literal as a host, never as a scheme", () => {
+    // `[::1]://` ends its authority in a colon, which is also how `scheme://`
+    // ends — so the scheme branch caught it and an address became unparseable.
+    // An IPv6 literal is a host by definition; nothing else pinned this.
+    expect(parseRequestUrl("[::1]://")?.url.origin).toBe("https://[::1]");
+    expect(parseRequestUrl("[::1]://x")?.url.origin).toBe("https://[::1]");
   });
 
   it("leaves `host:port` alone, which the URL parser reads as a scheme", () => {
