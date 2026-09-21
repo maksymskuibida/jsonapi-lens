@@ -251,8 +251,10 @@ function claimsScheme(text: string): boolean {
   const colon = authority.indexOf(":");
   if (colon < 0) return false;
   // `scheme://…` — everything before the first slash is the scheme and its
-  // colon, whatever that scheme turned out to be.
-  if (authority.endsWith(":")) return true;
+  // colon, whatever that scheme turned out to be. The `//` is required: without
+  // it a bare IPv6 host with an empty port (`[::1]:/x`) ends in a colon too,
+  // and was read as a scheme for exactly the reason this branch exists to stop.
+  if (authority.endsWith(":") && text.startsWith(`${authority}//`)) return true;
   // Otherwise a colon only means a scheme when what comes before it could be
   // one. `[::1]:8080` is an IPv6 host and a port, and its *first* colon belongs
   // to the address — reading that as a malformed scheme rejected every bare

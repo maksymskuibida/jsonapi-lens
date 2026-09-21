@@ -114,6 +114,12 @@ describe("parseRequestUrl", () => {
     expect(parseRequestUrl("[::1]/x")?.url.href).toBe("https://[::1]/x");
     expect(parseRequestUrl("[::1]:8080/x")?.url.href).toBe("https://[::1]:8080/x");
     expect(parseRequestUrl("[2001:db8::1]:443/v2/articles")?.assumedScheme).toBe(true);
+    // Round two of the same blocker: an empty port ends the authority in a
+    // colon, which is also how `scheme://` ends. The `//` is what tells them
+    // apart, and without requiring it these two regressed while the cases
+    // above were passing.
+    expect(parseRequestUrl("[::1]:")?.url.href).toBe("https://[::1]/");
+    expect(parseRequestUrl("[::1]:/x")?.url.href).toBe("https://[::1]/x");
   });
 
   it("leaves `host:port` alone, which the URL parser reads as a scheme", () => {
