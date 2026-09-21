@@ -677,19 +677,32 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
       });
       if (detach) {
         detach.addEventListener("click", async () => {
-          // Destructive, one click, and there is no undo — the same shape as
-          // deleting a library entry, which asks first (`panels.ts`). Asking
-          // here too keeps the one pattern rather than inventing a second.
-          const confirmed = await confirmModal({
-            title: m.detach,
-            message: m.detachConfirm,
-            confirmLabel: m.detach,
-            cancelLabel: t().modal.cancel,
-            tone: "danger",
-          });
-          if (!confirmed) return;
-          handle.close();
-          onSave({ request: undefined, response: undefined, detach: true });
+          // The handler awaits, so a second click lands while the first is
+          // still open and stacks a second confirmation on top of the first.
+          // Confirming the top one then removes the exchange and closes the
+          // form, leaving the other stranded over nothing — and answering it
+          // fires a second `onSave` for an action that already happened.
+          // Disabling is what a real hand needs; the guard covers a click
+          // dispatched straight at the element.
+          if (detach.disabled) return;
+          detach.disabled = true;
+          try {
+            // Destructive, one click, and there is no undo — the same shape as
+            // deleting a library entry, which asks first (`panels.ts`). Asking
+            // here too keeps the one pattern rather than inventing a second.
+            const confirmed = await confirmModal({
+              title: m.detach,
+              message: m.detachConfirm,
+              confirmLabel: m.detach,
+              cancelLabel: t().modal.cancel,
+              tone: "danger",
+            });
+            if (!confirmed) return;
+            handle.close();
+            onSave({ request: undefined, response: undefined, detach: true });
+          } finally {
+            detach.disabled = false;
+          }
         });
       }
       return el("div", { class: "modal__actions" }, detach, save);

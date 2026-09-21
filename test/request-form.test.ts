@@ -278,6 +278,31 @@ describe("removing the exchange", () => {
     expect(got!.response).toBeUndefined();
   });
 
+  it("asks once however many times the button is pressed", async () => {
+    // The handler awaits, so a second click used to land while the first
+    // confirmation was still open and stack a second one on top. Confirming the
+    // top one then removed the exchange and closed the form, leaving the other
+    // over nothing — and answering that one fired a second `onSave` for an
+    // action that had already happened.
+    let calls = 0;
+    openRequestForm({ request: { url: "https://api.example.com/x" } }, () => (calls += 1));
+
+    const remove = withText(/remove/i)!;
+    remove.click();
+    remove.click();
+    remove.click();
+    await settle();
+
+    // The form, and exactly one confirmation over it.
+    expect(document.querySelectorAll(".modal__panel")).toHaveLength(2);
+
+    topPanelButtons().find((b) => b.classList.contains("btn--danger"))!.click();
+    await settle();
+
+    expect(calls, "one removal, not one per click").toBe(1);
+    expect(document.querySelectorAll(".modal__panel"), "nothing stranded").toHaveLength(0);
+  });
+
   it("does nothing if the confirmation is declined", async () => {
     // One click and no undo, so it asks — and saying no has to mean no.
     let got: RequestFormResult | null = null;
