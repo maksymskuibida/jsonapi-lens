@@ -223,11 +223,34 @@ export function parseRequestUrl(raw: string): ParsedRequestUrl | null {
   // in front of it would parse to a URL with an empty host, which is not what
   // the spec's `api.example.com/x` example means.
   if (trimmed.startsWith("/")) return null;
+  // A scheme that was given and is *invalid* is not a missing scheme. Without
+  // this, `ht!tp://[not a url]` fell through and `https://ht!tp://…` parsed —
+  // producing the origin `https://ht!tp`, which no request ever went to, under
+  // a note reading "No scheme was given". A tool people open precisely because
+  // a request looks wrong must not invent the part they came to check.
+  if (claimsScheme(trimmed)) return null;
   try {
     return { url: new URL(`https://${trimmed}`), assumedScheme: true };
   } catch {
     return null;
   }
+}
+
+/**
+ * Does this text claim a scheme of its own?
+ *
+ * Only the part before the first `/` is considered, so a query that happens to
+ * carry a URL (`api.example.com/go?to=https://x`) is still a bare host. Within
+ * that, a colon followed by digits alone is a port — `api.example.com:8080` has
+ * no scheme and should still get one assumed. Anything else after a colon is
+ * something trying to be a scheme, and if the URL parser has already rejected
+ * it, it is a broken one.
+ */
+function claimsScheme(text: string): boolean {
+  const authority = text.split("/", 1)[0] ?? "";
+  const colon = authority.indexOf(":");
+  if (colon < 0) return false;
+  return !/^\d+$/.test(authority.slice(colon + 1));
 }
 
 /* -------------------------------------------------------- masked values --- */
@@ -240,6 +263,8 @@ export function parseRequestUrl(raw: string): ParsedRequestUrl | null {
  * for the unmasked case). "Click to reveal, one at a time" — each value has
  * its own toggle; revealing one never affects any other.
  */
+const MASK_DOTS = 12;
+
 function maskableValue(value: string, masked: boolean): HTMLElement {
   const wrap = el("span", { class: "xmask" });
   if (!masked) {
@@ -248,10 +273,10 @@ function maskableValue(value: string, masked: boolean): HTMLElement {
   }
 
   wrap.setAttribute(REVEAL_ATTR, "false");
-  const dots = el("span", {
-    class: "xmask__dots",
-    text: "•".repeat(Math.min(24, Math.max(8, value.length))),
-  });
+  // A fixed run, not one derived from the value. Scaling it to the length
+  // counted the secret out on screen — a 21-character session id showed exactly
+  // 21 dots — which is the one thing a mask must not do.
+  const dots = el("span", { class: "xmask__dots", text: "•".repeat(MASK_DOTS) });
   const real = el("span", { class: "xmask__value", text: value });
   const button = el("button", {
     class: "xmask__toggle",

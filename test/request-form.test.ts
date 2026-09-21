@@ -28,10 +28,58 @@ describe("decodeQueryRows / encodeQueryRows — the URL <-> table sync", () => {
   it("decodes a query string into rows, percent- and +-decoded for display", () => {
     const rows = decodeQueryRows("a=1&b=hello%20world&c=x+y");
     expect(rows).toEqual([
-      { name: "a", value: "1", disabled: false },
-      { name: "b", value: "hello world", disabled: false },
-      { name: "c", value: "x y", disabled: false },
+      { name: "a", value: "1", disabled: false, raw: { key: "a", value: "1" } },
+      { name: "b", value: "hello world", disabled: false, raw: { key: "b", value: "hello%20world" } },
+      { name: "c", value: "x y", disabled: false, raw: { key: "c", value: "x+y" } },
     ]);
+  });
+
+  /*
+   * Opening the request dialog and pressing Save, changing nothing, used to
+   * re-encode every parameter — because a row is populated with the *decoded*
+   * text a person edits, and saving encoded that text again over bytes that
+   * were already encoded. `%5B` became `%255B`, and again on the next round
+   * trip, taking the bracket-object reading with it. The corrupted values are
+   * what Copy, Download and a share then carried.
+   *
+   * Asserted as an identity on the wire, which is the property that actually
+   * matters, rather than on the row shape.
+   */
+  it("writes an untouched row back byte-for-byte, however it was encoded", () => {
+    for (const query of [
+      "filter%5Btag%5D=a%20b",
+      "q=%D1%82%D0%B5%D1%81%D1%82",
+      "a%5B%5D=1&a%5B%5D=2",
+      "include=comments",
+      "c=x+y",
+    ]) {
+      expect(encodeQueryRows(decodeQueryRows(query)), query).toBe(query);
+      // Twice, because the defect compounded — one round trip looked survivable.
+      expect(encodeQueryRows(decodeQueryRows(encodeQueryRows(decodeQueryRows(query)))), query).toBe(query);
+    }
+  });
+
+  it("keeps an escape it cannot decode, rather than escaping the escape", () => {
+    // `%ZZ` is not valid percent-encoding, so it decodes to itself; encoding
+    // that gave `%25ZZ` on the *first* save, with no round trip needed.
+    expect(encodeQueryRows(decodeQueryRows("a=%ZZ"))).toBe("a=%ZZ");
+  });
+
+  it("keeps a valueless parameter valueless", () => {
+    // `?flag` is not `?flag=`, and `params.ts` keeps the two distinguishable.
+    expect(encodeQueryRows(decodeQueryRows("flag"))).toBe("flag");
+    expect(encodeQueryRows(decodeQueryRows("flag=")), "empty value is not valueless").toBe("flag=");
+  });
+
+  it("re-encodes a row that was actually edited", () => {
+    // The other half: preserving bytes must not mean ignoring an edit.
+    const rows = decodeQueryRows("filter%5Btag%5D=a%20b");
+    rows[0]!.value = "changed value";
+    expect(encodeQueryRows(rows)).toBe("filter%5Btag%5D=changed%20value");
+
+    const renamed = decodeQueryRows("filter%5Btag%5D=a%20b");
+    renamed[0]!.name = "other[k]";
+    expect(encodeQueryRows(renamed)).toBe("other%5Bk%5D=a%20b");
   });
 
   it("re-encodes rows to a query string decodeParams reads back to an equivalent value", () => {

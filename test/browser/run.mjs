@@ -978,7 +978,7 @@ try {
    * reported it as a compliant 24. The first version of this check did exactly
    * that and passed while two kinds of target were still too small.
    *
-   * The anti-vacuity guard is that all three kinds of control are actually
+   * The anti-vacuity guard is that all four kinds of control are actually
    * present: `.act` (the per-resource row buttons), `.act--mini` (the per-value
    * copies, the shortest kind at 18.5px) and `.chip` (a link to another
    * resource, the 23.5px kind). An empty sweep passes trivially, and each of
@@ -1016,13 +1016,61 @@ try {
       [...d.querySelectorAll("details.tree")].forEach((t) => (t.open = true));
       await wait(700);
 
+      // Attach an exchange, so the band's own controls are on screen to be
+      // measured. Without this the sweep ran against a document that had none,
+      // and .xmask__toggle — a 17px standalone button — was never in it. A
+      // credential-shaped value, because the toggle only exists on a masked one.
+      d.getElementById("edit-request").click();
+      await wait(900);
+      const urlField = d.querySelector(".xform__url-input");
+      if (urlField) {
+        urlField.value = "https://api.example.com/v2/x";
+        urlField.dispatchEvent(new Event("input", { bubbles: true }));
+        // Request headers are the second row list; query parameters are first.
+        const headerList = [...d.querySelectorAll(".xform-rowlist")][1];
+        if (headerList) {
+          headerList.querySelector("button").click();
+          await wait(250);
+          const name = headerList.querySelector(".xform__name");
+          const value = headerList.querySelector(".xform__value");
+          name.value = "Authorization";
+          name.dispatchEvent(new Event("input", { bubbles: true }));
+          value.value = "Bearer s3cr3t-token";
+          value.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        [...d.querySelectorAll(".modal__actions button")].pop().click();
+        await wait(1400);
+        const band = d.getElementById("exchange-band");
+        if (band) band.open = true;
+        await wait(600);
+      }
+
       const small = {};
       let measured = 0;
+      let inlineExempt = 0;
       for (const el of d.querySelectorAll("button, a[href], summary, [role=button]")) {
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;
         measured++;
         if (r.height >= 24 - 0.01 && r.width >= 24 - 0.01) continue;
+        // SC 2.5.8 exempts a target "in a sentence or whose size is otherwise
+        // constrained by the line-height of non-target text". Tested as the
+        // spec words it: an anchor with real text beside it in the same parent.
+        // That covers "jump to the document below", which sits mid-sentence in
+        // a paragraph, and nothing else — the band's origin link has only a
+        // span for a sibling, so it is not exempt and was given the floor
+        // instead. Checking computed display cannot work here: a flex item is
+        // blockified, so the origin link reports "block" despite reading as
+        // inline text.
+        const inSentence =
+          el.tagName === "A" &&
+          [...(el.parentElement ? el.parentElement.childNodes : [])].some(
+            (n) => n.nodeType === 3 && n.textContent.trim().length > 0,
+          );
+        if (inSentence) {
+          inlineExempt++;
+          continue;
+        }
         const key =
           el.tagName.toLowerCase() +
           "." +
@@ -1037,6 +1085,8 @@ try {
         rows: d.querySelectorAll(".act").length,
         minis: d.querySelectorAll(".act--mini").length,
         chips: d.querySelectorAll(".chip").length,
+        reveals: d.querySelectorAll(".xmask__toggle").length,
+        inlineExempt,
         offenders: Object.entries(small).map(
           ([sel, v]) => sel + " " + v.n + "x " + v.w + "x" + v.h,
         ),
@@ -1048,6 +1098,10 @@ try {
       targets.rows > 0 &&
       targets.minis > 0 &&
       targets.chips > 0 &&
+      // The band's own reveal toggle. Without this the sweep passes against a
+      // page that simply has no band on it, which is how a 17px button shipped
+      // under a green check.
+      targets.reveals > 0 &&
       targets.offenders.length === 0;
     report(
       held,
@@ -1055,12 +1109,114 @@ try {
       "every pointer target is at least 24x24, the WCAG 2.2 minimum",
       targets.offenders.length
         ? `${targets.offenders.length} kind(s) too small: ${targets.offenders.join("; ")}`
-        : `${targets.measured} measured — ${targets.rows} row controls, ${targets.minis} per-value copies, ${targets.chips} chips`,
+        : `${targets.measured} measured — ${targets.rows} row controls, ${targets.minis} per-value copies, ${targets.chips} chips, ${targets.reveals} reveal toggles, ${targets.inlineExempt} inline links exempt`,
     );
   } catch (error) {
     report(false, "err", "every pointer target is at least 24x24, the WCAG 2.2 minimum", error.message);
   } finally {
     await phone?.dispose();
+  }
+
+  /*
+   * The exchange review shows the values it is not masking.
+   *
+   * `.xmask` is used for every value, masked or not, and the rule that hides
+   * the real text was written as `:not([data-x-reveal="true"])` — which also
+   * matched the no-mask case, where the attribute is absent entirely. Every
+   * ordinary header, cookie and URL part rendered as an empty cell: no text, no
+   * dots, no toggle, a 0x0 box. A panel whose whole job is showing an HTTP
+   * exchange was showing only the names.
+   *
+   * Both halves are asserted together on purpose. "The value is visible" alone
+   * would pass if masking stopped working altogether, and "the secret is
+   * hidden" alone is what shipped. The dot run is checked too — it used to be
+   * `min(24, max(8, length))`, which counted the secret out on screen.
+   */
+  try {
+    const mask = await page.openSized(1200, 900);
+    await mask.navigate(`${ORIGIN}/?lang=en`);
+    await mask.evaluate(readFlow('{"data":{"type":"a","id":"1"}}'));
+    const shown = await mask.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const d = document;
+      await wait(400);
+      d.getElementById("edit-request").click();
+      await wait(900);
+      const url = d.querySelector(".xform__url-input");
+      if (!url) return { reason: "no request form" };
+      url.value = "https://api.example.com/v2/x";
+      url.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Two request headers: one ordinary, one credential-shaped.
+      const headerList = [...d.querySelectorAll(".xform-rowlist")][1];
+      if (!headerList) return { reason: "no header list" };
+      const add = headerList.querySelector("button");
+      const fill = async (name, value, index) => {
+        add.click();
+        await wait(250);
+        const names = [...headerList.querySelectorAll(".xform__name")];
+        const values = [...headerList.querySelectorAll(".xform__value")];
+        names[index].value = name;
+        names[index].dispatchEvent(new Event("input", { bubbles: true }));
+        values[index].value = value;
+        values[index].dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      await fill("Accept", "application/vnd.api+json", 0);
+      await fill("Authorization", "Bearer SECRETSESSIONVALUE123", 1);
+
+      [...d.querySelectorAll(".modal__actions button")].pop().click();
+      await wait(1400);
+      const band = d.getElementById("exchange-band");
+      if (band) band.open = true;
+      await wait(600);
+
+      const row = (name) =>
+        [...d.querySelectorAll(".xrow--header")].find(
+          (r) => (r.querySelector(".xrow__name") || {}).textContent === name,
+        );
+      const plain = row("Accept");
+      const secret = row("Authorization");
+      if (!plain || !secret) return { reason: "rows not rendered" };
+
+      const valueOf = (r) => r.querySelector(".xmask__value");
+      const plainBox = valueOf(plain).getBoundingClientRect();
+
+      return {
+        plainVisible: getComputedStyle(valueOf(plain)).display !== "none",
+        plainWidth: Math.round(plainBox.width),
+        plainText: (plain.querySelector(".xrow__value") || {}).innerText.trim(),
+        secretHidden: getComputedStyle(valueOf(secret)).display === "none",
+        secretHasToggle: !!secret.querySelector(".xmask__toggle"),
+        dots: (secret.querySelector(".xmask__dots") || { textContent: "" }).textContent.length,
+        secretLength: "Bearer SECRETSESSIONVALUE123".length,
+      };
+    })()`);
+
+    const held =
+      !shown.reason &&
+      shown.plainVisible === true &&
+      shown.plainWidth > 0 &&
+      shown.plainText === "application/vnd.api+json" &&
+      shown.secretHidden === true &&
+      shown.secretHasToggle === true &&
+      shown.dots > 0 &&
+      shown.dots !== shown.secretLength;
+    report(
+      held,
+      "-",
+      "the review shows an ordinary header value and masks a credential-shaped one",
+      shown.reason
+        ? shown.reason
+        : `plain ${shown.plainVisible ? "shown" : "HIDDEN"} ${shown.plainWidth}px ${JSON.stringify(shown.plainText)}, secret ${shown.secretHidden ? "masked" : "EXPOSED"}, ${shown.dots} dots for a ${shown.secretLength}-char value`,
+    );
+    await mask.dispose();
+  } catch (error) {
+    report(
+      false,
+      "err",
+      "the review shows an ordinary header value and masks a credential-shaped one",
+      error.message,
+    );
   }
 
   // `total` is whatever `report` was actually called with, rather than a

@@ -81,6 +81,42 @@ describe("parseRequestUrl", () => {
     expect(parseRequestUrl("   ")).toBeNull();
     expect(parseRequestUrl("not a url at all with spaces")).toBeNull();
   });
+
+  /*
+   * A scheme that was given and is invalid is not a missing scheme.
+   * `ht!tp://[not a url]` used to fall through to the assumed-scheme attempt,
+   * where `https://ht!tp://…` parses — so the review showed the origin
+   * `https://ht!tp`, which no request ever went to, captioned "No scheme was
+   * given". The caller renders the raw text with an "unparseable" note when
+   * this returns null, which is the honest answer.
+   */
+  it("does not invent an origin for a malformed scheme", () => {
+    expect(parseRequestUrl("ht!tp://[not a url]:99999/path?a=%ZZ&b")).toBeNull();
+    expect(parseRequestUrl("ht!tp://example.com")).toBeNull();
+    expect(parseRequestUrl("2http://example.com")).toBeNull();
+  });
+
+  it("still assumes a scheme for a bare host, and is not confused by a colon further along", () => {
+    // The other half of the fix: refusing a *claimed* scheme must not stop the
+    // ordinary bare-host case from getting one assumed.
+    expect(parseRequestUrl("api.example.com/x")?.assumedScheme).toBe(true);
+    // A colon inside the query is past the first slash, so it is not a scheme.
+    expect(parseRequestUrl("api.example.com/go?to=https://x")?.assumedScheme).toBe(true);
+    expect(parseRequestUrl("api.example.com/go?to=https://x")?.url.href).toBe(
+      "https://api.example.com/go?to=https://x",
+    );
+  });
+
+  it("leaves `host:port` alone, which the URL parser reads as a scheme", () => {
+    // Not something this fix changes, and worth pinning rather than leaving to
+    // be rediscovered: `api.example.com` is a syntactically valid scheme, so
+    // `new URL` accepts `api.example.com:8080/x` on the first attempt and the
+    // assumed-scheme path — and therefore the malformed-scheme check — is never
+    // reached. The result is an opaque URL whose origin is "null".
+    const parsed = parseRequestUrl("api.example.com:8080/x");
+    expect(parsed?.assumedScheme).toBe(false);
+    expect(parsed?.url.protocol).toBe("api.example.com:");
+  });
 });
 
 describe("responseReferenceTime", () => {
