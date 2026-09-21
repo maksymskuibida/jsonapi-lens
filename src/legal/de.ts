@@ -182,6 +182,10 @@ export const legalDe: LegalPages = {
             ],
           },
           {
+            kind: "p",
+            text: "Der protokollierte Pfad enthält niemals den Schlüssel eines Share-Links. Ein Share-Link führt seinen Schlüssel hinter dem Rautezeichen (#), und diesen Teil einer Adresse übermittelt ein Browser nicht — er bleibt auf Ihrem Gerät, ist also nicht Teil der Anfrage und kann nicht im Protokoll stehen. Links in einem früheren Format dieser Seite trugen den Schlüssel im Pfad selbst; solche Links funktionieren weiterhin, und solange einer davon benutzt wird, wird sein Schlüssel wie jeder andere Pfad protokolliert. Neue Links entstehen in diesem Format nicht mehr.",
+          },
+          {
             kind: "pairs",
             rows: [
               [
@@ -249,7 +253,7 @@ export const legalDe: LegalPages = {
           },
           {
             kind: "p",
-            text: "Ihr Browser komprimiert das Dokument, erzeugt lokal einen Schlüssel und verschlüsselt das Dokument damit. Übertragen wird nur der verschlüsselte Datensatz. Der Schlüssel steht ausschließlich im Link und wird zu keinem Zeitpunkt an den Server gesendet; dieser speichert also einen Datensatz, den er nicht lesen kann. Beschreibende Angaben werden nicht mitgespeichert — kein Dateiname, keine Bezeichnung, keine Ressourcentypen —, sondern nur eine laufende Nummer, die Größe in Bytes und die von Ihnen gewählte Gültigkeitsdauer.",
+            text: "Ihr Browser komprimiert das Dokument, erzeugt lokal einen Schlüssel und verschlüsselt das Dokument damit. Übertragen wird nur der verschlüsselte Datensatz. Der Schlüssel steht hinter dem Rautezeichen (#) im Link — dem einzigen Teil einer Webadresse, den ein Browser nicht überträgt — und wird daher zu keinem Zeitpunkt an den Server gesendet und in keinem Server-Protokoll festgehalten; dieser speichert also einen Datensatz, den er nicht lesen kann. Beschreibende Angaben werden nicht mitgespeichert — kein Dateiname, keine Bezeichnung, keine Ressourcentypen —, sondern nur eine laufende Nummer, die Größe in Bytes und die von Ihnen gewählte Gültigkeitsdauer.",
           },
           {
             kind: "pairs",

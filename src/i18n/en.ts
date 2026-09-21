@@ -596,7 +596,7 @@ export const en = {
       "This browser cannot encrypt a share link (needs WebCrypto and CompressionStream).",
     lede: "The document is gzipped and encrypted in this tab. The key is generated here and lives only in the link — the server stores an opaque blob it cannot read. Creating and opening a link each take a moment, because the short key is deliberately expensive to derive.",
     lifetimeLabel: "Link lifetime",
-    note: "Anyone with the link can read the document, so treat it like the payload itself. The key sits in the URL path, so it reaches browser history and anything else that handles the link — send it the way you would send the payload.",
+    note: "Anyone with the link can read the document, so treat it like the payload itself. The key is the part after the #, which your browser keeps to itself and never sends to the server — but it still lands in browser history and anywhere the link is pasted, so send the link the way you would send the payload.",
     /**
      * Shown before the link is created, when the attached exchange carries
      * anything redaction will mask. The point is that the person finds out
@@ -733,6 +733,17 @@ export const en = {
     expired: {
       headline: "That share link has expired.",
       hint: "Share links are deleted when their lifetime runs out. Ask for a fresh link.",
+    },
+    /**
+     * A path shaped like a share link that carries no usable key — the
+     * fragment was dropped, or a legacy in-path key was truncated. Says the
+     * link is damaged, never that the page does not exist, and says nothing
+     * about whether the id behind it is real: that distinction is deliberately
+     * unavailable, here as everywhere else.
+     */
+    damaged: {
+      headline: "That share link is missing its key.",
+      hint: "A share link ends in # followed by the key, and this one does not. Some chat clients, link shorteners and mail scanners cut it off. Ask for the link again, and copy it whole.",
     },
     corruptShort: {
       headline: "That shared document is corrupt.",

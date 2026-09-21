@@ -10,7 +10,7 @@
  * Two rules do the work:
  *
  *  - **A route either has a canonical path or must not be indexed.** `/view` and
- *    `/d/<id>:<secret>` have no content of their own — one renders whatever is
+ *    `/d/<id>#<secret>` have no content of their own — one renders whatever is
  *    in the visitor's IndexedDB, the other carries a decryption key in the URL —
  *    so they get `noindex` and no canonical. `robots.txt` and `_headers` say the
  *    same thing for readers that never run this code.

@@ -255,7 +255,7 @@ describe("real subprocess, raw stdio: everything written to stdout and stderr", 
       const structured = shareResult.structuredContent!;
       const id = structured["id"] as number;
       const url = structured["url"] as string;
-      expect(url).toBe(`${stubWorker.origin}/d/${id}:${secret}`);
+      expect(url).toBe(`${stubWorker.origin}/d/${id}#${secret}`);
 
       // A failure path too, deliberately, since a refusal is exactly the
       // kind of place a secret gets echoed back by accident.

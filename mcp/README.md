@@ -80,7 +80,7 @@ Takes one or more `{ label, text, exchange? }` documents and a secret, seals the
 ciphertext. One document becomes a version-2 single-document link; several become a version-3
 **bundle** link that opens all of them together — the same rule the browser's own share button
 follows, so the two mint byte-identical envelopes. Returns `{ id, url, expiresAt, bytes, kind }`,
-where `url` is exactly `<origin>/d/<id>:<secret>` — built for you because it is the one string in
+where `url` is exactly `<origin>/d/<id>#<secret>` — built for you because it is the one string in
 this whole flow that cannot be retried if it comes out wrong.
 
 **Anyone who has the returned `url` can read the document. Anyone who has only the `id` cannot.**

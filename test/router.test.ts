@@ -1,6 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { IMPRESSUM_PATH, parseRoute, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
+import {
+  IMPRESSUM_PATH,
+  parseRoute,
+  PASTE_PATH,
+  PRIVACY_PATH,
+  shareUrl,
+  VIEW_PATH,
+} from "../src/router.js";
 import { escapeToken, join, parse, resolve, unescapeToken } from "../src/pointer.js";
+
+describe("shareUrl", () => {
+  it("puts the key in the fragment, where no browser will transmit it", () => {
+    // DECISIONS.md D7: the key must not appear in the path, because the path
+    // is what reaches the origin's access log. A `:` here is a security
+    // regression, not a formatting change.
+    const url = shareUrl(42, "AAAAAAAAAAAAAAAAAAAA");
+    expect(new URL(url).pathname).toBe("/d/42");
+    expect(new URL(url).hash).toBe("#AAAAAAAAAAAAAAAAAAAA");
+    expect(new URL(url).pathname).not.toContain("AAAAAAAAAAAAAAAAAAAA");
+  });
+
+  it("mints a link this app can read back", () => {
+    const url = new URL(shareUrl(7, "BBBBBBBBBBBBBBBBBBBB"));
+    expect(parseRoute(url.pathname, url.hash)).toEqual({
+      kind: "share",
+      id: 7,
+      secret: "BBBBBBBBBBBBBBBBBBBB",
+    });
+  });
+});
 
 describe("parseRoute", () => {
   it("maps the app's own paths", () => {
@@ -24,11 +52,21 @@ describe("parseRoute", () => {
   });
 
   it("does not mistake a share link for a legal page", () => {
-    expect(parseRoute("/d/1:AAAAAAAAAAAAAAAAAAAA").kind).toBe("share");
+    expect(parseRoute("/d/1", "#AAAAAAAAAAAAAAAAAAAA").kind).toBe("share");
     expect(parseRoute("/impressum/extra").kind).toBe("unknown");
   });
 
   it("reads a share link", () => {
+    expect(parseRoute("/d/42", "#AAAAAAAAAAAAAAAAAAAA")).toEqual({
+      kind: "share",
+      id: 42,
+      secret: "AAAAAAAAAAAAAAAAAAAA",
+    });
+  });
+
+  it("still reads the legacy in-path form, because those links are out there", () => {
+    // Minted until the key moved to the fragment (DECISIONS.md D7). Nothing
+    // produces this any more, and it must never stop being read.
     expect(parseRoute("/d/42:AAAAAAAAAAAAAAAAAAAA")).toEqual({
       kind: "share",
       id: 42,
@@ -46,20 +84,28 @@ describe("parseRoute", () => {
     });
   });
 
-  it("accepts a fragment-delimited key, which never reaches the server", () => {
-    expect(parseRoute("/d/7", "#BBBBBBBBBBBBBBBBBBBB")).toEqual({
+  it("accepts a trailing slash on the id, with the key still in the fragment", () => {
+    expect(parseRoute("/d/7/", "#BBBBBBBBBBBBBBBBBBBB")).toEqual({
       kind: "share",
       id: 7,
       secret: "BBBBBBBBBBBBBBBBBBBB",
     });
   });
 
-  it("rejects a share link with an implausibly short key", () => {
-    expect(parseRoute("/d/42:short").kind).toBe("unknown");
-    expect(parseRoute("/d/42", "#short").kind).toBe("unknown");
+  it("calls a share link with no usable key damaged, not missing", () => {
+    // The fragment is the part a chat client, shortener or mail scanner eats,
+    // so "no page here" would send someone away from the actual problem.
+    for (const [path, hash] of [
+      ["/d/42", ""],
+      ["/d/42", "#short"],
+      ["/d/42:short", ""],
+      ["/d/42:AAAAAAAAAAAAAAAAAAAA/extra", ""],
+    ] as const) {
+      expect(parseRoute(path, hash), `${path}${hash}`).toEqual({ kind: "share-damaged" });
+    }
   });
 
-  it("rejects a non-numeric share id", () => {
+  it("rejects a non-numeric share id — that was never a share link", () => {
     expect(parseRoute("/d/abc:AAAAAAAAAAAAAAAAAAAA").kind).toBe("unknown");
   });
 

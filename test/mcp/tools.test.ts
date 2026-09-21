@@ -100,7 +100,7 @@ describe("registered tool descriptions", () => {
     const description = share!.description ?? "";
 
     expect(description).toContain(GENERATE_SECRET_COMMAND);
-    expect(description).toContain("<origin>/d/<id>:<secret>");
+    expect(description).toContain("<origin>/d/<id>#<secret>");
     expect(description.toLowerCase()).toMatch(/not recoverable|unrecoverable/);
     expect(description).toMatch(/anyone with that link can read the document/i);
     expect(description).toMatch(/anyone with only the id cannot/i);
@@ -178,7 +178,7 @@ describe("share", () => {
 
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent?.kind).toBe("document");
-    expect(result.structuredContent?.url).toBe(`${ORIGIN}/d/${result.structuredContent?.id}:${SECRET_A}`);
+    expect(result.structuredContent?.url).toBe(`${ORIGIN}/d/${result.structuredContent?.id}#${SECRET_A}`);
 
     const uploaded = backend.calls.find((c) => c.init?.method === "POST")!.init!.body!;
     expect(uploaded[0]).toBe(2);

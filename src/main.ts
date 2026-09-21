@@ -2203,6 +2203,18 @@ async function applyRoute(): Promise<void> {
     return;
   }
 
+  // A link that was a share link and no longer has a usable key. It gets the
+  // paste view and an error card rather than the "no page here" toast, because
+  // the page did exist — the key is what went missing, usually on the way
+  // through whatever carried the link.
+  if (route.kind === "share-damaged") {
+    navigate(PASTE_PATH, { replace: true });
+    applyRouteMeta({ kind: "paste" });
+    showView("paste");
+    showError(new ShareError(t().shareErrors.damaged.headline, t().shareErrors.damaged.hint));
+    return;
+  }
+
   if (route.kind === "unknown") {
     toast(t().toast.noPage(route.pathname));
     navigate(PASTE_PATH, { replace: true });
@@ -2287,7 +2299,12 @@ async function boot(): Promise<void> {
     return;
   }
 
-  if (route.kind === "view" || route.kind === "unknown" || route.kind === "legal") {
+  if (
+    route.kind === "view" ||
+    route.kind === "unknown" ||
+    route.kind === "share-damaged" ||
+    route.kind === "legal"
+  ) {
     await applyRoute();
     return;
   }
