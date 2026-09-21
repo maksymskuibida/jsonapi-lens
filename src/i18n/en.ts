@@ -993,6 +993,10 @@ export const en = {
       addRow: "Add row",
       removeRow: "Remove this row",
       disableRowLabel: "disabled",
+      /** The checkbox's own name, so rows are told apart by a screen reader. */
+      disableRowAria: (name: string) => (name === "" ? "Disable this row" : `Disable ${name}`),
+      detachHint:
+        "To take the request and response off this document, empty every field above and save.",
       disableRowTitle: "Take this row out of consideration without deleting it",
       rowName: "Field name",
       rowValue: "Field value",

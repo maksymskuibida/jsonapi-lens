@@ -103,6 +103,14 @@ function nameValueRow(row: SimpleRow, namePlaceholder: string, onNameChange?: (r
     else valueInput.dataset["rawValueless"] = "true";
   }
   const disableToggle = el("input", { type: "checkbox", checked: row.disabled });
+  // Every one of these announced the same single word, with no clue which row
+  // it belonged to. The name is what distinguishes them, and it changes as the
+  // row is typed, so the label follows it.
+  const nameToggleLabel = (): void => {
+    disableToggle.setAttribute("aria-label", t().request.form.disableRowAria(nameInput.value.trim()));
+  };
+  nameToggleLabel();
+  nameInput.addEventListener("input", nameToggleLabel);
   const remove = el("button", {
     class: "act act--mini",
     type: "button",
@@ -573,6 +581,9 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
     el("p", { class: "xform__hint", text: m.setCookieHint }),
     labeled(m.cookiesLabel, resSetCookieList.root),
     resBody.root,
+    // How to take the whole thing off again. It has always worked — empty every
+    // field and save — but nothing said so, which made it look one-way.
+    el("p", { class: "xform__hint", text: m.detachHint }),
   );
 
   const save = el("button", { class: "btn btn--primary", type: "button", text: m.save });

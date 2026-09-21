@@ -913,6 +913,9 @@ export const uk: Messages = {
       addRow: "Додати рядок",
       removeRow: "Видалити цей рядок",
       disableRowLabel: "вимкнено",
+      disableRowAria: (name) => (name === "" ? "Вимкнути цей рядок" : `Вимкнути ${name}`),
+      detachHint:
+        "Щоб від'єднати запит і відповідь від цього документа, очистіть усі поля вище та збережіть.",
       disableRowTitle: "Не враховувати цей рядок, не видаляючи його",
       rowName: "Назва поля",
       rowValue: "Значення поля",

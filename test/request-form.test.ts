@@ -174,3 +174,49 @@ describe("the URL field's preview keeps untouched rows byte-identical", () => {
     expect(urlInput!.value).toBe("https://api.example.com/x?a=%ZZ&keep=x%20y&edit=new");
   });
 });
+
+/*
+ * Each row's disable checkbox names the row it belongs to.
+ *
+ * Every one of them announced the same single word before this — "disabled",
+ * with nothing to say which field it would disable — so a screen-reader user
+ * hearing a column of them had no way to tell them apart.
+ */
+describe("the per-row disable checkbox has a name of its own", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="modal-root"></div><div id="toast"></div>';
+  });
+
+  const labels = (): (string | null)[] =>
+    [
+      ...[...document.querySelectorAll<HTMLElement>(".xform-rowlist")][0]!.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"]',
+      ),
+    ].map((box) => box.getAttribute("aria-label"));
+
+  it("names each row by its field, and they differ", () => {
+    openRequestForm({ request: { url: "https://api.example.com/x?alpha=1&beta=2" } }, () => {});
+    const found = labels();
+    expect(found).toHaveLength(2);
+    expect(found[0]).toContain("alpha");
+    expect(found[1]).toContain("beta");
+    // The point of the fix: two rows must not announce the same thing.
+    expect(found[0]).not.toBe(found[1]);
+  });
+
+  it("follows the field as it is renamed, and says something when it is empty", () => {
+    openRequestForm({ request: { url: "https://api.example.com/x?alpha=1" } }, () => {});
+    const list = [...document.querySelectorAll<HTMLElement>(".xform-rowlist")][0]!;
+    const name = list.querySelector<HTMLInputElement>(".xform__name")!;
+
+    name.value = "renamed";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(labels()[0]).toContain("renamed");
+
+    name.value = "";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    // Still named — an empty field is not an excuse for an empty label.
+    expect(labels()[0]).toBeTruthy();
+    expect(labels()[0]).not.toContain("renamed");
+  });
+});

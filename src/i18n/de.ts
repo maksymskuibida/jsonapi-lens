@@ -871,6 +871,9 @@ export const de: Messages = {
       addRow: "Zeile hinzufügen",
       removeRow: "Diese Zeile entfernen",
       disableRowLabel: "deaktiviert",
+      disableRowAria: (name) => (name === "" ? "Diese Zeile deaktivieren" : `${name} deaktivieren`),
+      detachHint:
+        "Um Anfrage und Antwort von diesem Dokument zu lösen, leeren Sie alle Felder oben und speichern Sie.",
       disableRowTitle: "Diese Zeile außer Betracht lassen, ohne sie zu löschen",
       rowName: "Feldname",
       rowValue: "Feldwert",
