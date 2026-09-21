@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { decodeQueryRows, encodeQueryRows, openRequestForm, splitUrlQuery } from "../src/request-form.js";
+import type { RequestFormResult } from "../src/request-form.js";
+import { headerSet } from "../src/headers.js";
 import { decodeParams } from "../src/params.js";
 
 describe("splitUrlQuery", () => {
@@ -172,5 +174,184 @@ describe("the URL field's preview keeps untouched rows byte-identical", () => {
     editValue.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(urlInput!.value).toBe("https://api.example.com/x?a=%ZZ&keep=x%20y&edit=new");
+  });
+});
+
+/*
+ * Each row's disable checkbox names the row it belongs to.
+ *
+ * Every one of them announced the same single word before this — "disabled",
+ * with nothing to say which field it would disable — so a screen-reader user
+ * hearing a column of them had no way to tell them apart.
+ */
+describe("the per-row disable checkbox has a name of its own", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="modal-root"></div><div id="toast"></div>';
+  });
+
+  const labels = (): (string | null)[] =>
+    [
+      ...[...document.querySelectorAll<HTMLElement>(".xform-rowlist")][0]!.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"]',
+      ),
+    ].map((box) => box.getAttribute("aria-label"));
+
+  it("names each row by its field, and they differ", () => {
+    openRequestForm({ request: { url: "https://api.example.com/x?alpha=1&beta=2" } }, () => {});
+    const found = labels();
+    expect(found).toHaveLength(2);
+    expect(found[0]).toContain("alpha");
+    expect(found[1]).toContain("beta");
+    // The point of the fix: two rows must not announce the same thing.
+    expect(found[0]).not.toBe(found[1]);
+  });
+
+  it("follows the field as it is renamed, and says something when it is empty", () => {
+    openRequestForm({ request: { url: "https://api.example.com/x?alpha=1" } }, () => {});
+    const list = [...document.querySelectorAll<HTMLElement>(".xform-rowlist")][0]!;
+    const name = list.querySelector<HTMLInputElement>(".xform__name")!;
+
+    name.value = "renamed";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(labels()[0]).toContain("renamed");
+
+    name.value = "";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    // Still named — an empty field is not an excuse for an empty label.
+    expect(labels()[0]).toBeTruthy();
+    expect(labels()[0]).not.toContain("renamed");
+  });
+});
+
+/*
+ * Removing an exchange has to be said, not inferred from emptiness.
+ *
+ * The first attempt at this finding was a hint telling people to "empty every
+ * field and save". That is false: `hasRequest`/`hasResponse` gate on the fields
+ * being non-empty, so emptying them submits *nothing*, and `mergeExchange`
+ * keeps a part the form did not submit — which is exactly what makes "open,
+ * touch nothing, save" a no-op. Following the hint left the request in place
+ * with its headers and whatever credentials were in them, while telling the
+ * person it had been taken off.
+ */
+describe("removing the exchange", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="modal-root"></div><div id="toast"></div>';
+  });
+
+  const actionLabels = (): string[] =>
+    [...document.querySelectorAll(".modal__actions button")].map((b) => (b.textContent ?? "").trim());
+
+  const withText = (re: RegExp): HTMLElement | undefined =>
+    [...document.querySelectorAll<HTMLElement>(".modal__actions button")].find((b) => re.test(b.textContent ?? ""));
+
+  /**
+   * The topmost panel's buttons. Scoped to the last `.modal__panel` on purpose:
+   * the form's own `Remove request` is `btn--danger` too, so a document-wide
+   * selector finds it rather than the confirmation stacked above it.
+   */
+  const topPanelButtons = (): HTMLElement[] => {
+    const panel = [...document.querySelectorAll<HTMLElement>(".modal__panel")].pop();
+    return panel ? [...panel.querySelectorAll<HTMLElement>(".modal__actions .btn")] : [];
+  };
+
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("says detach explicitly, rather than leaving it to be inferred", async () => {
+    let got: RequestFormResult | null = null;
+    openRequestForm(
+      { request: { url: "https://api.example.com/x", headers: headerSet([{ name: "Authorization", value: "Bearer s3cr3t" }]) } },
+      (result) => (got = result),
+    );
+    expect(actionLabels(), "a remove control is offered").toContain("Remove request");
+
+    withText(/remove/i)!.click();
+    await settle();
+    topPanelButtons().find((b) => b.classList.contains("btn--danger"))!.click();
+    await settle();
+
+    expect(got).not.toBeNull();
+    expect(got!.detach, "the result carries the instruction").toBe(true);
+    // And carries no parts, so a caller that ignored `detach` would merge
+    // nothing rather than silently write a half-empty exchange.
+    expect(got!.request).toBeUndefined();
+    expect(got!.response).toBeUndefined();
+  });
+
+  it("asks once however many times the button is pressed", async () => {
+    // The handler awaits, so a second click used to land while the first
+    // confirmation was still open and stack a second one on top. Confirming the
+    // top one then removed the exchange and closed the form, leaving the other
+    // over nothing — and answering that one fired a second `onSave` for an
+    // action that had already happened.
+    let calls = 0;
+    openRequestForm({ request: { url: "https://api.example.com/x" } }, () => (calls += 1));
+
+    const remove = withText(/remove/i)!;
+    remove.click();
+    remove.click();
+    remove.click();
+    await settle();
+
+    // The form, and exactly one confirmation over it.
+    expect(document.querySelectorAll(".modal__panel")).toHaveLength(2);
+
+    topPanelButtons().find((b) => b.classList.contains("btn--danger"))!.click();
+    await settle();
+
+    expect(calls, "one removal, not one per click").toBe(1);
+    expect(document.querySelectorAll(".modal__panel"), "nothing stranded").toHaveLength(0);
+  });
+
+  it("leaves focus on the button after the confirmation is declined", async () => {
+    // Disabling the button to stop a double-click blurs it, and does so before
+    // the confirmation captures what to restore focus to — so declining used to
+    // drop focus onto `<body>`, outside the dialog's own trap. Keyboard users
+    // only.
+    openRequestForm({ request: { url: "https://api.example.com/x" } }, () => {});
+    const remove = withText(/remove/i)!;
+    remove.focus();
+    remove.click();
+    await settle();
+    topPanelButtons().find((b) => !b.classList.contains("btn--danger"))!.click();
+    await settle();
+
+    expect(document.activeElement, "not stranded on the body").toBe(remove);
+  });
+
+  it("does nothing if the confirmation is declined", async () => {
+    // One click and no undo, so it asks — and saying no has to mean no.
+    let got: RequestFormResult | null = null;
+    openRequestForm({ request: { url: "https://api.example.com/x" } }, (result) => (got = result));
+
+    withText(/remove/i)!.click();
+    await settle();
+    const cancel = topPanelButtons().find((b) => !b.classList.contains("btn--danger"));
+    expect(cancel, "a way out of the confirmation").toBeTruthy();
+    cancel!.click();
+    await settle();
+
+    expect(got, "nothing was submitted").toBeNull();
+  });
+
+  it("offers nothing to remove when nothing is attached", () => {
+    openRequestForm({}, () => {});
+    expect(actionLabels()).not.toContain("Remove request");
+  });
+
+  it("does not treat emptying every field as a removal", () => {
+    // The behaviour the false hint described. Pinned so nobody reintroduces
+    // the claim: emptying submits nothing, which is a no-op, not a removal.
+    let got: RequestFormResult | null = null;
+    openRequestForm({ request: { url: "https://api.example.com/x" } }, (result) => (got = result));
+
+    const url = document.querySelector<HTMLInputElement>(".xform__url-input")!;
+    url.value = "";
+    url.dispatchEvent(new Event("input", { bubbles: true }));
+    for (const row of [...document.querySelectorAll<HTMLElement>(".xform-row")]) row.remove();
+
+    withText(/^save$/i)!.click();
+    expect(got).not.toBeNull();
+    expect(got!.detach, "emptiness is not an instruction").toBeUndefined();
   });
 });

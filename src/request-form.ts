@@ -42,12 +42,13 @@
 
 import { el } from "./dom.js";
 import { t } from "./i18n/index.js";
-import { openModal } from "./ui.js";
+import { confirmModal, openModal } from "./ui.js";
 import { headerSet } from "./headers.js";
 import type { HeaderEntry, HeaderSet } from "./headers.js";
 import { parseCookieHeader, parseSetCookie } from "./cookies.js";
 import type { Cookie, CookieSet, SetCookie, SetCookieSet } from "./cookies.js";
 import { decodeParams } from "./params.js";
+import { hasExchangeContent } from "./render-request.js";
 import type { BodyPart, Exchange, RequestPart, ResponsePart } from "./exchange.js";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -103,6 +104,14 @@ function nameValueRow(row: SimpleRow, namePlaceholder: string, onNameChange?: (r
     else valueInput.dataset["rawValueless"] = "true";
   }
   const disableToggle = el("input", { type: "checkbox", checked: row.disabled });
+  // Every one of these announced the same single word, with no clue which row
+  // it belonged to. The name is what distinguishes them, and it changes as the
+  // row is typed, so the label follows it.
+  const nameToggleLabel = (): void => {
+    disableToggle.setAttribute("aria-label", t().request.form.disableRowAria(nameInput.value.trim()));
+  };
+  nameToggleLabel();
+  nameInput.addEventListener("input", nameToggleLabel);
   const remove = el("button", {
     class: "act act--mini",
     type: "button",
@@ -376,6 +385,17 @@ function textField(value: string, placeholder: string, ariaLabel: string, type =
 export interface RequestFormResult {
   request: RequestPart | undefined;
   response: ResponsePart | undefined;
+  /**
+   * Take the exchange off the document entirely, rather than merge.
+   *
+   * `undefined` on the two fields above cannot mean this: `mergeExchange`
+   * treats an absent part as "unchanged", which is what makes "open the form,
+   * touch nothing, save" a no-op. Emptying every field therefore did *not*
+   * remove anything — it submitted nothing, and the request survived with its
+   * headers and whatever credentials were in them. Removal has to be said, not
+   * inferred from emptiness.
+   */
+  detach?: true;
 }
 
 /**
@@ -575,7 +595,16 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
     resBody.root,
   );
 
-  const save = el("button", { class: "btn btn--primary", type: "button", text: m.save });
+  // `xform__save` is a locale-independent hook for the browser scenarios, which
+  // used to take the first button in the actions row — fine until a second
+  // button appeared beside it.
+  const save = el("button", { class: "btn btn--primary xform__save", type: "button", text: m.save });
+  // Only when there is something to take off. `hasExchangeContent` is the same
+  // test the band's own visibility uses, so the button is there exactly when a
+  // band is.
+  const detach = hasExchangeContent(existing)
+    ? el("button", { class: "btn btn--danger", type: "button", text: m.detach, title: m.detachTitle })
+    : null;
 
   openModal({
     title: m.title,
@@ -646,7 +675,44 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
         handle.close();
         onSave({ request: requestPart, response: responsePart });
       });
-      return el("div", { class: "modal__actions" }, save);
+      if (detach) {
+        detach.addEventListener("click", async () => {
+          // The handler awaits, so a second click lands while the first is
+          // still open and stacks a second confirmation on top of the first.
+          // Confirming the top one then removes the exchange and closes the
+          // form, leaving the other stranded over nothing — and answering it
+          // fires a second `onSave` for an action that already happened.
+          // Disabling is what a real hand needs; the guard covers a click
+          // dispatched straight at the element.
+          if (detach.disabled) return;
+          detach.disabled = true;
+          try {
+            // Destructive, one click, and there is no undo — the same shape as
+            // deleting a library entry, which asks first (`panels.ts`). Asking
+            // here too keeps the one pattern rather than inventing a second.
+            const confirmed = await confirmModal({
+              title: m.detach,
+              message: m.detachConfirm,
+              confirmLabel: m.detach,
+              cancelLabel: t().modal.cancel,
+              tone: "danger",
+            });
+            if (!confirmed) return;
+            handle.close();
+            onSave({ request: undefined, response: undefined, detach: true });
+          } finally {
+            detach.disabled = false;
+            // Disabling blurs the button, and it does so *before* the
+            // confirmation captures what to restore focus to — so declining
+            // left focus on `<body>`, outside the dialog's own trap. Putting it
+            // back is this handler's job, since this handler is what moved it.
+            // Skipped once the form has closed: the button is detached then,
+            // and the confirmation's own restore has the floor.
+            if (detach.isConnected) detach.focus();
+          }
+        });
+      }
+      return el("div", { class: "modal__actions" }, detach, save);
     },
   });
 }

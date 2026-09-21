@@ -1219,6 +1219,103 @@ try {
     );
   }
 
+  /*
+   * Removing an attached exchange actually removes it.
+   *
+   * `main.ts` is where the instruction is honoured, so no vitest test reaches
+   * this: the form's own tests can only assert that it asks. The first attempt
+   * at this finding was a hint saying to empty every field and save, which does
+   * nothing at all — `mergeExchange` keeps a part the form did not submit — so
+   * the request survived, credentials and all, while the dialog implied it had
+   * gone. That is what this measures: the band is gone afterwards, and the URL
+   * with it.
+   */
+  try {
+    const gone = await page.openSized(1200, 900);
+    await gone.navigate(`${ORIGIN}/?lang=en`);
+    await gone.evaluate(readFlow('{"data":{"type":"a","id":"1"}}'));
+    const removal = await gone.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const d = document;
+      await wait(400);
+      d.getElementById("edit-request").click();
+      await wait(900);
+      const url = d.querySelector(".xform__url-input");
+      if (!url) return { reason: "no request form" };
+      url.value = "https://api.example.com/v2/x";
+      url.dispatchEvent(new Event("input", { bubbles: true }));
+      const headerList = [...d.querySelectorAll(".xform-rowlist")][1];
+      headerList.querySelector("button").click();
+      await wait(250);
+      const name = headerList.querySelector(".xform__name");
+      const value = headerList.querySelector(".xform__value");
+      name.value = "Authorization";
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+      value.value = "Bearer SECRET-TOKEN";
+      value.dispatchEvent(new Event("input", { bubbles: true }));
+      [...d.querySelectorAll(".modal__actions button")].pop().click();
+      await wait(1400);
+
+      const attached = !!d.getElementById("exchange-band");
+
+      d.getElementById("edit-request").click();
+      await wait(900);
+      const remove = [...d.querySelectorAll(".modal__actions button")].find((b) => /remove/i.test(b.textContent));
+      if (!remove) return { attached, reason: "no remove control" };
+      remove.click();
+      await wait(700);
+      // It asks first. Scoped to the topmost panel: the form's own Remove is
+      // btn--danger too, so a document-wide search finds it, not this.
+      const top = [...d.querySelectorAll(".modal__panel")].pop();
+      const yes = top && [...top.querySelectorAll(".modal__actions .btn--danger")][0];
+      if (!yes) return { attached, reason: "no confirmation offered" };
+      yes.click();
+      await wait(1500);
+
+      const band = d.getElementById("exchange-band");
+      return {
+        attached,
+        stillThere: !!band,
+        stillNamesTheHost: (band ? band.textContent : "").includes("api.example.com"),
+      };
+    })()`);
+
+    // And it stays gone. The removal is persisted, so "the band disappeared"
+    // on its own would be satisfied by a render that simply stopped drawing it
+    // while the exchange sat in IndexedDB waiting for the next load.
+    await gone.navigate(`${ORIGIN}/?lang=en`);
+    const afterReload = await gone.evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 40 && !document.querySelector("#resume button"); i++) await wait(250);
+      const resume = document.querySelector("#resume button");
+      if (!resume) return { reason: "no resume button" };
+      resume.click();
+      await wait(1500);
+      const band = document.getElementById("exchange-band");
+      return { built: document.getElementById("doc").childElementCount, backAgain: !!band };
+    })()`);
+
+    const held =
+      !removal.reason &&
+      !afterReload.reason &&
+      removal.attached === true &&
+      removal.stillThere === false &&
+      removal.stillNamesTheHost === false &&
+      afterReload.built > 0 &&
+      afterReload.backAgain === false;
+    report(
+      held,
+      "-",
+      "removing an attached exchange takes it off the document",
+      removal.reason || afterReload.reason
+        ? removal.reason || afterReload.reason
+        : `attached ${removal.attached}, band after remove ${removal.stillThere ? "STILL THERE" : "gone"}, after reload ${afterReload.backAgain ? "CAME BACK" : "still gone"}`,
+    );
+    await gone.dispose();
+  } catch (error) {
+    report(false, "err", "removing an attached exchange takes it off the document", error.message);
+  }
+
   // `total` is whatever `report` was actually called with, rather than a
   // hand-maintained `keys.length + n`: every check added since this line was
   // written was added outside `SCEN`, and each one silently widened the gap
