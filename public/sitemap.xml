@@ -9,7 +9,7 @@
   declares with `<link rel="alternate">`, and `test/seo.test.ts` holds this file,
   that head and `src/router.ts` to the same paths so none of the three can drift.
 
-  Missing on purpose: `/view` and `/d/<id>:<secret>`. Neither has content of its
+  Missing on purpose: `/view` and `/d/<id>#<secret>`. Neither has content of its
   own — see `robots.txt`.
 -->
 <urlset
