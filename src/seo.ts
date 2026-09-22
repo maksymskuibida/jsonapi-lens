@@ -87,6 +87,15 @@ export function metaForRoute(route: Route): PageMeta {
     return { title: m.meta.title, description: m.meta.description, path: null };
   }
 
+  // A damaged share link never stays on this route: `applyRoute`/`boot`
+  // replace it with `PASTE_PATH` before anything paints. Giving it its own
+  // arm — rather than letting it fall into the generic default below —
+  // states that explicitly, so the *next* `Route` member added to the union
+  // does not silently inherit paste meta by accident (review S2, PR #25).
+  if (route.kind === "share-damaged") {
+    return { title: m.meta.title, description: m.meta.description, path: PASTE_PATH };
+  }
+
   return { title: m.meta.title, description: m.meta.description, path: PASTE_PATH };
 }
 

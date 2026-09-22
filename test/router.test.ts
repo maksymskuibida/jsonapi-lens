@@ -74,6 +74,21 @@ describe("parseRoute", () => {
     });
   });
 
+  it("still reads the legacy in-path form with the `.` separator, forever", () => {
+    // SHARE_PATTERN's character class is `[:.]`, and D7 promises both legacy
+    // separators keep parsing, not just `:`. Review B1 (round 1): this was
+    // the one form nothing in the suite exercised, so deleting the `.` from
+    // that class passed every test in the repository. Confirmed by hand:
+    // removing the `.` from src/router.ts's SHARE_PATTERN turns this red
+    // (kind becomes "share-damaged", falling through to the digit-only
+    // fallback rule) while every other test still passes.
+    expect(parseRoute("/d/42.AAAAAAAAAAAAAAAAAAAA")).toEqual({
+      kind: "share",
+      id: 42,
+      secret: "AAAAAAAAAAAAAAAAAAAA",
+    });
+  });
+
   it("reads a share link whose colon the asset router percent-encoded", () => {
     // Cloudflare 307s `/d/1:KEY` to `/d/1%3AKEY`, so this is the form the app
     // actually sees in `location.pathname` most of the time.
@@ -92,6 +107,24 @@ describe("parseRoute", () => {
     });
   });
 
+  it("accepts a 64-character secret — crypto.ts's own maximum, and what the MCP tool mints", () => {
+    // Review B1 (round 1): test/mcp/tools.test.ts mints a 64-character
+    // secret but only ever asserted the returned *string*, never parsed it
+    // back — so lowering SECRET_PATTERN's upper bound (src/router.ts:87)
+    // below 64 passed every test in the repository while breaking every
+    // MCP-minted link. The honest guard is a round trip through the app's
+    // own router, the same shape shareUrl/parseRoute are exercised in
+    // "mints a link this app can read back" above, at the boundary length.
+    // Confirmed by hand: lowering SECRET_PATTERN's `{8,64}` to `{8,20}`
+    // turns this red while the rest of the suite stays green.
+    const secret = "a".repeat(64);
+    const url = new URL(shareUrl(9001, secret));
+    expect(parseRoute(url.pathname, url.hash)).toEqual({ kind: "share", id: 9001, secret });
+
+    // The legacy in-path form must accept the same length.
+    expect(parseRoute(`/d/9001:${secret}`)).toEqual({ kind: "share", id: 9001, secret });
+  });
+
   it("calls a share link with no usable key damaged, not missing", () => {
     // The fragment is the part a chat client, shortener or mail scanner eats,
     // so "no page here" would send someone away from the actual problem.
@@ -106,7 +139,17 @@ describe("parseRoute", () => {
   });
 
   it("rejects a non-numeric share id — that was never a share link", () => {
+    // Review B1 (round 1): the test plan's case 12 claims both
+    // "/d/notanumber:secret" and bare "/d/notanumber" are covered, but only
+    // the `:`-suffixed form was ever asserted. The bare form is the one that
+    // actually exercises the new `share-damaged` fallthrough's boundary
+    // (`/^\/d\/\d/.test(pathname)`, src/router.ts): it must not fire for a
+    // path that never had a digit after `/d/` in the first place. Confirmed
+    // by hand: loosening that regex to `/^\/d\//` turns this red (kind
+    // becomes "share-damaged") while the rest of the suite stays green.
     expect(parseRoute("/d/abc:AAAAAAAAAAAAAAAAAAAA").kind).toBe("unknown");
+    expect(parseRoute("/d/notanumber").kind).toBe("unknown");
+    expect(parseRoute("/d/notanumber:AAAAAAAAAAAAAAAAAAAA").kind).toBe("unknown");
   });
 
   it("reports anything else as unknown, keeping the path for the message", () => {

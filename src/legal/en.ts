@@ -185,7 +185,7 @@ export const legalEn: LegalPages = {
           },
           {
             kind: "p",
-            text: "The path in that log never contains the key to a share link. A share link carries its key after the number sign (#), and a browser does not transmit that part of an address — it stays on your device, so it is not part of the request and cannot appear in the log. Links created in an earlier format of this site put the key in the path itself; those links still open, and for as long as one is used its key is recorded like any other path. Nothing here creates links in that format any more.",
+            text: "A share link created here carries its key after the number sign (#), and a browser does not transmit that part of an address — it stays on your device, so it is not part of the request and never appears in the log. Links created in an earlier format of this site put the key in the path itself; those links still open, and for as long as one is used its key is recorded like any other path. Nothing here creates links in that format any more.",
           },
           {
             kind: "pairs",

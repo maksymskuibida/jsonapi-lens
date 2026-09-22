@@ -183,7 +183,7 @@ export const legalDe: LegalPages = {
           },
           {
             kind: "p",
-            text: "Der protokollierte Pfad enthält niemals den Schlüssel eines Share-Links. Ein Share-Link führt seinen Schlüssel hinter dem Rautezeichen (#), und diesen Teil einer Adresse übermittelt ein Browser nicht — er bleibt auf Ihrem Gerät, ist also nicht Teil der Anfrage und kann nicht im Protokoll stehen. Links in einem früheren Format dieser Seite trugen den Schlüssel im Pfad selbst; solche Links funktionieren weiterhin, und solange einer davon benutzt wird, wird sein Schlüssel wie jeder andere Pfad protokolliert. Neue Links entstehen in diesem Format nicht mehr.",
+            text: "Ein hier erzeugter Share-Link führt seinen Schlüssel hinter dem Rautezeichen (#), und diesen Teil einer Adresse übermittelt ein Browser nicht — er bleibt auf Ihrem Gerät, ist also nicht Teil der Anfrage und steht nicht im Protokoll. Links in einem früheren Format dieser Seite trugen den Schlüssel im Pfad selbst; solche Links funktionieren weiterhin, und solange einer davon benutzt wird, wird sein Schlüssel wie jeder andere Pfad protokolliert. Neue Links entstehen in diesem Format nicht mehr.",
           },
           {
             kind: "pairs",
