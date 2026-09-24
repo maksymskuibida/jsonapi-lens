@@ -7,9 +7,16 @@
  * appears in a request body. This Worker sees an opaque blob, a byte count and
  * an expiry, and nothing else: no label, no type names, no filename.
  *
- * Everything else on the site is served straight from static assets; only
- * `/api/*` reaches this script (see `run_worker_first` in wrangler.jsonc).
+ * It also answers for paths that match no asset, which is every page this app
+ * has apart from `/`. `not_found_handling` is `"none"` so those fall through
+ * to this script rather than being answered `200 OK` with `index.html`
+ * whatever they were: a single-page app still has a finite set of paths, and
+ * `/nope` is not one of them. `parseRoute` — the same function the client
+ * routes with — decides which, and the shell goes back under `200` or `404`
+ * accordingly.
  */
+
+import { parseRoute, robotsTagForRoute, statusForRoute } from "./router.js";
 
 // `Env` is generated from the bindings in wrangler.jsonc by `wrangler types`,
 // so it cannot drift from the config.
@@ -166,12 +173,43 @@ async function sweep(env: Env): Promise<number> {
 /** Roughly one in every twenty-five share creations also sweeps. */
 const SWEEP_PROBABILITY = 0.04;
 
+/**
+ * Serve the single page, under the status the path deserves.
+ *
+ * The asset router has already decided there is no file at this path, so the
+ * shell is fetched by its own URL and re-wrapped. A `404` still carries the
+ * whole app: the client reads the path, says which page does not exist and
+ * offers the paste view, which is a better answer than a dead end — but it
+ * says so under a status code that is true, so a crawler, a link checker and
+ * `curl -f` are all told what a visitor can already see.
+ */
+async function serveShell(request: Request, env: Env): Promise<Response> {
+  const route = parseRoute(new URL(request.url).pathname);
+  // `/`, not `/index.html`: `html_handling` defaults to `auto-trailing-slash`,
+  // which answers the explicit filename with a redirect to the directory form.
+  const shell = await env.ASSETS.fetch(new URL("/", request.url));
+
+  // If the shell itself could not be served there is nothing better to send;
+  // pass the asset router's own answer through untouched.
+  if (!shell.ok) return shell;
+
+  const headers = new Headers(shell.headers);
+  const robots = robotsTagForRoute(route);
+  if (robots) headers.set("x-robots-tag", robots);
+
+  return new Response(shell.body, {
+    status: statusForRoute(route),
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Only `/api/*` is routed here; anything else means the config drifted.
-    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+    // Anything that is not the share API reached this script because no asset
+    // matched it, so it is a page path — or meant to be one.
+    if (!url.pathname.startsWith("/api/")) return serveShell(request, env);
 
     if (url.pathname === "/api/shares" && request.method === "POST") {
       const response = await createShare(request, env);

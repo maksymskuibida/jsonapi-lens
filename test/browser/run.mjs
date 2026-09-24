@@ -1269,6 +1269,10 @@ try {
       const top = [...d.querySelectorAll(".modal__panel")].pop();
       const yes = top && [...top.querySelectorAll(".modal__actions .btn--danger")][0];
       if (!yes) return { attached, reason: "no confirmation offered" };
+      // Blank the live region first, so what it holds afterwards is what this
+      // removal announced and not the "saved" left over from attaching above.
+      const toast = d.getElementById("toast");
+      if (toast) toast.textContent = "";
       yes.click();
       await wait(1500);
 
@@ -1277,6 +1281,7 @@ try {
         attached,
         stillThere: !!band,
         stillNamesTheHost: (band ? band.textContent : "").includes("api.example.com"),
+        announced: (d.getElementById("toast") || {}).textContent || "",
       };
     })()`);
 
@@ -1310,6 +1315,17 @@ try {
       removal.reason || afterReload.reason
         ? removal.reason || afterReload.reason
         : `attached ${removal.attached}, band after remove ${removal.stillThere ? "STILL THERE" : "gone"}, after reload ${afterReload.backAgain ? "CAME BACK" : "still gone"}`,
+    );
+
+    // The band is what a sighted person watches disappear. Someone on a screen
+    // reader has only this line, so it has to describe a removal — it used to
+    // say "Request saved.", which is the opposite of what happened.
+    const announced = (removal.announced || "").trim();
+    report(
+      /removed/i.test(announced) && !/saved/i.test(announced),
+      "-",
+      "…and says so, rather than announcing a save",
+      announced ? `announced "${announced}"` : "the live region said nothing",
     );
     await gone.dispose();
   } catch (error) {

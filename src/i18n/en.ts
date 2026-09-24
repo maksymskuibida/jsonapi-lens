@@ -847,6 +847,10 @@ export const en = {
       redactionCaveat:
         "Redaction targets header and cookie values shaped like credentials. It does not scan the body or the URL — review those yourself before sharing.",
       saved: "Request saved.",
+      // Removing is not a kind of saving, and this line is the only
+      // confirmation a screen reader gets: the band it would have read
+      // instead is gone by the time the live region speaks.
+      removed: "Request removed.",
       modeResponse: "Response",
       modeRequest: "Request",
       modeBoth: "Both",

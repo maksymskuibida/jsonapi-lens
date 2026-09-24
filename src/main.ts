@@ -59,7 +59,8 @@ import type { RequestFormResult } from "./request-form.js";
 import { mergeExchange } from "./exchange.js";
 import type { Exchange } from "./exchange.js";
 import { redactExchange } from "./secrets.js";
-import { currentRoute, navigate, parseRoute, PASTE_PATH, VIEW_PATH } from "./router.js";
+import { currentRoute, navigate } from "./navigation.js";
+import { parseRoute, PASTE_PATH, VIEW_PATH } from "./router.js";
 import type { LegalRoute, Route } from "./router.js";
 import { applyPageMeta, applyRouteMeta, documentMeta, metaForRoute } from "./seo.js";
 import { renderLegalPage } from "./views/legal.js";
@@ -370,7 +371,7 @@ function openExchangeEditor(): void {
       : mergeExchange(current.exchange, { request: result.request, response: result.response });
     refreshExchangeBand();
     persistCurrentExchange();
-    toast(t().request.band.saved);
+    toast(result.detach ? t().request.band.removed : t().request.band.saved);
   });
 }
 
