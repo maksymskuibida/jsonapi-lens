@@ -22,7 +22,12 @@
  * does for every file-backed path on its own (N2, 2026-09-28).
  */
 
-import { methodStatusForRoute, parseRoute, robotsTagForRoute } from "./router.js";
+import {
+  methodStatusForRoute,
+  parseRoute,
+  referrerPolicyForRoute,
+  robotsTagForRoute,
+} from "./router.js";
 import { SECURITY_HEADERS } from "./security-headers.js";
 
 // `Env` is generated from the bindings in wrangler.jsonc by `wrangler types`,
@@ -53,8 +58,11 @@ const JSON_HEADERS = {
   "x-content-type-options": "nosniff",
 };
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...JSON_HEADERS, ...extraHeaders },
+  });
 }
 
 function blobKey(id: number): string {
@@ -194,9 +202,15 @@ const SWEEP_PROBABILITY = 0.04;
  * `SECURITY_HEADERS` (`src/security-headers.ts`) is what keeps those values
  * from being retyped here and drifting from `_headers` unnoticed.
  */
-function methodNotAllowed(): Response {
+function methodNotAllowed(referrerPolicy: string | null): Response {
   const headers = new Headers();
   for (const [name, value] of SECURITY_HEADERS) headers.set(name, value);
+  // QA4: a share route's response says `no-referrer`, whatever the status.
+  // A 405 has no body and so issues no subresource request — the header is
+  // inert here — but "every response for a share route carries it" is one
+  // rule without an exception. Applied after `SECURITY_HEADERS`, which stays
+  // a byte-for-byte mirror of `_headers` (`test/security-headers.test.ts`).
+  if (referrerPolicy) headers.set("referrer-policy", referrerPolicy);
   headers.set("allow", "GET, HEAD");
   headers.set("content-length", "0");
   return new Response(null, { status: 405, headers });
@@ -218,7 +232,10 @@ async function serveShell(request: Request, env: Env): Promise<Response> {
   const route = parseRoute(new URL(request.url).pathname);
   const status = methodStatusForRoute(route, request.method);
 
-  if (status === 405) return methodNotAllowed();
+  // `null` means "keep the site-wide policy the shell inherits" (QA4).
+  const referrerPolicy = referrerPolicyForRoute(route);
+
+  if (status === 405) return methodNotAllowed(referrerPolicy);
 
   // `/`, not `/index.html`: `html_handling` defaults to `auto-trailing-slash`,
   // which answers the explicit filename with a redirect to the directory form.
@@ -231,6 +248,9 @@ async function serveShell(request: Request, env: Env): Promise<Response> {
   const headers = new Headers(shell.headers);
   const robots = robotsTagForRoute(route);
   if (robots) headers.set("x-robots-tag", robots);
+  // `set`, not `append`: the shell already carries `_headers`' policy, and
+  // exactly one `Referrer-Policy` must leave this Worker (QA4).
+  if (referrerPolicy) headers.set("referrer-policy", referrerPolicy);
 
   return new Response(shell.body, {
     status,
@@ -264,7 +284,10 @@ export default {
     }
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true });
+      // QA4: answered every method with 200 before. GET is what the deploy
+      // smoke test sends; HEAD is what an uptime probe may send.
+      if (request.method === "GET" || request.method === "HEAD") return json({ ok: true });
+      return json({ error: "Method not allowed." }, 405, { allow: "GET, HEAD" });
     }
 
     return json({ error: "Not found." }, 404);

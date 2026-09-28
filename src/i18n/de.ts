@@ -543,6 +543,10 @@ export const de: Messages = {
     opened: "Ein geteiltes Dokument wurde geöffnet. Es liegt jetzt in diesem Browser.",
     openedKeyExposed:
       "Ein geteiltes Dokument wurde geöffnet. Es liegt jetzt in diesem Browser – aber in diesem Link wurde das # zu %23 umgeschrieben, sodass der Schlüssel als Teil der Adresse an den Server ging. Betrachten Sie diesen Link als offengelegt und teilen Sie bei sensiblen Inhalten einen neuen.",
+    openedNotStored:
+      "Ein geteiltes Dokument wurde geöffnet, konnte aber nicht in diesem Browser gespeichert werden. Beim Neuladen der Seite geht es verloren.",
+    openedKeyExposedNotStored:
+      "Ein geteiltes Dokument wurde geöffnet, konnte aber nicht in diesem Browser gespeichert werden. Beim Neuladen der Seite geht es verloren. Außerdem wurde in diesem Link das # zu %23 umgeschrieben, sodass der Schlüssel als Teil der Adresse an den Server ging. Betrachten Sie diesen Link als offengelegt und teilen Sie bei sensiblen Inhalten einen neuen.",
   },
 
   toast: {
