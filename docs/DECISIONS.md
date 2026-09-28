@@ -441,6 +441,40 @@ even if the code has not changed.
 key back in the path contradicts this entry and must amend it in the same pull request — and must
 also correct the two sentences above, which would become false again.
 
+### Amendment (N3, 2026-09-28) · an encoded fragment is accepted, because the exposure already happened
+
+The 2026-09-28 production QA pass (finding N3) found a link whose `#` had been rewritten to
+`%23` by something between sender and recipient — a URL sanitiser, a wiki or Markdown renderer.
+Cloudflare's asset router normalises that path first, so it reaches `parseRoute` still
+percent-encoded, and `parseRoute` already `decodeURIComponent`s the pathname before matching
+anything (it has to, for the legacy `:`-form's own `%3A`). Decoded, `/d/30%23e4iDnHELrg` becomes
+`/d/30#e4iDnHELrg` — a literal `#` sitting inside the *pathname*, which cannot happen for a real
+URL any other way: an *unencoded* `#` always starts the fragment before a pathname is ever built,
+so nothing that went through a browser or a `fetch` could hand this function a genuine `#` there
+unless it started life percent-encoded.
+
+Before this amendment, `parseRoute` treated that shape as `share-damaged` — "this link is missing
+its key" — which was false and actively harmful: the key was not missing, it had already been sent
+to the origin, in the request line, before the page's own JavaScript ever ran. The damaged-link
+message pointed the visitor at the wrong problem (a cut-off link) and hid the real one (a link that
+needs to be treated as burned).
+
+**The rule, extended:** `parseRoute` recognises `/d/<id>#<key>` inside the decoded pathname itself
+and opens the document, exactly as it would the ordinary fragment form — refusing protects nothing,
+since the exposure this entry's rule exists to prevent has already occurred for that one link.
+The route carries `keyExposed: true` (`src/router.ts`'s `Route` type) so the caller can say so,
+and `main.ts`'s `loadSharedDocument` does: it shows a distinct toast naming the link as exposed
+instead of the ordinary "opened a shared document" one, for both a single document and a bundle.
+The key still leaves the address bar the same way it always has — `navigate(VIEW_PATH, { replace:
+true })` runs regardless of which form the link arrived in.
+
+This does not weaken what the entry above promises. The promise was always about the *ordinary*
+minted form (`shareUrl` still only ever produces `#`, never `%23`); this amendment is about how the
+app responds to a link that was already damaged in transit by something outside the app's control,
+and "pretend it was never opened" does not un-send the request that already went out. A
+double-encoded key (`%2523…`) decodes once to the literal text `%23`, not to a `#` character, so it
+does **not** match this branch and still reaches `share-damaged`, same as before.
+
 ### Rejected alternatives
 
 - **A password or passphrase on the link** — rejected: it solves the same problem by making every

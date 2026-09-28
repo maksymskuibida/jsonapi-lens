@@ -541,6 +541,8 @@ export const de: Messages = {
       forever: "Kein Ablauf",
     },
     opened: "Ein geteiltes Dokument wurde geöffnet. Es liegt jetzt in diesem Browser.",
+    openedKeyExposed:
+      "Ein geteiltes Dokument wurde geöffnet. Der Schlüssel dieses Links stand in der Adresse selbst statt nur im Fragment – behandle ihn als kompromittiert und erstelle bei Bedarf einen neuen Link.",
   },
 
   toast: {

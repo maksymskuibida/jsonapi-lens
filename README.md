@@ -51,11 +51,14 @@ Five, parsed by hand in [`src/router.ts`](src/router.ts) — no router library:
 | `/view` | the document view; relationship anchors are fragments on this path |
 | `/d/<id>#<secret>` | a share link, which loads and then replaces itself with `/view` |
 | `/d/<id>:<secret>` | the same, in the format links were minted in before the key moved into the fragment — still read, never written |
+| `/d/<id>%23<secret>` | a `#`-form link whose `#` something rewrote to a literal `%23` on the way — still opened, since the key already travelled; see below |
 | `/impressum` | provider information under § 5 DDG |
 | `/privacy` | the privacy policy |
 
-The server returns `index.html` for every path except `/api/*`, so all of this is resolved in the
-browser.
+The server returns `index.html` for every path except `/api/*`, under `GET`/`HEAD` — any other
+method on a page path gets `405`, matching what it already does for every asset-backed path. So all
+of the routing above is resolved in the browser; the method check just decides whether the browser
+gets to.
 
 `/impressum` keeps the German word in every language: § 5 DDG requires the provider information to
 be *leicht erkennbar*, and the case law is built around that term, so it is what a German visitor
@@ -308,6 +311,13 @@ logs and not only of its database; see [DECISIONS.md D7](docs/DECISIONS.md). It 
 browser history and anything else that handles the link, so it is not a secret you can be careless
 with. The app strips it from the address bar as soon as a link opens, and still reads the older
 `/d/<id>:<secret>` form so links already sent keep working — nothing mints it any more.
+
+If something between sender and recipient rewrites the `#` to a percent-encoded `%23` — some URL
+sanitisers, wiki and Markdown renderers do this — the key ends up in the request the browser sends
+to open the link, in the clear, before any of this app's JavaScript has run. Refusing to open the
+document at that point would not undo the exposure, so the link still opens; the app tells you the
+key already left in the open and that this specific link should be treated as compromised. See
+[DECISIONS.md D7](docs/DECISIONS.md).
 
 **One link can carry several documents.** The envelope's first byte is a version: `2` is today's
 single document, unchanged since before bundles existed, and `3` is a **bundle** — sealed the same

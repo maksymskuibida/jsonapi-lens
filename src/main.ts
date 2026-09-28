@@ -2161,6 +2161,17 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
     // later Referer.
     navigate(VIEW_PATH, { replace: true });
 
+    // `route.keyExposed` (router.ts) means this link's key reached the
+    // pathname rather than the fragment — it already travelled to a server
+    // once, in the request line that produced this route, and nothing here
+    // can undo that. Say so instead of the ordinary "opened" toast, for
+    // either payload kind: DECISIONS.md D7's "the server never sees the
+    // key" promise was already broken for this specific link, once, before
+    // this tab ran a single line of JavaScript.
+    if (route.keyExposed) {
+      toast(t().share.openedKeyExposed, "error");
+    }
+
     if (isBundlePayload(payload)) {
       if (!isWellFormedBundlePayload(payload)) {
         throw new ShareError(t().bundle.errors.corrupt.headline, t().bundle.errors.corrupt.hint);
@@ -2191,7 +2202,7 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
       persist: true,
       exchange: payload.exchange,
     });
-    toast(t().share.opened);
+    if (!route.keyExposed) toast(t().share.opened);
   } catch (error) {
     navigate(PASTE_PATH, { replace: true });
     applyRouteMeta({ kind: "paste" });

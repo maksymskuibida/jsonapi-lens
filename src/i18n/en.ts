@@ -629,6 +629,15 @@ export const en = {
       forever: "No expiry",
     },
     opened: "Opened a shared document. It is now stored in this browser.",
+    /**
+     * Shown instead of `opened` when `route.keyExposed` (router.ts) is set —
+     * the link's `#` had been rewritten to `%23` before it reached this tab,
+     * so the key travelled in the request line rather than staying in the
+     * fragment. DECISIONS.md D7. Told as a fact about this one link, not a
+     * blanket "sharing is unsafe" claim.
+     */
+    openedKeyExposed:
+      "Opened a shared document. This link's key travelled in the address itself, not just the fragment — treat it as exposed, and mint a fresh link if this document still matters.",
   },
 
   /* ------------------------------------------------------------ toasts --- */

@@ -40,7 +40,15 @@
 export type Route =
   | { kind: "paste" }
   | { kind: "view" }
-  | { kind: "share"; id: number; secret: string }
+  /**
+   * `keyExposed` is set only when the key reached here inside the
+   * *pathname*, rather than the fragment where `shareUrl` puts it — see the
+   * `%23` branch in `parseRoute` below and DECISIONS.md D7. It means the key
+   * has already been sent to a server once (this one, in the request line
+   * that produced this very route), so the caller should say so rather than
+   * pretend the link was opened the ordinary way.
+   */
+  | { kind: "share"; id: number; secret: string; keyExposed?: true }
   /**
    * Shaped like a share link, but without a usable key — a truncated paste, a
    * fragment a chat client ate, a link retyped by hand. It is a share link
@@ -127,6 +135,31 @@ export function parseRoute(rawPathname: string, hash = ""): Route {
     }
   }
 
+  // `/d/<id>#<key>`, found in the *pathname itself* rather than in `hash` —
+  // a normal share link whose `#` was rewritten to the percent-encoded
+  // `%23` by something between sender and recipient (some URL sanitisers,
+  // wiki and Markdown renderers do this). The `decodeURIComponent` above has
+  // already turned that `%23` back into a literal `#`, and a literal `#`
+  // can reach a decoded pathname no other way: an *unencoded* `#` always
+  // starts the fragment before a pathname is ever built, so nothing that
+  // went through a browser or a `fetch` could hand this function a genuine
+  // `#` here unless it started life percent-encoded. That means the request
+  // that produced this very route already carried the key in its request
+  // line — the exposure D7 exists to prevent has already happened for this
+  // one link, and it cannot be undone by refusing to open the document.
+  // `keyExposed` lets the caller say so. A double-encoded key (`%2523…`)
+  // decodes to a literal `%23`, not a `#`, so it does not match here and
+  // falls through to `share-damaged` below, same as any other malformed key.
+  const exposedFragment = /^\/d\/(\d{1,18})#([A-Za-z0-9_-]{8,64})\/?$/.exec(pathname);
+  if (exposedFragment) {
+    return {
+      kind: "share",
+      id: Number(exposedFragment[1]),
+      secret: exposedFragment[2]!,
+      keyExposed: true,
+    };
+  }
+
   // Anything else under `/d/<digits>` was a share link once. It is damaged —
   // most often a fragment that something along the way dropped — and it is
   // reported as that rather than as a missing page. `/d/notanumber:secret`
@@ -186,4 +219,29 @@ export function robotsTagForRoute(route: Route): string | null {
  */
 export function statusForRoute(route: Route): 200 | 404 {
   return route.kind === "unknown" ? 404 : 200;
+}
+
+/**
+ * The HTTP status the Worker serves the single page under, for a path AND a
+ * method (N2, 2026-09-28).
+ *
+ * Only ever called for a request that already reached `worker.ts`'s page
+ * path — `/api/*` has its own method handling and never calls this. Every
+ * path with a real asset (`/`, `/impressum`, every file) never reaches here
+ * either: the asset router answers a non-GET/HEAD request for those with its
+ * own `405` before the Worker script runs at all, which is what makes
+ * `unknown` (below) the interesting case rather than the common one.
+ *
+ * `unknown` stays `404` under every method, not `405`: a path that is not a
+ * page does not become "a page that merely disagrees with this verb" by
+ * trying a different one on it — there is nothing there to disagree with the
+ * method about, under any method. Every other route kind names a page that
+ * *does* exist, so GET and HEAD get `statusForRoute`'s ordinary answer and
+ * anything else is `405`, because the page exists but does not answer that
+ * method.
+ */
+export function methodStatusForRoute(route: Route, method: string): 200 | 404 | 405 {
+  const upper = method.toUpperCase();
+  if (upper === "GET" || upper === "HEAD") return statusForRoute(route);
+  return route.kind === "unknown" ? 404 : 405;
 }
