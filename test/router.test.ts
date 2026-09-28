@@ -196,6 +196,47 @@ describe("parseRoute", () => {
     });
   });
 
+  it("a %23-form key combined with a real #fragment opens on the encoded key and drops the real one", () => {
+    // Review round 1 (B2/reviewer trace): `/d/42%23<k1>#<k2>` reaches the
+    // browser as pathname `/d/42%23<k1>` and hash `#<k2>` (the *unencoded*
+    // `#` always starts the real fragment). Decoded, the pathname alone
+    // already names a well-formed key — `k1` — so this matches the %23
+    // branch and opens on it; `k2` is simply never read. Whether `k1`
+    // actually decrypts anything is unrelated to this test.
+    expect(parseRoute("/d/42%23AAAAAAAAAAAAAAAAAAAA", "#BBBBBBBBBBBBBBBBBBBB")).toEqual({
+      kind: "share",
+      id: 42,
+      secret: "AAAAAAAAAAAAAAAAAAAA",
+      keyExposed: true,
+    });
+  });
+
+  it("two %23-encoded keys in the same pathname is damaged, not a pick between them", () => {
+    // Review round 1 (B2/reviewer trace): `/d/42%23<k1>%23<k2>` decodes to
+    // `/d/42#<k1>#<k2>` — the second literal `#` is outside `SECRET_PATTERN`'s
+    // character class, so nothing after the first `#` up to the required
+    // `\/?$` end-of-string can match, and this falls through to
+    // `share-damaged` rather than guessing which key is meant.
+    expect(
+      parseRoute("/d/42%23AAAAAAAAAAAAAAAAAAAA%23BBBBBBBBBBBBBBBBBBBB"),
+    ).toEqual({ kind: "share-damaged" });
+  });
+
+  it("an encoded %23 with an empty key, alongside a separate real #fragment, is still damaged — N2", () => {
+    // Review round 1 (N2): `/d/42%23#<valid>` reaches the browser as
+    // pathname `/d/42%23` and hash `#<valid>` — a genuinely valid key
+    // sitting in `hash`, right next to a pathname that *also* looks like
+    // the %23 shape but carries no key of its own (decoded: `/d/42#`, empty
+    // capture, below SECRET_PATTERN's 8-character minimum). Deliberately
+    // not special-cased to fall back to `hash` here — see router.ts's own
+    // comment just above the %23 regex for why treating "two candidate
+    // keys, one of them empty" as unambiguous would be the wrong kind of
+    // helpful. This is `share-damaged`, not `share`.
+    expect(parseRoute("/d/42%23", "#AAAAAAAAAAAAAAAAAAAA")).toEqual({
+      kind: "share-damaged",
+    });
+  });
+
   it("rejects a non-numeric share id — that was never a share link", () => {
     // Review B1 (round 1): the test plan's case 12 claims both
     // "/d/notanumber:secret" and bare "/d/notanumber" are covered, but only

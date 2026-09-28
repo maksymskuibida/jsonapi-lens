@@ -5,14 +5,29 @@ import { t } from "./i18n/index.js";
 
 let toastTimer: number | undefined;
 
-export function toast(message: string, tone: "info" | "error" = "info"): void {
+/** How long an ordinary toast stays up before it hides itself. */
+const DEFAULT_TOAST_MS = 3400;
+
+/**
+ * `durationMs` defaults to `DEFAULT_TOAST_MS` for every existing call site.
+ * Review round 1 (S1, PR #27) is the reason a caller can override it: a
+ * ~170-character security notice (`t().share.openedKeyExposed`) read at
+ * `DEFAULT_TOAST_MS` is gone before most people finish the first sentence.
+ * This does not change anything about *how* a toast is shown, only how long
+ * — one still replaces whatever is currently up, same as before.
+ */
+export function toast(
+  message: string,
+  tone: "info" | "error" = "info",
+  durationMs: number = DEFAULT_TOAST_MS,
+): void {
   const node = document.getElementById("toast");
   if (!node) return;
   node.textContent = message;
   node.classList.toggle("toast--error", tone === "error");
   node.classList.add("is-visible");
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => node.classList.remove("is-visible"), 3400);
+  toastTimer = window.setTimeout(() => node.classList.remove("is-visible"), durationMs);
 }
 
 /* ---------------------------------------------------------------- modal --- */

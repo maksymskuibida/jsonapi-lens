@@ -17,6 +17,20 @@ import { SECURITY_HEADERS } from "../src/security-headers.js";
  * that forgets the other fails here instead of drifting silently into a
  * `405` response with a stale CSP.
  */
+/**
+ * Review round 1 (N3): the first draft of this parser stopped at the first
+ * blank line, but a blank line does not end a Cloudflare `_headers` rule —
+ * only the next pattern line (unindented, not a comment) does. Blank lines
+ * and comment lines, indented or not, are just formatting and are skipped;
+ * they were never terminators. `public/_headers`' own `/*` block happens to
+ * hit a blank line right after its four headers today, so the old parser's
+ * bug was invisible against the current file — it would only have shown up
+ * the day someone added a fifth header below a blank explanatory line, which
+ * is exactly the shape this file's own header comment uses elsewhere
+ * (compare the blank-line-separated paragraphs above the CSP explanation).
+ * The two tests below pin the corrected behaviour down with synthetic input,
+ * independent of whatever `public/_headers` happens to contain right now.
+ */
 function parseGlobalHeaderBlock(text: string): Map<string, string> {
   const lines = text.split("\n");
   const start = lines.findIndex((line) => line.trim() === "/*");
@@ -24,10 +38,12 @@ function parseGlobalHeaderBlock(text: string): Map<string, string> {
 
   const headers = new Map<string, string>();
   for (const line of lines.slice(start + 1)) {
-    if (line.trim() === "") break; // the block ends at the first blank line
+    const trimmed = line.trim();
+    if (trimmed === "") continue; // a blank line does not end a _headers rule
+    if (trimmed.startsWith("#")) continue; // nor does a comment, indented or not
+    if (!/^\s/.test(line)) break; // the next un-indented, non-comment line starts the next rule
     const match = /^\s+([^:]+):\s*(.+)$/.exec(line);
-    if (!match) continue;
-    headers.set(match[1]!.trim().toLowerCase(), match[2]!.trim());
+    if (match) headers.set(match[1]!.trim().toLowerCase(), match[2]!.trim());
   }
   return headers;
 }
@@ -50,5 +66,44 @@ describe("SECURITY_HEADERS matches public/_headers", () => {
     // and are intentionally not part of SECURITY_HEADERS, so only compare
     // the names this module actually claims to mirror.
     expect(fromHeadersFile.size).toBe(SECURITY_HEADERS.length);
+  });
+});
+
+describe("parseGlobalHeaderBlock — N3 regression guards, on synthetic input", () => {
+  it("does not stop at the first blank line — a blank line does not end a _headers rule", () => {
+    const synthetic = [
+      "/*",
+      "  Referrer-Policy: strict-origin-when-cross-origin",
+      "",
+      "# a header explained in its own paragraph, separated by a blank line",
+      "  X-Content-Type-Options: nosniff",
+      "",
+      "/assets/*",
+      "  Cache-Control: public, max-age=31536000, immutable",
+    ].join("\n");
+    expect(parseGlobalHeaderBlock(synthetic)).toEqual(
+      new Map([
+        ["referrer-policy", "strict-origin-when-cross-origin"],
+        ["x-content-type-options", "nosniff"],
+      ]),
+    );
+  });
+
+  it("stops at the next rule's pattern line — not one line early (a comment) or late (past it)", () => {
+    const synthetic = ["/*", "  X-Frame-Options: DENY", "/assets/*", "  Cache-Control: public"].join(
+      "\n",
+    );
+    expect(parseGlobalHeaderBlock(synthetic)).toEqual(new Map([["x-frame-options", "DENY"]]));
+  });
+
+  it("skips a comment even when it is indented, and never mistakes it for a header", () => {
+    const synthetic = [
+      "/*",
+      "  # not a header, just an indented note",
+      "  X-Content-Type-Options: nosniff",
+    ].join("\n");
+    const parsed = parseGlobalHeaderBlock(synthetic);
+    expect(parsed.size).toBe(1);
+    expect(parsed.get("x-content-type-options")).toBe("nosniff");
   });
 });

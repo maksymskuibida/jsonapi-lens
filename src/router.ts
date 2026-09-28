@@ -150,6 +150,19 @@ export function parseRoute(rawPathname: string, hash = ""): Route {
   // `keyExposed` lets the caller say so. A double-encoded key (`%2523…`)
   // decodes to a literal `%23`, not a `#`, so it does not match here and
   // falls through to `share-damaged` below, same as any other malformed key.
+  //
+  // Review round 1 (N2): a decoded pathname that reads `/d/<id>#` followed by
+  // *nothing this regex accepts as a key* (empty, too short, or trailing
+  // punctuation before a real `#hash` the browser split off separately —
+  // e.g. `/d/42%23#<valid>`, decoded pathname `/d/42#`, real hash `#<valid>`)
+  // does not match here and falls all the way to `share-damaged` below, even
+  // though a well-formed key is sitting right there in `hash`. Deliberately
+  // not special-cased: a link carrying *two* `#`s, one encoded and one real,
+  // is a shape nothing in this app or its README ever produces, and no
+  // known link-mangling tool produces either — treating it as damaged rather
+  // than guessing which of two present keys is the "real" one keeps this
+  // function's one job (does the URL alone, unambiguously, name a key?)
+  // honest. `test/router.test.ts` pins this exact case down.
   const exposedFragment = /^\/d\/(\d{1,18})#([A-Za-z0-9_-]{8,64})\/?$/.exec(pathname);
   if (exposedFragment) {
     return {

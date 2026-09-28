@@ -632,12 +632,19 @@ export const en = {
     /**
      * Shown instead of `opened` when `route.keyExposed` (router.ts) is set —
      * the link's `#` had been rewritten to `%23` before it reached this tab,
-     * so the key travelled in the request line rather than staying in the
-     * fragment. DECISIONS.md D7. Told as a fact about this one link, not a
-     * blanket "sharing is unsafe" claim.
+     * so the key was sent to the server as part of the request path, not
+     * kept in the fragment. DECISIONS.md D7. Says where the key actually
+     * went (the server, not "the address" in the abstract) and what to do
+     * about it, addressed to whoever is reading the toast — usually the
+     * recipient of the link, not the person who made it — so "mint" and
+     * other minting-side jargon do not belong here. Review round 1 (B1):
+     * the first draft claimed the key was "not just" in the fragment, which
+     * implied it *was* partly in the fragment — for this route it never
+     * was, it went straight to the server in the path. Also restores "now
+     * stored in this browser", which `opened` says and is still true here.
      */
     openedKeyExposed:
-      "Opened a shared document. This link's key travelled in the address itself, not just the fragment — treat it as exposed, and mint a fresh link if this document still matters.",
+      "Opened a shared document. It is now stored in this browser — but this link's # had been changed to %23, so its key was sent to the server as part of the address. Treat this link as exposed, and share a new one if the document is sensitive.",
   },
 
   /* ------------------------------------------------------------ toasts --- */

@@ -542,7 +542,7 @@ export const de: Messages = {
     },
     opened: "Ein geteiltes Dokument wurde geöffnet. Es liegt jetzt in diesem Browser.",
     openedKeyExposed:
-      "Ein geteiltes Dokument wurde geöffnet. Der Schlüssel dieses Links stand in der Adresse selbst statt nur im Fragment – behandle ihn als kompromittiert und erstelle bei Bedarf einen neuen Link.",
+      "Ein geteiltes Dokument wurde geöffnet. Es liegt jetzt in diesem Browser – aber in diesem Link wurde das # zu %23 umgeschrieben, sodass der Schlüssel als Teil der Adresse an den Server ging. Betrachten Sie diesen Link als offengelegt und teilen Sie bei sensiblen Inhalten einen neuen.",
   },
 
   toast: {
