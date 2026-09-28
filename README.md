@@ -319,6 +319,16 @@ document at that point would not undo the exposure, so the link still opens; the
 key already left in the open and that this specific link should be treated as compromised. See
 [DECISIONS.md D7](docs/DECISIONS.md).
 
+The same goes for the page's own requests. For a share link (`/d/*`) the server sends
+`Referrer-Policy: no-referrer`, so the script, stylesheet and icons the page loads before any of this
+app's JavaScript has run do not carry a path-borne key in `Referer`; every other page keeps the
+site-wide `strict-origin-when-cross-origin`. And the Worker runs with Workers Logs' per-request
+*invocation logs* switched off (`observability.logs.invocation_logs: false` in
+[`wrangler.jsonc`](wrangler.jsonc)), so opening a legacy or `%23` link does not write its key into a
+log the operator can read. The cost is that the per-request "GET /path 200" lines are gone for every
+path; the Worker's own `console` output and exceptions still land in Workers Logs. See
+[DECISIONS.md D7](docs/DECISIONS.md).
+
 **One link can carry several documents.** The envelope's first byte is a version: `2` is today's
 single document, unchanged since before bundles existed, and `3` is a **bundle** — sealed the same
 way, through the same upload, just with several documents inside instead of one. Sharing exactly one

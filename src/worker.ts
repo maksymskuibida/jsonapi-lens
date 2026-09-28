@@ -20,6 +20,14 @@
  * reimplemented: `POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS` on a page path get a
  * `405` (see `methodNotAllowed`), matching what the asset router already
  * does for every file-backed path on its own (N2, 2026-09-28).
+ *
+ * `referrerPolicyForRoute` (`router.ts`) is the same kind of shared decision for
+ * the `Referrer-Policy` header: share routes get `no-referrer` in place of the
+ * site-wide value, because a path-borne key would otherwise ride out in the
+ * `Referer` of the page's own subresource requests (QA4). Nothing in this file
+ * may log a URL, path, header or `Referer` — `wrangler.jsonc` turns Workers
+ * Logs' invocation logs off for the same reason, and `test/worker.test.ts`
+ * fails if a `console.*` call here starts to mention one.
  */
 
 import {
