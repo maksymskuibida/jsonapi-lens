@@ -22,7 +22,7 @@ depends on another. This spec was written by the implementer (none existed when 
 ## Interface
 
 **1. `wrangler.jsonc`** — `observability` becomes
-`{ "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } }`. Shape taken from
+`{ "enabled": true, "head_sampling_rate": 1, "logs": { "enabled": true, "invocation_logs": false } }`. Shape taken from
 Cloudflare's Workers Logs documentation ("Invocation logs can be disabled in wrangler by adding the
 `invocation_logs = false` configuration") and from `node_modules/wrangler/config-schema.json`
 (`Observability.logs.invocation_logs: boolean`). `head_sampling_rate` is not touched. `logs.enabled: true`
@@ -126,7 +126,7 @@ methods). `HEAD` gets the same 200 headers with no body per the runtime.
 - [ ] `test/security-headers.test.ts` passes unmodified in meaning.
 - [ ] The bundle-link `%23` toast and the decrypted-but-unparseable `%23` toast use `share.keyExposedOnly`, in en/de/uk.
 - [ ] `shareOpenedToast` returns a not-stored copy when `stored` is false, in en/de/uk, and the exposed-key copy still contains the `%23` warning when not stored.
-- [ ] `en.ts`, `de.ts`, `uk.ts` each carry both new rows; typecheck passes.
+- [ ] `en.ts`, `de.ts`, `uk.ts` each carry all three new rows (`openedNotStored`, `openedKeyExposedNotStored`, `keyExposedOnly`); typecheck passes.
 - [ ] `POST /api/health` is 405 with `Allow: GET, HEAD`; `GET`/`HEAD` 200; deploy smoke test's check (`"ok":true` in `GET` body) still holds.
 - [ ] `DECISIONS.md` D7's amendment records the logging channel as closed at config level and what the operator gives up.
 

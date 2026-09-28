@@ -646,14 +646,6 @@ export const en = {
     openedKeyExposed:
       "Opened a shared document. It is now stored in this browser — but this link's # had been changed to %23, so its key was sent to the server as part of the address. Treat this link as exposed, and share a new one if the document is sensitive.",
     /**
-     * QA4: the two `opened*` rows above claim "stored in this browser", which
-     * is false when IndexedDB is unavailable (`store.ts#saveDocument` returns
-     * false). `share-toast.ts` picks these instead. They replace the general
-     * `toast.notStored` on screen, so each says what that one says — not
-     * stored, a reload loses it — and the exposed-key variant keeps the whole
-     * key warning.
-     */
-    /**
      * QA4 review (S1, S2): the exposed-key warning on its own, for the two
      * places where nothing has been stored *and* "opened" would be wrong — a
      * bundle link (its import view is still open, nothing is saved yet) and a
@@ -662,6 +654,14 @@ export const en = {
      */
     keyExposedOnly:
       "This link's # had been changed to %23, so its key was sent to the server as part of the address. Treat this link as exposed, and share a new one if the document is sensitive.",
+    /**
+     * QA4: the two `opened*` rows above claim "stored in this browser", which
+     * is false when IndexedDB is unavailable (`store.ts#saveDocument` returns
+     * false). `share-toast.ts` picks these instead. They replace the general
+     * `toast.notStored` on screen, so each says what that one says — not
+     * stored, a reload loses it — and the exposed-key variant keeps the whole
+     * key warning.
+     */
     openedNotStored:
       "Opened a shared document, but it could not be stored in this browser, so a reload will lose it.",
     openedKeyExposedNotStored:
