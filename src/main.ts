@@ -2136,6 +2136,19 @@ document.addEventListener("keydown", (event) => {
 /* --------------------------------------------------------------- routes --- */
 
 /**
+ * How long the "this link's key was exposed" toast stays up. Review round 1
+ * (S2, PR #27): the ordinary toast's default lifetime (`DEFAULT_TOAST_MS` in
+ * `ui.ts`) was written for a one-line confirmation, not a ~170-character
+ * security notice — most readers would not finish it in time.
+ *
+ * Review round 2 nit: this constant used to sit *between*
+ * `loadSharedDocument`'s doc comment below and the function itself, which
+ * left that doc comment attached to nothing (an editor hovering the function
+ * would not show it). Moved above it for exactly that reason.
+ */
+const EXPOSED_KEY_TOAST_MS = 9000;
+
+/**
  * Load a document that arrived as a share link — or, since T6, a bundle of
  * several. `fetchShare` hands back whichever the link decrypted to;
  * `isBundlePayload` alone is *not* enough to trust `payload.documents`
@@ -2151,15 +2164,6 @@ document.addEventListener("keydown", (event) => {
  * exception inside it — this one included — reaches the `catch` below
  * instead of becoming an unhandled rejection behind a blank page.
  */
-
-/**
- * How long the "this link's key was exposed" toast stays up. Review round 1
- * (S2, PR #27): the ordinary toast's default lifetime (`DEFAULT_TOAST_MS` in
- * `ui.ts`) was written for a one-line confirmation, not a ~170-character
- * security notice — most readers would not finish it in time.
- */
-const EXPOSED_KEY_TOAST_MS = 9000;
-
 async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Promise<void> {
   showView("boot", t().boot.fetchingShare);
 

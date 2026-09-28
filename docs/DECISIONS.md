@@ -479,7 +479,7 @@ does **not** match this branch and still reaches `share-damaged`, same as before
 
 The first draft of this entry said the exposure "has already occurred" and left it there, as though
 nothing after that point could still leak the key. That was too strong, and the round-1 review
-(escalated, `crypto.ts`/`share.ts`-adjacent) caught the gap: there are **two separate requests**
+(escalated, `crypto.ts`/`share.ts`-adjacent) caught the gap: there are **three separate requests**
 that can carry a path-borne key to this origin, not one, and this amendment only ever closed one of
 them.
 
@@ -506,11 +506,36 @@ them.
    `:`/`.` form. An ordinary `#`-fragment link was never exposed here in the first place — the
    Referrer Policy spec strips the fragment from a `Referer` value unconditionally, for every
    policy, before this app ever had a chance to — so this fix changes nothing for that case.
+3. **The page's own subresource requests** — the module script, the stylesheet, and the small
+   assets `index.html` links (`favicon.svg`, `icon-192.png`, `apple-touch-icon.png`,
+   `site.webmanifest`). The browser issues these while parsing the shell, before `main.ts` has run a
+   single line, so — same as request 2 was before round 1 — each one's `Referer` is still
+   `/d/<id>%23<key>` (or the legacy `:key` path) under this page's `strict-origin-when-cross-origin`
+   policy. Found in review round 2 (S3, PR #27), after round 1 had already fixed request 2 and
+   named request 1. **What is and is not known about this channel:** every one of these paths is a
+   real file, and `wrangler.jsonc`'s `run_worker_first` names only `/api/*` — so, as far as static
+   reading of the config shows, the asset router answers all of them directly and none reaches
+   `worker.ts` or its `observability` config at all. That reading was **not verified against a
+   running Worker** — nobody has confirmed by observation that a subresource request for a share
+   route never invokes the script. Recorded here as what is believed and why, not as a settled fact,
+   because the difference matters: if it turns out these *do* reach the Worker, this channel joins
+   channel 1 (a configuration question, not something this repository's client code can fix); if
+   they genuinely never do, this channel is arguably already closed by Cloudflare's own asset
+   routing, and the only open question is the `Referer` header itself still leaving the browser
+   toward *this* origin — lower-stakes than channel 1's logged-and-retained case, but not nothing.
+   **Left unclosed by this task.** A `Referrer-Policy: no-referrer` (or `strict-origin`) set on the
+   shell response for `share` routes in `serveShell` would close it — and channel 2 as a second,
+   redundant layer alongside the S1 reordering — but that is a behaviour change to a document
+   already reviewed and approved once, so it is deliberately left as a follow-up rather than folded
+   into this round; see `STATUS.md` §4.
 
-So: **the page-request channel stays open, is a deployment decision, and is out of this entry's
-control. The follow-up-request channel is closed, for both link forms that can carry a path-borne
-key.** Saying "the exposure has already occurred" without this distinction let a fixable leak look
-like an already-lost cause; it was not.
+So: **the page-request channel (1) stays open, is a deployment decision, and is out of this entry's
+control. The follow-up-request channel (2) is closed, for both link forms that can carry a
+path-borne key. The subresource channel (3) is believed, but not confirmed, to already avoid the
+Worker's own logging — and is left open as a `Referer`-header question regardless, tracked as a
+follow-up.** Saying "the exposure has already occurred" without this distinction let a fixable leak
+look like an already-lost cause; it was not, and channel 3 shows the distinction has to be redrawn
+carefully rather than assumed complete once redrawn once.
 
 #### Why the legacy `:`/`.` in-path forms never get `keyExposed` (review round 1, N1)
 

@@ -10,7 +10,7 @@ const DEFAULT_TOAST_MS = 3400;
 
 /**
  * `durationMs` defaults to `DEFAULT_TOAST_MS` for every existing call site.
- * Review round 1 (S1, PR #27) is the reason a caller can override it: a
+ * Review round 1 (S2, PR #27) is the reason a caller can override it: a
  * ~170-character security notice (`t().share.openedKeyExposed`) read at
  * `DEFAULT_TOAST_MS` is gone before most people finish the first sentence.
  * This does not change anything about *how* a toast is shown, only how long
