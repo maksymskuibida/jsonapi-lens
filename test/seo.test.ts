@@ -11,6 +11,7 @@ import llmsFullTxt from "../public/llms-full.txt?raw";
 import manifestJson from "../public/site.webmanifest?raw";
 import headersFile from "../public/_headers?raw";
 import redirectsFile from "../public/_redirects?raw";
+import wranglerConfig from "../wrangler.jsonc?raw";
 
 import { PRERENDERED_PAGES } from "../vite.config.js";
 import { de } from "../src/i18n/de.js";
@@ -19,7 +20,16 @@ import { uk } from "../src/i18n/uk.js";
 import { LOCALES } from "../src/i18n/index.js";
 import { legalEn } from "../src/legal/en.js";
 import { IDENTITY } from "../src/legal/identity.js";
-import { IMPRESSUM_PATH, LEGAL_PATHS, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
+import {
+  IMPRESSUM_PATH,
+  LEGAL_PATHS,
+  parseRoute,
+  PASTE_PATH,
+  PRIVACY_PATH,
+  robotsTagForRoute,
+  statusForRoute,
+  VIEW_PATH,
+} from "../src/router.js";
 import { INDEXABLE, NOT_INDEXABLE, SITE_ORIGIN } from "../src/seo.js";
 import type { Messages } from "../src/i18n/en.js";
 import type { LegalPage } from "../src/legal/types.js";
@@ -339,13 +349,80 @@ describe("site.webmanifest", () => {
   });
 });
 
-describe("_headers", () => {
+describe("crawler directives", () => {
   it("sends noindex for the two paths robots.txt only asks about", () => {
-    expect(headersFile).toContain("/d/*");
-    expect(headersFile).toMatch(/X-Robots-Tag: noindex, nofollow/);
-    expect(headersFile).toContain(VIEW_PATH);
-    // Whatever else it says, it must not accidentally noindex the whole site.
-    expect(headersFile).not.toMatch(/^\/\*\n(\s+.*\n)*\s+X-Robots-Tag/m);
+    expect(robotsTagForRoute(parseRoute(VIEW_PATH))).toBe("noindex");
+    expect(robotsTagForRoute(parseRoute("/d/42:AAAAAAAAAAAA"))).toMatch(/^noindex, nofollow/);
+  });
+
+  it("does not archive a share link, whose URL is the decryption key", () => {
+    expect(robotsTagForRoute(parseRoute("/d/42:AAAAAAAAAAAA"))).toContain("noarchive");
+  });
+
+  it("leaves the pages that have content of their own indexable", () => {
+    expect(robotsTagForRoute(parseRoute(PASTE_PATH))).toBeNull();
+    expect(robotsTagForRoute(parseRoute(IMPRESSUM_PATH))).toBeNull();
+    expect(robotsTagForRoute(parseRoute(PRIVACY_PATH))).toBeNull();
+  });
+
+  it("does not index a path that is not a page", () => {
+    expect(robotsTagForRoute(parseRoute("/nope"))).toBe("noindex");
+  });
+
+  it("no longer keys them off _headers, which never matched a file for them", () => {
+    // Directive lines are indented under a path; a `#` line is prose. Nothing
+    // sets `X-Robots-Tag` there any more — which also means `/*` cannot
+    // accidentally noindex the whole site.
+    const directives = headersFile
+      .split("\n")
+      .filter((line) => /^\s+\S/.test(line) && !line.trim().startsWith("#"));
+    expect(directives.join("\n")).not.toMatch(/X-Robots-Tag/i);
+  });
+});
+
+describe("status for a path", () => {
+  it("answers 404 for a path that is not a page", () => {
+    expect(statusForRoute(parseRoute("/nope"))).toBe(404);
+    expect(statusForRoute(parseRoute("/deep/nope/x"))).toBe(404);
+  });
+
+  it("answers 200 for every page", () => {
+    for (const path of [PASTE_PATH, VIEW_PATH, IMPRESSUM_PATH, PRIVACY_PATH]) {
+      expect(statusForRoute(parseRoute(path))).toBe(200);
+    }
+  });
+
+  it("answers 200 for a share link as the server receives it — without its key", () => {
+    // The browser strips `#<secret>`, so the Worker parses `/d/42` with no
+    // hash. That is every valid link, and it must not look dead.
+    const onTheWire = parseRoute("/d/42");
+    expect(onTheWire.kind).toBe("share-damaged");
+    expect(statusForRoute(onTheWire)).toBe(200);
+    expect(robotsTagForRoute(onTheWire)).toContain("noarchive");
+  });
+
+  it("answers 200 for an old path-form share link, which still opens", () => {
+    expect(statusForRoute(parseRoute("/d/42:AAAAAAAAAAAA"))).toBe(200);
+  });
+});
+
+describe("not-found handling", () => {
+  /**
+   * `"single-page-application"` answers every unmatched path `200 OK` with
+   * `index.html`, which makes `/nope` indistinguishable from `/view` to a
+   * crawler, a link checker or `curl -f`. `"none"` sends those requests to the
+   * Worker, and `worker.ts#serveShell` picks the status with `parseRoute`.
+   *
+   * This is asserted because flipping it back is a one-word edit that nothing
+   * else would catch: the site would still work, and every 404 would quietly
+   * become a 200 again.
+   */
+  it("leaves unmatched paths to the Worker rather than answering 200 for all of them", () => {
+    expect(wranglerConfig).toMatch(/"not_found_handling"\s*:\s*"none"/);
+  });
+
+  it("still runs the Worker ahead of asset matching for the share API", () => {
+    expect(wranglerConfig).toMatch(/"run_worker_first"\s*:\s*\[\s*"\/api\/\*"\s*\]/);
   });
 });
 

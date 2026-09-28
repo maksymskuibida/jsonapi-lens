@@ -12,7 +12,7 @@ import {
 import type { BundleEntry, BundlePayload, SharePayload } from "./crypto.js";
 import type { Exchange } from "./exchange.js";
 import { redactExchange } from "./secrets.js";
-import { shareUrl } from "./router.js";
+import { shareUrl } from "./navigation.js";
 import { openModal, toast } from "./ui.js";
 
 /**

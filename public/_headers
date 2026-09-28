@@ -1,8 +1,10 @@
 # Response headers for the static assets, read natively by Workers assets.
 #
-# `robots.txt` asks crawlers to stay out of the two paths below; these headers
-# tell the ones that arrive anyway not to index what they found. A Disallow is a
-# request, an `X-Robots-Tag` is an instruction to the indexer.
+# Every rule here is keyed on an asset path. The crawler directives for `/view`
+# and `/d/*` are not — those paths have no file — so they live in
+# `robotsTagForRoute` in `src/router.ts` and are set by the Worker. `robots.txt`
+# asks crawlers to stay out of both; a Disallow is a request, an `X-Robots-Tag`
+# is an instruction to the indexer.
 #
 # ## The Content-Security-Policy
 #
@@ -43,15 +45,11 @@
   Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   X-Frame-Options: DENY
 
-# A share link carries its decryption key in the URL. Nothing about it should
-# reach an index, and nothing should follow it further.
-/d/*
-  X-Robots-Tag: noindex, nofollow, noarchive
-
-# The document view renders whatever is in the visitor's own IndexedDB, so for a
-# crawler it is an empty shell.
-/view
-  X-Robots-Tag: noindex
+# `/d/*` and `/view` used to be given `X-Robots-Tag` here. They are not files:
+# neither has an asset of its own, so the Worker builds their response from
+# `index.html` and a rule keyed on those paths never matched. The table moved to
+# `robotsTagForRoute` in `src/router.ts`, which the Worker reads — `test/seo.test.ts`
+# checks the two paths still get their directives.
 
 # Every file here is content-hashed by the build (`assetsInlineLimit: 0`, and
 # Vite's own naming), so a given URL's bytes never change — a new build means a

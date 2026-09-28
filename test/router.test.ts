@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  IMPRESSUM_PATH,
-  parseRoute,
-  PASTE_PATH,
-  PRIVACY_PATH,
-  shareUrl,
-  VIEW_PATH,
-} from "../src/router.js";
+import { shareUrl } from "../src/navigation.js";
+import { IMPRESSUM_PATH, parseRoute, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
 import { escapeToken, join, parse, resolve, unescapeToken } from "../src/pointer.js";
 
 describe("shareUrl", () => {

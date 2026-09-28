@@ -720,6 +720,7 @@ export const de: Messages = {
       redactionCaveat:
         "Die Schwärzung erfasst Header- und Cookie-Werte, die wie Zugangsdaten aussehen. Body und URL werden nicht durchsucht — prüfen Sie diese vor dem Teilen selbst.",
       saved: "Request gespeichert.",
+      removed: "Request entfernt.",
       modeResponse: "Response",
       modeRequest: "Request",
       modeBoth: "Beide",

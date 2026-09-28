@@ -22,6 +22,12 @@
  * navigation stays entirely the browser's business — this module reads the
  * hash only on `/d/<id>`, and never writes one.
  *
+ * Nothing here reads a global. `worker.ts` imports `parseRoute` so that the
+ * server's answer to "is this a page?" is the same function the client uses —
+ * a second copy of these rules on the server would eventually 404 a valid
+ * share link — and workerd has no `location` or `history`. The helpers that do
+ * need them live in `navigation.ts`.
+ *
  * The two legal paths are real paths rather than a modal because they have to
  * be linkable and quotable on their own. `/impressum` keeps the German word in
  * every language: it is the term § 5 DDG case law is built around and the one a
@@ -134,40 +140,50 @@ export function parseRoute(rawPathname: string, hash = ""): Route {
   return { kind: "unknown", pathname };
 }
 
-export function currentRoute(): Route {
-  return parseRoute(location.pathname, location.hash);
+/**
+ * What a crawler should be told about a path, or `null` for one that may be
+ * indexed.
+ *
+ * This lived in `public/_headers` until the server stopped answering `200` for
+ * paths that are not pages. `_headers` matches the *asset* being served, and
+ * `/view` and `/d/<id>:<secret>` are not assets — they have no file of their
+ * own, so the Worker builds their response from `index.html` and the rules
+ * keyed on those paths never matched. It is one table either way; this is the
+ * one the server actually reads. `seo.ts` says the same thing in the `<head>`,
+ * for a reader that runs the page instead of stopping at the headers.
+ *
+ * A share link is `noarchive` as well: the URL carries the decryption key, so a
+ * cached copy of the page is a copy of the key.
+ */
+export function robotsTagForRoute(route: Route): string | null {
+  switch (route.kind) {
+    // A share link reaches the server as `/d/<id>` with no key — the key is
+    // in the fragment, which browsers never send — so the server parses every
+    // valid link as `share-damaged`. The two kinds are one URL shape here.
+    case "share":
+    case "share-damaged":
+      return "noindex, nofollow, noarchive";
+    case "view":
+      return "noindex";
+    // Not a page. It renders the paste view with a "no page here" notice, which
+    // is not something to index under a URL that does not exist.
+    case "unknown":
+      return "noindex";
+    case "paste":
+    case "legal":
+      return null;
+  }
 }
 
 /**
- * Build the canonical share URL.
+ * The HTTP status the Worker serves the single page under, for a path.
  *
- * The key goes after `#`. A fragment is the one part of a URL that browsers
- * do not transmit: it is stripped before the request line is built and never
- * appears in `Referer`, so the key reaches neither this site's origin nor any
- * proxy, CDN or access log in between. The document is end-to-end encrypted
- * either way; the fragment is what keeps the other end of it out of a log
- * file. Changing this back to a path segment would quietly undo that, and
- * make two sentences in `/privacy` false.
+ * Only `unknown` is a 404. `share-damaged` is deliberately not: it is how the
+ * *server* sees every valid share link, because the key travels in the
+ * fragment and never reaches it. Answering 404 there would make every share
+ * link look dead to anything that checks the status first — a link unfurler,
+ * a chat preview, `curl -f` — while the browser opened it fine.
  */
-export function shareUrl(id: number, secret: string): string {
-  return `${location.origin}/d/${id}#${secret}`;
-}
-
-interface NavigateOptions {
-  replace?: boolean;
-  /** Keep the current fragment. Defaults to dropping it. */
-  keepHash?: boolean;
-}
-
-/**
- * Change the path without reloading.
- *
- * `pushState` for a real navigation the user should be able to go Back from,
- * `replaceState` when the current entry is being corrected — notably after a
- * share link loads, where the secret must not be left in history.
- */
-export function navigate(path: string, options: NavigateOptions = {}): void {
-  const target = path + (options.keepHash ? location.hash : "");
-  if (options.replace) history.replaceState(history.state, "", target);
-  else history.pushState(null, "", target);
+export function statusForRoute(route: Route): 200 | 404 {
+  return route.kind === "unknown" ? 404 : 200;
 }

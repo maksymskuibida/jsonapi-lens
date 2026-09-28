@@ -15,11 +15,18 @@
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
-    // Paths are resolved in the browser, so every non-asset path must return
-    // the single page: `/`, `/view`, `/d/<id>#<secret>`.
-    "not_found_handling": "single-page-application",
-    // ...except the share API, which has to reach the Worker instead of being
-    // swallowed by the SPA fallback above.
+    // Paths are resolved in the browser, so every non-asset path still has to
+    // return the single page (`/view`, `/d/<id>#<secret>`, the legal pages) — but `"single-page-application"` returns it with
+    // `200 OK` for *any* path, which makes `/nope` indistinguishable from
+    // `/view` to a crawler, a link checker or `curl -f`. `"none"` sends those
+    // requests to the Worker instead, and `worker.ts#serveShell` decides the
+    // status with the same `parseRoute` the client routes with.
+    //
+    // A path that does match an asset is still served without waking the
+    // Worker, so `/assets/*` costs nothing extra.
+    "not_found_handling": "none",
+    // The share API has to reach the Worker ahead of asset matching; every
+    // other path reaches it by not matching an asset at all.
     "run_worker_first": ["/api/*"]
   },
 
