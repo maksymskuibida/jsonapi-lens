@@ -2166,9 +2166,10 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
   try {
     // Drop the key from the visible URL and from history *before* the
     // request below, not after. Review round 1 (S1, PR #27): this used to
-    // run after `fetchShare`, which meant the `fetch("/api/shares/<id>")`
-    // call itself still carried the key — for a legacy `/d/<id>:<key>` link
-    // or a `%23`-exposed one, the key sits in the *path*, and this page's
+    // run after `fetchShare`, which meant `fetchShare`'s own GET of
+    // `/api/shares/<id>` still carried the key — for a legacy
+    // `/d/<id>:<key>` link or a `%23`-exposed one, the key sits in the
+    // *path*, and this page's
     // referrer policy (`strict-origin-when-cross-origin`) sends the current
     // URL's path as `Referer` on a same-origin request. That request hits
     // this Worker, which has invocation-log observability on
