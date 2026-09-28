@@ -34,6 +34,9 @@ const MAX_BYTES = 12 * 1024 * 1024;
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
+  // `public/_headers` covers the static assets; nothing there reaches a
+  // response this Worker builds itself, so these set their own.
+  "x-content-type-options": "nosniff",
 };
 
 function json(body: unknown, status = 200): Response {
@@ -111,6 +114,7 @@ async function readShare(id: number, env: Env): Promise<Response> {
   return new Response(object.body, {
     headers: {
       "content-type": "application/octet-stream",
+      "x-content-type-options": "nosniff",
       // `no-store`, matching every other `/api/` response and the promise
       // `robots.txt` already makes about this path.
       //

@@ -148,6 +148,34 @@ describe("value classification", () => {
     expect(classify({})).toBe("object");
   });
 
+  it("reads a scheme case-insensitively, as RFC 3986 defines it", () => {
+    // These rendered as plain text, so a real link was not clickable.
+    expect(classify("HTTPS://example.com/x")).toBe("url");
+    expect(classify("HtTpS://example.com/x")).toBe("url");
+    expect(classify("HTTP://example.com/x")).toBe("url");
+  });
+
+  it("still admits nothing but http and https, in any case", () => {
+    // The same pattern is the allowlist for the branch that puts a value
+    // straight into an `href`, so widening it to ignore case must not widen
+    // what it lets through.
+    for (const hostile of [
+      "javascript:alert(1)",
+      "JavaScript:alert(1)",
+      "JAVASCRIPT:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "DATA:text/html,x",
+      "vbscript:msgbox(1)",
+      "VBScript:msgbox(1)",
+      "//evil.example.com/x",
+      " javascript:alert(1)",
+      "\tjavascript:alert(1)",
+      "file:///etc/passwd",
+    ]) {
+      expect(classify(hostile), hostile).not.toBe("url");
+    }
+  });
+
   it("does not mistake a version string for a date", () => {
     expect(classify("1.1")).toBe("string");
     expect(classify("2026")).toBe("string");

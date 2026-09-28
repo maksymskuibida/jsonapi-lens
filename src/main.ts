@@ -357,7 +357,17 @@ function openExchangeEditor(): void {
   if (!current) return;
   openRequestForm(current.exchange, (result: RequestFormResult) => {
     if (!current) return;
-    current.exchange = mergeExchange(current.exchange, { request: result.request, response: result.response });
+    // `detach` is explicit because emptiness cannot carry it: `mergeExchange`
+    // keeps a part the form did not submit, which is what makes "open, touch
+    // nothing, save" harmless — and what made emptying every field leave the
+    // request exactly where it was.
+    // `{}` rather than dropping `request`/`response` alone: removing the
+    // exchange removes all of it, `origin` included. Nothing populates `origin`
+    // yet — T3 will — and when it does, provenance for a request that is no
+    // longer attached is not something to keep.
+    current.exchange = result.detach
+      ? {}
+      : mergeExchange(current.exchange, { request: result.request, response: result.response });
     refreshExchangeBand();
     persistCurrentExchange();
     toast(t().request.band.saved);

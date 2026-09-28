@@ -26,7 +26,13 @@ export function classify(value: JsonValue): ValueKind {
   if (value === "") return "empty-string";
   if (ISO_DATE.test(value)) return "date";
   if (UUID.test(value)) return "uuid";
-  if (/^https?:\/\/\S+$/.test(value)) return "url";
+  // Case-insensitive, as RFC 3986 says a scheme is — `HTTPS://example.com` is
+  // a URL and was rendering as plain text, costing a real link its
+  // clickability, which is most of what this tool is for. `UUID` above already
+  // takes the same view. Still only http and https: the pattern is the scheme
+  // allowlist for `render-value.ts`'s `url` branch, which puts the value
+  // straight into an `href`.
+  if (/^https?:\/\/\S+$/i.test(value)) return "url";
   return "string";
 }
 

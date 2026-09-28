@@ -42,12 +42,13 @@
 
 import { el } from "./dom.js";
 import { t } from "./i18n/index.js";
-import { openModal } from "./ui.js";
+import { confirmModal, openModal } from "./ui.js";
 import { headerSet } from "./headers.js";
 import type { HeaderEntry, HeaderSet } from "./headers.js";
 import { parseCookieHeader, parseSetCookie } from "./cookies.js";
 import type { Cookie, CookieSet, SetCookie, SetCookieSet } from "./cookies.js";
 import { decodeParams } from "./params.js";
+import { hasExchangeContent } from "./render-request.js";
 import type { BodyPart, Exchange, RequestPart, ResponsePart } from "./exchange.js";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -58,6 +59,18 @@ interface SimpleRow {
   name: string;
   value: string;
   disabled: boolean;
+  /**
+   * The wire pair this row was built from, when it was built from one.
+   *
+   * A row shows the *decoded* text, because that is what a person edits —
+   * `filter[tag]`, not `filter%5Btag%5D`. Re-encoding that on save is correct
+   * for a row somebody changed and wrong for one they did not: `%20` would come
+   * back as `%2520`, and an escape that cannot be decoded at all (`%ZZ`) as
+   * `%25ZZ`. Keeping the original bytes lets an untouched row be written back
+   * exactly as it arrived. `null` value is a valueless pair (`?flag`), which
+   * must not gain an `=`.
+   */
+  raw?: { key: string; value: string | null };
 }
 
 /**
@@ -83,7 +96,22 @@ function nameValueRow(row: SimpleRow, namePlaceholder: string, onNameChange?: (r
     spellcheck: false,
     "aria-label": t().request.form.rowValue,
   });
+  // Carried on the DOM rather than in a parallel array, for the reason this
+  // module's header gives about `readRows`: the rows are the state.
+  if (row.raw) {
+    nameInput.dataset["raw"] = row.raw.key;
+    if (row.raw.value !== null) valueInput.dataset["raw"] = row.raw.value;
+    else valueInput.dataset["rawValueless"] = "true";
+  }
   const disableToggle = el("input", { type: "checkbox", checked: row.disabled });
+  // Every one of these announced the same single word, with no clue which row
+  // it belonged to. The name is what distinguishes them, and it changes as the
+  // row is typed, so the label follows it.
+  const nameToggleLabel = (): void => {
+    disableToggle.setAttribute("aria-label", t().request.form.disableRowAria(nameInput.value.trim()));
+  };
+  nameToggleLabel();
+  nameInput.addEventListener("input", nameToggleLabel);
   const remove = el("button", {
     class: "act act--mini",
     type: "button",
@@ -113,11 +141,21 @@ function nameValueRow(row: SimpleRow, namePlaceholder: string, onNameChange?: (r
 function readRows(container: HTMLElement): SimpleRow[] {
   const rows: SimpleRow[] = [];
   for (const rowEl of container.querySelectorAll<HTMLElement>(".xform-row")) {
-    const name = rowEl.querySelector<HTMLInputElement>(".xform__name")?.value ?? "";
-    const value = rowEl.querySelector<HTMLInputElement>(".xform__value")?.value ?? "";
+    const nameEl = rowEl.querySelector<HTMLInputElement>(".xform__name");
+    const valueEl = rowEl.querySelector<HTMLInputElement>(".xform__value");
+    const name = nameEl?.value ?? "";
+    const value = valueEl?.value ?? "";
     const disabled = rowEl.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked ?? false;
     if (name === "" && value === "") continue;
-    rows.push({ name, value, disabled });
+    const rawKey = nameEl?.dataset["raw"];
+    const raw =
+      rawKey === undefined
+        ? undefined
+        : {
+            key: rawKey,
+            value: valueEl?.dataset["rawValueless"] === "true" ? null : (valueEl?.dataset["raw"] ?? ""),
+          };
+    rows.push({ name, value, disabled, ...(raw ? { raw } : {}) });
   }
   return rows;
 }
@@ -207,14 +245,47 @@ export interface QueryRowState {
   name: string;
   value: string;
   disabled: boolean;
+  /** See `SimpleRow.raw` — the wire pair this row came from, when it came from one. */
+  raw?: { key: string; value: string | null };
 }
 
-/** Encode the enabled rows to a wire query string — `?` not included. */
+/**
+ * Encode the enabled rows to a wire query string — `?` not included.
+ *
+ * A row that still reads exactly as its origin decoded is written back as those
+ * original bytes rather than re-encoded. Re-encoding decoded text is only right
+ * when somebody changed it: `filter[tag]` encodes to `filter%5Btag%5D`, but the
+ * row arrived holding `filter%5Btag%5D` already, and encoding *that* gives
+ * `filter%255Btag%255D` — worse each time the dialog is opened and saved, with
+ * the bracket-object reading lost along the way. An escape that cannot be
+ * decoded at all (`%ZZ`) never survives a round trip otherwise, and a valueless
+ * pair (`?flag`) would gain an `=`.
+ */
 export function encodeQueryRows(rows: QueryRowState[]): string {
   return rows
     .filter((r) => !r.disabled && r.name !== "")
-    .map((r) => `${encodeURIComponent(r.name)}=${encodeURIComponent(r.value)}`)
+    .map((r) => {
+      if (r.raw && r.name === decodeParamText(r.raw.key) && r.value === decodeParamText(r.raw.value ?? "")) {
+        return r.raw.value === null ? r.raw.key : `${r.raw.key}=${r.raw.value}`;
+      }
+      return `${encodeURIComponent(r.name)}=${encodeURIComponent(r.value)}`;
+    })
     .join("&");
+}
+
+/**
+ * The wire-to-display decoding, in one place so `decodeQueryRows` and
+ * `encodeQueryRows`'s "was this edited?" test cannot drift apart. Mirrors
+ * `params.ts#safeDecodeComponent`: `+` is a space, and text that will not
+ * decode comes back as it went in rather than throwing.
+ */
+function decodeParamText(s: string): string {
+  const plusDecoded = s.replace(/\+/g, " ");
+  try {
+    return decodeURIComponent(plusDecoded);
+  } catch {
+    return plusDecoded;
+  }
 }
 
 /** Split a `?query` string (already stripped of `?`) into editable rows, decoded for display. */
@@ -223,15 +294,13 @@ export function decodeQueryRows(query: string): QueryRowState[] {
   return query.split("&").map((pair) => {
     const eq = pair.indexOf("=");
     const rawName = eq < 0 ? pair : pair.slice(0, eq);
-    const rawValue = eq < 0 ? "" : pair.slice(eq + 1);
-    const decode = (s: string): string => {
-      try {
-        return decodeURIComponent(s.replace(/\+/g, " "));
-      } catch {
-        return s;
-      }
+    const rawValue = eq < 0 ? null : pair.slice(eq + 1);
+    return {
+      name: decodeParamText(rawName),
+      value: decodeParamText(rawValue ?? ""),
+      disabled: false,
+      raw: { key: rawName, value: rawValue },
     };
-    return { name: decode(rawName), value: decode(rawValue), disabled: false };
   });
 }
 
@@ -316,6 +385,17 @@ function textField(value: string, placeholder: string, ariaLabel: string, type =
 export interface RequestFormResult {
   request: RequestPart | undefined;
   response: ResponsePart | undefined;
+  /**
+   * Take the exchange off the document entirely, rather than merge.
+   *
+   * `undefined` on the two fields above cannot mean this: `mergeExchange`
+   * treats an absent part as "unchanged", which is what makes "open the form,
+   * touch nothing, save" a no-op. Emptying every field therefore did *not*
+   * remove anything — it submitted nothing, and the request survived with its
+   * headers and whatever credentials were in them. Removal has to be said, not
+   * inferred from emptiness.
+   */
+  detach?: true;
 }
 
 /**
@@ -389,7 +469,16 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
    */
   const initialQueryRows: QueryRowState[] = req?.query
     ? req.query.entries.flatMap((entry) =>
-        entry.raw.map((pair) => ({ name: pair.key, value: pair.value ?? "", disabled: false })),
+        entry.raw.map((pair) => ({
+          // Decoded for the person editing it — `filter[tag]`, not
+          // `filter%5Btag%5D`, which is what these bytes actually are. The pair
+          // rides along so an untouched row is written back unchanged; see
+          // `encodeQueryRows`.
+          name: decodeParamText(pair.key),
+          value: decodeParamText(pair.value ?? ""),
+          disabled: false,
+          raw: { key: pair.key, value: pair.value },
+        })),
       )
     : decodeQueryRows(splitUrlQuery(req?.url ?? "").query);
 
@@ -399,7 +488,12 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
   const rebuildUrlFromQuery = (): void => {
     if (syncingUrl) return;
     syncingUrl = true;
-    const rows = readRows(queryList.root).map((r) => ({ name: r.name, value: r.value, disabled: r.disabled }));
+    // `raw` is carried through deliberately. Dropping it here re-encoded every
+    // row — including untouched ones — the moment any single row was edited, so
+    // the URL field showed `a=%25ZZ` for a row nobody had touched. Only the
+    // preview was wrong (Save reads the rows straight off the DOM), but it is
+    // the field somebody is looking at while they decide the value is right.
+    const rows = readRows(queryList.root);
     const split = splitUrlQuery(urlInput.value);
     const query = encodeQueryRows(rows);
     urlInput.value = split.base + (query ? `?${query}` : "") + split.hash;
@@ -501,7 +595,16 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
     resBody.root,
   );
 
-  const save = el("button", { class: "btn btn--primary", type: "button", text: m.save });
+  // `xform__save` is a locale-independent hook for the browser scenarios, which
+  // used to take the first button in the actions row — fine until a second
+  // button appeared beside it.
+  const save = el("button", { class: "btn btn--primary xform__save", type: "button", text: m.save });
+  // Only when there is something to take off. `hasExchangeContent` is the same
+  // test the band's own visibility uses, so the button is there exactly when a
+  // band is.
+  const detach = hasExchangeContent(existing)
+    ? el("button", { class: "btn btn--danger", type: "button", text: m.detach, title: m.detachTitle })
+    : null;
 
   openModal({
     title: m.title,
@@ -572,7 +675,44 @@ export function openRequestForm(existing: Exchange, onSave: (result: RequestForm
         handle.close();
         onSave({ request: requestPart, response: responsePart });
       });
-      return el("div", { class: "modal__actions" }, save);
+      if (detach) {
+        detach.addEventListener("click", async () => {
+          // The handler awaits, so a second click lands while the first is
+          // still open and stacks a second confirmation on top of the first.
+          // Confirming the top one then removes the exchange and closes the
+          // form, leaving the other stranded over nothing — and answering it
+          // fires a second `onSave` for an action that already happened.
+          // Disabling is what a real hand needs; the guard covers a click
+          // dispatched straight at the element.
+          if (detach.disabled) return;
+          detach.disabled = true;
+          try {
+            // Destructive, one click, and there is no undo — the same shape as
+            // deleting a library entry, which asks first (`panels.ts`). Asking
+            // here too keeps the one pattern rather than inventing a second.
+            const confirmed = await confirmModal({
+              title: m.detach,
+              message: m.detachConfirm,
+              confirmLabel: m.detach,
+              cancelLabel: t().modal.cancel,
+              tone: "danger",
+            });
+            if (!confirmed) return;
+            handle.close();
+            onSave({ request: undefined, response: undefined, detach: true });
+          } finally {
+            detach.disabled = false;
+            // Disabling blurs the button, and it does so *before* the
+            // confirmation captures what to restore focus to — so declining
+            // left focus on `<body>`, outside the dialog's own trap. Putting it
+            // back is this handler's job, since this handler is what moved it.
+            // Skipped once the form has closed: the button is detached then,
+            // and the confirmation's own restore has the floor.
+            if (detach.isConnected) detach.focus();
+          }
+        });
+      }
+      return el("div", { class: "modal__actions" }, detach, save);
     },
   });
 }

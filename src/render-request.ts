@@ -223,12 +223,53 @@ export function parseRequestUrl(raw: string): ParsedRequestUrl | null {
   // in front of it would parse to a URL with an empty host, which is not what
   // the spec's `api.example.com/x` example means.
   if (trimmed.startsWith("/")) return null;
+  // A scheme that was given and is *invalid* is not a missing scheme. Without
+  // this, `ht!tp://[not a url]` fell through and `https://ht!tp://…` parsed —
+  // producing the origin `https://ht!tp`, which no request ever went to, under
+  // a note reading "No scheme was given". A tool people open precisely because
+  // a request looks wrong must not invent the part they came to check.
+  if (claimsScheme(trimmed)) return null;
   try {
     return { url: new URL(`https://${trimmed}`), assumedScheme: true };
   } catch {
     return null;
   }
 }
+
+/**
+ * Does this text claim a scheme of its own?
+ *
+ * Only the part before the first `/` is considered, so a query that happens to
+ * carry a URL (`api.example.com/go?to=https://x`) is still a bare host. Within
+ * that, a colon followed by digits alone is a port — `api.example.com:8080` has
+ * no scheme and should still get one assumed. Anything else after a colon is
+ * something trying to be a scheme, and if the URL parser has already rejected
+ * it, it is a broken one.
+ */
+function claimsScheme(text: string): boolean {
+  // Up to the first `/`, `?` or `#`. Splitting on `/` alone let a query carrying
+  // a URL of its own supply the colon: `example.com?a=http://x` has no path, so
+  // the split ran into the embedded `://` and the whole thing was read as
+  // claiming a scheme — a bare host that parsed on main stopped parsing.
+  const authority = text.split(/[/?#]/, 1)[0] ?? "";
+  const colon = authority.indexOf(":");
+  if (colon < 0) return false;
+  // `scheme://…` — everything before the first slash is the scheme and its
+  // colon, whatever that scheme turned out to be. The `//` is required: without
+  // it a bare IPv6 host with an empty port (`[::1]:/x`) ends in a colon too,
+  // and was read as a scheme for exactly the reason this branch exists to stop.
+  if (authority.endsWith(":") && text.startsWith(`${authority}//`) && !authority.startsWith("[")) return true;
+  // Otherwise a colon only means a scheme when what comes before it could be
+  // one. `[::1]:8080` is an IPv6 host and a port, and its *first* colon belongs
+  // to the address — reading that as a malformed scheme rejected every bare
+  // IPv6 URL, with or without a port, which is the same harm F5 was about
+  // coming from the other side.
+  if (!SCHEME_TOKEN.test(authority.slice(0, colon))) return false;
+  return !/^\d+$/.test(authority.slice(colon + 1));
+}
+
+/** A scheme, as RFC 3986 spells it: a letter, then letters, digits, `+`, `-` or `.`. */
+const SCHEME_TOKEN = /^[A-Za-z][A-Za-z0-9+.-]*$/;
 
 /* -------------------------------------------------------- masked values --- */
 
@@ -240,6 +281,8 @@ export function parseRequestUrl(raw: string): ParsedRequestUrl | null {
  * for the unmasked case). "Click to reveal, one at a time" — each value has
  * its own toggle; revealing one never affects any other.
  */
+const MASK_DOTS = 12;
+
 function maskableValue(value: string, masked: boolean): HTMLElement {
   const wrap = el("span", { class: "xmask" });
   if (!masked) {
@@ -248,10 +291,10 @@ function maskableValue(value: string, masked: boolean): HTMLElement {
   }
 
   wrap.setAttribute(REVEAL_ATTR, "false");
-  const dots = el("span", {
-    class: "xmask__dots",
-    text: "•".repeat(Math.min(24, Math.max(8, value.length))),
-  });
+  // A fixed run, not one derived from the value. Scaling it to the length
+  // counted the secret out on screen — a 21-character session id showed exactly
+  // 21 dots — which is the one thing a mask must not do.
+  const dots = el("span", { class: "xmask__dots", text: "•".repeat(MASK_DOTS) });
   const real = el("span", { class: "xmask__value", text: value });
   const button = el("button", {
     class: "xmask__toggle",

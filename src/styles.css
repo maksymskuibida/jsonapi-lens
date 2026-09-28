@@ -3917,6 +3917,15 @@ body.has-modal {
 }
 
 .xurl__origin a {
+  /* 21.7px tall before this. Not a link inside a sentence — its only sibling is
+     the path span — so SC 2.5.8's inline exception does not cover it and it
+     takes the 24px floor like any other control. The one link in this module
+     that *is* in a sentence ("jump to the document below", inside a `<p>` of
+     running text) is exempt and deliberately left alone: giving it a box would
+     break the line it sits in, which is what the exception exists to prevent. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   color: var(--accent);
 }
 
@@ -4031,6 +4040,14 @@ body.has-modal {
 }
 
 .xmask__toggle {
+  /* A standalone button, so WCAG 2.2 SC 2.5.8's 24px floor applies — the
+     inline-text exception does not cover it. 17px tall before this. The
+     browser suite's target sweep missed it because it ran against a document
+     with no exchange attached, so none of the band's own controls were on
+     screen to measure; it now attaches one. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   border: 0;
   background: transparent;
   padding: 0;
@@ -4043,8 +4060,15 @@ body.has-modal {
 
 /* Reveal is `false` by default (`render-request.ts#maskableValue`): the dots
    and the toggle show, the real value is hidden. `[data-x-reveal="true"]`
-   flips which of the two is visible — never a re-render, just a class check. */
-.xmask:not([data-x-reveal="true"]) .xmask__value {
+   flips which of the two is visible — never a re-render, just a class check.
+
+   Matched on `="false"` rather than `:not(="true")`. A value that needs no mask
+   is the same `.xmask` element with **no** attribute at all, and `:not(="true")`
+   matched that too — so every ordinary header, cookie and URL part in the review
+   rendered as an empty cell, with no dots and no toggle to bring it back. The
+   panel exists to show the exchange; it was hiding everything that was not a
+   secret. */
+.xmask[data-x-reveal="false"] .xmask__value {
   display: none;
 }
 

@@ -53,6 +53,13 @@
 /view
   X-Robots-Tag: noindex
 
+# Every file here is content-hashed by the build (`assetsInlineLimit: 0`, and
+# Vite's own naming), so a given URL's bytes never change — a new build means a
+# new URL. `immutable` is what that earns: the browser stops revalidating on
+# every load, which it was doing under the site-wide `max-age=0`.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
 /sitemap.xml
   Cache-Control: public, max-age=3600
 /robots.txt
