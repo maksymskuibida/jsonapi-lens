@@ -10,7 +10,7 @@
  * Two rules do the work:
  *
  *  - **A route either has a canonical path or must not be indexed.** `/view` and
- *    `/d/<id>:<secret>` have no content of their own — one renders whatever is
+ *    `/d/<id>#<secret>` have no content of their own — one renders whatever is
  *    in the visitor's IndexedDB, the other carries a decryption key in the URL —
  *    so they get `noindex` and no canonical. `robots.txt` and `_headers` say the
  *    same thing for readers that never run this code.
@@ -85,6 +85,15 @@ export function metaForRoute(route: Route): PageMeta {
   // Both of these render somebody's own document, or nothing at all.
   if (route.kind === "view" || route.kind === "share") {
     return { title: m.meta.title, description: m.meta.description, path: null };
+  }
+
+  // A damaged share link never stays on this route: `applyRoute`/`boot`
+  // replace it with `PASTE_PATH` before anything paints. Giving it its own
+  // arm — rather than letting it fall into the generic default below —
+  // states that explicitly, so the *next* `Route` member added to the union
+  // does not silently inherit paste meta by accident (review S2, PR #25).
+  if (route.kind === "share-damaged") {
+    return { title: m.meta.title, description: m.meta.description, path: PASTE_PATH };
   }
 
   return { title: m.meta.title, description: m.meta.description, path: PASTE_PATH };

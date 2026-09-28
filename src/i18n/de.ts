@@ -514,7 +514,7 @@ export const de: Messages = {
       "Dieser Browser kann keinen Share-Link verschlüsseln (benötigt WebCrypto und CompressionStream).",
     lede: "Das Dokument wird in diesem Tab gzip-komprimiert und verschlüsselt. Der Schlüssel entsteht hier und steht nur im Link — der Server speichert einen undurchsichtigen Datensatz, den er nicht lesen kann. Erstellen und Öffnen dauern jeweils einen Moment, weil der kurze Schlüssel absichtlich aufwendig abzuleiten ist.",
     lifetimeLabel: "Gültigkeitsdauer",
-    note: "Wer den Link hat, kann das Dokument lesen — behandeln Sie ihn also wie den Payload selbst. Der Schlüssel steht im URL-Pfad und landet damit in der Browser-Historie und überall sonst, wo der Link verarbeitet wird. Verschicken Sie ihn so, wie Sie den Payload verschicken würden.",
+    note: "Wer den Link hat, kann das Dokument lesen — behandeln Sie ihn also wie den Payload selbst. Der Schlüssel ist der Teil nach dem #: Ihr Browser behält ihn für sich und sendet ihn nie an den Server. In der Browser-Historie und überall, wo der Link eingefügt wird, landet er trotzdem — verschicken Sie ihn so, wie Sie den Payload verschicken würden.",
     redacting: (n) =>
       f.plural(n, {
         // "Zugangsdaten" has no natural singular — "Zugangsdatum" is read as a
@@ -642,6 +642,10 @@ export const de: Messages = {
     expired: {
       headline: "Dieser Share-Link ist abgelaufen.",
       hint: "Share-Links werden gelöscht, sobald ihre Gültigkeitsdauer endet. Bitten Sie um einen frischen Link.",
+    },
+    damaged: {
+      headline: "Diesem Share-Link fehlt der Schlüssel.",
+      hint: "Ein Share-Link endet mit # und dem Schlüssel — dieser hier nicht. Manche Chat-Programme, Kurz-URL-Dienste und Mail-Scanner schneiden ihn ab. Lassen Sie sich den Link noch einmal geben und kopieren Sie ihn vollständig.",
     },
     corruptShort: {
       headline: "Dieses geteilte Dokument ist beschädigt.",

@@ -18,7 +18,7 @@ export const SHARE_DESCRIPTION = [
     "the plaintext or the secret.",
   `Generate the secret yourself before calling this, with \`${GENERATE_SECRET_COMMAND}\`. Keep it — ` +
     "it is not recoverable from the id, and the server cannot decrypt without it. The link is " +
-    "`<origin>/d/<id>:<secret>`, for example `https://jsonapi.mstool.dev/d/412:a1b2…`. Anyone " +
+    "`<origin>/d/<id>#<secret>`, for example `https://jsonapi.mstool.dev/d/412#a1b2…`. Anyone " +
     "with that link can read the document; anyone with only the id cannot.",
 ].join("\n\n");
 
@@ -26,7 +26,7 @@ export const READ_DESCRIPTION = [
   "Fetch and decrypt a jsonapi-lens share link given its id and secret, and return the document " +
     "text exactly as it was shared — or, for a link that carries several documents (a bundle), " +
     "every document in it. No parsing, indexing or reshaping happens here.",
-  "Use the secret exactly as it appears in the link — `<origin>/d/<id>:<secret>` — whatever its " +
+  "Use the secret exactly as it appears in the link — `<origin>/d/<id>#<secret>` — whatever its " +
     "shape. Most links were minted by jsonapi-lens's own Share button, whose secret is 10 " +
     "characters of mixed-case letters, digits, hyphens and underscores — about a quarter of real " +
     "secrets contain a `-` or `_`, so do not treat one as a typo or try to \"correct\" it; never " +

@@ -297,8 +297,8 @@ describe("llms.txt", () => {
   });
 
   it("asks not to be sent to the share links, whose keys are in the URL", () => {
-    expect(llmsTxt).toContain("/d/<id>:<secret>");
-    expect(llmsFullTxt).toContain("/d/<id>:<secret>");
+    expect(llmsTxt).toContain("/d/<id>#<secret>");
+    expect(llmsFullTxt).toContain("/d/<id>#<secret>");
   });
 
   it("repeats the answers, so an assistant that reads only this file has them", () => {

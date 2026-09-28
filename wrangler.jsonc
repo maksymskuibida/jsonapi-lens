@@ -16,7 +16,7 @@
     "directory": "./dist",
     "binding": "ASSETS",
     // Paths are resolved in the browser, so every non-asset path must return
-    // the single page: `/`, `/view`, `/d/<id>:<secret>`.
+    // the single page: `/`, `/view`, `/d/<id>#<secret>`.
     "not_found_handling": "single-page-application",
     // ...except the share API, which has to reach the Worker instead of being
     // swallowed by the SPA fallback above.

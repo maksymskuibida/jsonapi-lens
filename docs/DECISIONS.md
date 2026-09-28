@@ -391,3 +391,65 @@ under some resource count, summary above it) — rejected for being two behaviou
 simpler and neither loses anything a user needs: below the threshold the "second tree" is small
 enough to be cheap but is still a duplicate of what is already on screen one scroll away, so the
 threshold buys safety at large sizes without buying anything at small ones.
+
+---
+
+## D7 · The share key travels in the fragment, and never in the path
+
+**Date:** 2026-09-21 · **Settles:** the shape of a share link, for `src/router.ts`, `mcp/`, and
+every document that describes what the server can see
+
+### Why this is load-bearing
+
+Two sentences in the product — the share dialog's lede ("the server stores an opaque blob it cannot
+read") and `/privacy` ("the server receives ciphertext it cannot read") — are claims about what
+reaches the origin. Until this entry, the key reached it: a link was `/d/<id>:<secret>`, so opening
+one issued `GET /d/27%3AAaMYMLyMlq` and the key landed in the request line, in `Referer`, and from
+there in Cloudflare's access log, whose own retention `/privacy` documents under *Hosting and server
+log data*. Anyone holding those log lines held both halves of the encryption, and the two sentences
+above were false. This was found by the production QA pass of 2026-09-20 (finding F3).
+
+### The rule
+
+**A share link is `<origin>/d/<id>#<secret>`.** The key is a URL fragment, which a browser strips
+before building the request and never sends in `Referer` — so it is absent from the origin, from
+every proxy and CDN in between, and from anything either of them logs. `shareUrl` in
+`src/router.ts` is the only place a link is minted in the app, and `mcp/build-server.ts` the only
+other place in the repository; both produce this form and nothing produces the old one.
+
+`/d/<id>:<secret>` and `/d/<id>.<secret>` are still **parsed**, forever, because links already sent
+to people have to keep opening. Parsing them is not an endorsement: those links put their key in a
+log the first time anyone opens them, and that cannot be undone from here.
+
+A path under `/d/<digits>` with no usable key is `{ kind: "share-damaged" }` — a broken share link,
+not a missing page. The most likely cause is now something along the way eating the fragment, so
+the message names that rather than claiming the page does not exist. It is decided from the URL
+alone and never asks the server whether the id exists, so it introduces no oracle.
+
+### What this does not buy, and must not be claimed
+
+The origin still serves the JavaScript that holds the key, so anyone able to change what `/d/*`
+serves can exfiltrate it. Browser-delivered end-to-end encryption is always trust in the origin.
+What the fragment guarantees is **passive**: the key is not in what the server receives, stores or
+logs. `/privacy` says exactly that and no more, and a later change that makes it say more is wrong
+even if the code has not changed.
+
+### What enforces it
+
+`test/router.test.ts` asserts that `shareUrl` emits a `#` and that the colon form still parses;
+`test/mcp/tools.test.ts` asserts the same for the MCP `share` tool's `url`. A change putting the
+key back in the path contradicts this entry and must amend it in the same pull request — and must
+also correct the two sentences above, which would become false again.
+
+### Rejected alternatives
+
+- **A password or passphrase on the link** — rejected: it solves the same problem by making every
+  recipient do work, for a tool whose whole premise is paste-and-read.
+- **Deriving the fetch id from the key** (`id = H(secret)`, so the server never sees an independent
+  identifier) — rejected as strictly worse: it turns the logged id into a fast hash of a 60-bit
+  secret, brute-forceable offline in days, where `crypto.ts`'s PBKDF2 stretching currently puts
+  that at millions of GPU-years.
+- **Scrubbing the key out of the logs instead** — not available. Logpush, the only customer-facing
+  HTTP log pipeline, is Enterprise-only, and its filters drop whole records rather than redacting a
+  field. The reachable mitigation for already-logged keys is to delete the shares they open, not to
+  edit the log.

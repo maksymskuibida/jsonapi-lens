@@ -9,6 +9,7 @@ import { createMcpServer } from "../../mcp/build-server.js";
 import { GENERATE_SECRET_COMMAND, LIFETIME_KEYS } from "../../mcp/validate.js";
 import { generateSecret, open, seal } from "../../src/crypto.js";
 import type { SharePayload } from "../../src/crypto.js";
+import { parseRoute } from "../../src/router.js";
 import { createStubBackend } from "./stub-backend.js";
 import type { StubBackend } from "./stub-backend.js";
 
@@ -100,7 +101,7 @@ describe("registered tool descriptions", () => {
     const description = share!.description ?? "";
 
     expect(description).toContain(GENERATE_SECRET_COMMAND);
-    expect(description).toContain("<origin>/d/<id>:<secret>");
+    expect(description).toContain("<origin>/d/<id>#<secret>");
     expect(description.toLowerCase()).toMatch(/not recoverable|unrecoverable/);
     expect(description).toMatch(/anyone with that link can read the document/i);
     expect(description).toMatch(/anyone with only the id cannot/i);
@@ -178,7 +179,21 @@ describe("share", () => {
 
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent?.kind).toBe("document");
-    expect(result.structuredContent?.url).toBe(`${ORIGIN}/d/${result.structuredContent?.id}:${SECRET_A}`);
+    expect(result.structuredContent?.url).toBe(`${ORIGIN}/d/${result.structuredContent?.id}#${SECRET_A}`);
+
+    // Review B1 (round 1): asserting the *string* the tool returns is not
+    // the same guard as asserting the app can actually read it back. Parse
+    // the MCP-minted URL through the app's own router — the invariant that
+    // actually matters is that build-server.ts and router.ts agree, at the
+    // 64-character secret MCP always mints. Confirmed by hand: lowering
+    // src/router.ts's SECRET_PATTERN upper bound below 64 turns this
+    // assertion red while the string-shape assertion above stays green.
+    const minted = new URL(result.structuredContent!.url as string);
+    expect(parseRoute(minted.pathname, minted.hash)).toEqual({
+      kind: "share",
+      id: result.structuredContent!.id,
+      secret: SECRET_A,
+    });
 
     const uploaded = backend.calls.find((c) => c.init?.method === "POST")!.init!.body!;
     expect(uploaded[0]).toBe(2);

@@ -95,7 +95,7 @@ const shareInputShape = {
 
 const shareOutputShape = {
   id: z.number().describe("The share's numeric id."),
-  url: z.string().describe("The full link: `<origin>/d/<id>:<secret>`."),
+  url: z.string().describe("The full link: `<origin>/d/<id>#<secret>`."),
   expiresAt: z.union([z.number(), z.null()]).describe("Epoch milliseconds, or null for no expiry."),
   bytes: z.number().describe("The ciphertext size actually uploaded."),
   kind: z.enum(["document", "bundle"]),
@@ -106,7 +106,7 @@ const readInputShape = {
   // message, instead of interpolating it into a path and reporting whatever
   // came back ("gone or never existed") for a value that was never going to
   // exist in the first place.
-  id: z.number().int().positive().describe("The numeric id from a share link's `<origin>/d/<id>:<secret>`."),
+  id: z.number().int().positive().describe("The numeric id from a share link's `<origin>/d/<id>#<secret>`."),
   secret: z.string().describe("The secret half of the same link."),
   origin: z.string().optional().describe("Which jsonapi-lens deployment to read from."),
 };
@@ -214,7 +214,7 @@ export function createMcpServer(deps: McpServerDeps): McpServer {
       }
 
       const created = await uploadShare(fetchImpl, resolvedOrigin, blob, resolvedLifetime);
-      const url = `${resolvedOrigin}/d/${created.id}:${secret}`;
+      const url = `${resolvedOrigin}/d/${created.id}#${secret}`;
 
       const structuredContent = {
         id: created.id,

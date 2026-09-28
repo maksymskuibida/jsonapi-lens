@@ -103,7 +103,7 @@ ceiling is around 100,000 resources.
 - `/view` — the document view; relationship anchors are fragments on this path.
   Renders a document from the visitor's own browser storage, so it has no content
   for anyone else.
-- `/d/<id>:<secret>` — a share link, which loads and then becomes `/view`. The
+- `/d/<id>#<secret>` — a share link, which loads and then becomes `/view`. The
   decryption key is part of the URL; these should not be crawled, indexed or
   quoted.
 - `/impressum` — provider information under § 5 DDG. Also `/imprint`, `/legal`.

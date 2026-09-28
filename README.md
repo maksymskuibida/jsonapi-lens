@@ -49,7 +49,8 @@ Five, parsed by hand in [`src/router.ts`](src/router.ts) — no router library:
 |---|---|
 | `/` | the paste view |
 | `/view` | the document view; relationship anchors are fragments on this path |
-| `/d/<id>:<secret>` | a share link, which loads and then replaces itself with `/view` |
+| `/d/<id>#<secret>` | a share link, which loads and then replaces itself with `/view` |
+| `/d/<id>:<secret>` | the same, in the format links were minted in before the key moved into the fragment — still read, never written |
 | `/impressum` | provider information under § 5 DDG |
 | `/privacy` | the privacy policy |
 
@@ -127,7 +128,8 @@ called — so it matches the rest of the UI. `/imprint`, `/legal`, `/datenschutz
   being restored, so writing the outgoing position there overwrites exactly what is about to be read
   and Back stops working. Found by testing; `scrollend` closes the same gap safely.
 - **Cloudflare's asset router percent-encodes the colon** in `/d/1:KEY`, 307-ing to `/d/1%3AKEY`, so
-  the router decodes the pathname before matching.
+  the router decodes the pathname before matching. Only legacy links reach that path now; a current
+  link is `/d/1#KEY`, and a fragment survives a redirect untouched because it is never sent at all.
 - **Duplicate identities.** A document that repeats `type:id` violates the spec, but rendering it
   twice would put a duplicate id in the DOM and silently break every anchor to it. First occurrence
   wins; the row is tagged `duplicated`.
@@ -273,7 +275,7 @@ Opt-in, and the only thing that touches a server.
 
 1. The document is gzipped and encrypted **in the browser** with AES-256-GCM.
 2. The ciphertext is uploaded. The key is not — it goes in the link.
-3. You get `https://jsonapi.mstool.dev/d/<id>:<secret>` and a lifetime of your choosing
+3. You get `https://jsonapi.mstool.dev/d/<id>#<secret>` and a lifetime of your choosing
    (15 minutes, 6 hours, 1 day, 1 week, 1 month, or no expiry — remembered for next time).
 
 The Worker stores an opaque blob, a byte count and an expiry. No label, no type names, no filename —
@@ -299,10 +301,13 @@ when a link is created or opened, and the same *per guess* for an attacker:
 (36 bits) would fall in days and is deliberately not offered.
 
 **Two things to know before sending one.** Anyone with the link can read the document, so treat the
-link like the payload. And the key sits in the URL *path*, which means it reaches browser history and
-anything else that handles the link — unlike a `#fragment`, which browsers never send. The app
-strips the secret from the address bar as soon as a link opens, and accepts `/d/<id>#<secret>` if you
-prefer the fragment form, but links are minted in the path form.
+link like the payload. And the key is a **fragment** — the part after `#` — which a browser never
+puts on the wire: it is not in the request line, not in `Referer`, and so not in any access log
+between you and the origin. That is what makes "the server cannot read it" true of the server's
+logs and not only of its database; see [DECISIONS.md D7](docs/DECISIONS.md). It still reaches
+browser history and anything else that handles the link, so it is not a secret you can be careless
+with. The app strips it from the address bar as soon as a link opens, and still reads the older
+`/d/<id>:<secret>` form so links already sent keep working — nothing mints it any more.
 
 **One link can carry several documents.** The envelope's first byte is a version: `2` is today's
 single document, unchanged since before bundles existed, and `3` is a **bundle** — sealed the same
@@ -327,7 +332,7 @@ deliberately. Four surfaces do it, and each has a test holding it to the others:
 Two rules run through all of it:
 
 - **A route either has a canonical URL or is `noindex`.** `/view` renders a document from the
-  visitor's own IndexedDB, so for anyone else it is an empty page; `/d/<id>:<secret>` carries a
+  visitor's own IndexedDB, so for anyone else it is an empty page; `/d/<id>#<secret>` carries a
   decryption key in the URL, so a crawler that runs JavaScript could render a document meant for one
   recipient. Both are excluded in `robots.txt`, sent `X-Robots-Tag: noindex` by `_headers`, and given
   no canonical by `src/seo.ts` — three layers because a `Disallow` is a request and a header is not.

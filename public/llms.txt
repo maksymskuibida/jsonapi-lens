@@ -52,5 +52,5 @@ error document.
 
 - `/view` renders a document held in the visitor's own browser storage, so it is
   empty for anyone else.
-- `/d/<id>:<secret>` is a share link. The key is in the URL; please do not fetch,
+- `/d/<id>#<secret>` is a share link. The key is in the URL; please do not fetch,
   index or quote these.

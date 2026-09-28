@@ -43,7 +43,7 @@
  * range is enforced again here, independently of the router, because a
  * caller like T7 never goes through the router at all — it calls `seal`
  * directly — and a blob this module is willing to produce must always be a
- * blob the app's own `/d/<id>:<secret>` route can open back up. A longer
+ * blob the app's own `/d/<id>#<secret>` route can open back up. A longer
  * secret is simply a stronger one through the same `deriveKey`; nothing about
  * the KDF changes.
  *
@@ -76,7 +76,7 @@
  * Both shapes decrypt through the same key derivation and the same AES-GCM
  * call; only the JSON validation after decompression branches on the version
  * byte. `open` returns the right one of the two — the decrypted payload
- * declares its own kind, which is what lets `/d/<id>:<secret>` stay a single
+ * declares its own kind, which is what lets `/d/<id>#<secret>` stay a single
  * route for both.
  */
 
