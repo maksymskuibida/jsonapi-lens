@@ -65,7 +65,7 @@ import type { LegalRoute, Route } from "./router.js";
 import { applyPageMeta, applyRouteMeta, documentMeta, metaForRoute } from "./seo.js";
 import { renderLegalPage } from "./views/legal.js";
 import { fetchShare, openShareModal } from "./share.js";
-import { EXPOSED_KEY_TOAST_MS, shareOpenedToast } from "./share-toast.js";
+import { keyExposedOnlyToast, shareOpenedToast } from "./share-toast.js";
 import { isBundlePayload, ShareError } from "./crypto.js";
 import {
   clearDocument,
@@ -2172,10 +2172,14 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
     // `/api/shares/<id>` still carried the key — for a legacy
     // `/d/<id>:<key>` link or a `%23`-exposed one, the key sits in the
     // *path*, and this page's
-    // referrer policy (`strict-origin-when-cross-origin`) sends the current
-    // URL's path as `Referer` on a same-origin request. That request hits
-    // this Worker, which has invocation-log observability on
-    // (`wrangler.jsonc`), so the header was not just sent, it was kept. An
+    // referrer policy (then `strict-origin-when-cross-origin`) sends the
+    // current URL's path as `Referer` on a same-origin request. That request
+    // hit this Worker, which then had invocation-log observability on
+    // (`wrangler.jsonc`), so the header was not just sent, it was kept.
+    // QA4 update: share pages now carry `Referrer-Policy: no-referrer` and
+    // invocation logs are off, so this line is defence in depth rather than
+    // the only thing standing in the way — keep it (a second layer costs
+    // nothing; see DECISIONS.md D7's QA4 amendment). An
     // ordinary `#`-fragment link was never affected — the Referrer Policy
     // spec strips the fragment before building `Referer`, unconditionally,
     // for every policy — so moving this line earlier changes nothing for
@@ -2201,8 +2205,13 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
       // function still uses to reject a malformed bundle — showing it
       // earlier meant a corrupt bundle said "Opened a shared document…"
       // and then immediately showed the corrupt-bundle error card instead.
+      //
+      // QA4 review (S1): the warning alone, not `openedKeyExposed` — that
+      // copy says the document "is now stored in this browser", and a bundle
+      // is not stored until an entry is opened from the import view.
       if (route.keyExposed) {
-        toast(t().share.openedKeyExposed, "error", EXPOSED_KEY_TOAST_MS);
+        const warning = keyExposedOnlyToast(t());
+        toast(warning.text, warning.tone, warning.durationMs);
       }
       await renderBundleImportView(bundleImportEl, payload, {
         onOpen: (entry) => {
@@ -2233,13 +2242,19 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
     // Both used to say "stored in this browser" unconditionally, so with
     // storage blocked this toast replaced `notStored` with its opposite.
     // If the text did not parse, `load()` has already put the error card up
-    // and returned `ok: false`; there is nothing to announce then.
+    // and returned `ok: false`: there is no "opened" to announce, but a
+    // `%23` link's key was exposed all the same (the payload decrypted, so
+    // it was the right key), so the warning still goes up on its own
+    // (QA4 review, S2).
     if (loaded.ok) {
       const opened = shareOpenedToast(t(), {
         keyExposed: route.keyExposed === true,
         stored: loaded.saved !== false,
       });
       toast(opened.text, opened.tone, opened.durationMs);
+    } else if (route.keyExposed) {
+      const warning = keyExposedOnlyToast(t());
+      toast(warning.text, warning.tone, warning.durationMs);
     }
   } catch (error) {
     navigate(PASTE_PATH, { replace: true });

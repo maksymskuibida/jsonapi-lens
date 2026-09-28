@@ -18,9 +18,9 @@
  * keeps the whole key warning — losing the warning because storage also
  * failed would be a worse bug than the one this fixes.
  *
- * The tone and duration of the exposed-key variants are the caller's
- * (`main.ts#EXPOSED_KEY_TOAST_MS`), passed in, because that constant is about
- * how long a ~250-character notice needs, which is a display concern.
+ * The tone and duration of the exposed-key variants are fixed here
+ * (`EXPOSED_KEY_TOAST_MS`, below): how long a ~250-character notice needs is a
+ * display concern, and every place that shows one wants the same answer.
  */
 
 import type { Messages } from "./i18n/en.js";
@@ -35,7 +35,7 @@ export interface ShareOpenedToast {
 /**
  * How long the "this link's key was exposed" toast stays up. Review round 1
  * (S2, PR #27): the ordinary toast's default lifetime (`DEFAULT_TOAST_MS` in
- * `ui.ts`) was written for a one-line confirmation, not a ~170-character
+ * `ui.ts`) was written for a one-line confirmation, not a ~250-character
  * security notice — most readers would not finish it in time.
  */
 export const EXPOSED_KEY_TOAST_MS = 9000;
@@ -57,4 +57,16 @@ export function shareOpenedToast(
   return stored
     ? { text: m.share.opened, tone: "info" }
     : { text: m.share.openedNotStored, tone: "error" };
+}
+
+/**
+ * The exposed-key warning with no "opened" and no "stored" in it (QA4 review,
+ * S1 and S2). For the two places that must warn about a `%23` link but cannot
+ * truthfully say a document was opened and stored: a bundle link, whose
+ * import view is still open with nothing saved, and a link whose payload
+ * decrypted but did not parse, where the error card is on screen. The key was
+ * correct in both — the link is exposed just the same.
+ */
+export function keyExposedOnlyToast(m: Messages): ShareOpenedToast {
+  return { text: m.share.keyExposedOnly, tone: "error", durationMs: EXPOSED_KEY_TOAST_MS };
 }

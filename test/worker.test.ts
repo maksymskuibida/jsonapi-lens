@@ -142,6 +142,13 @@ describe("Workers Logs cannot retain a share key — QA4 item 1", () => {
     expect(consoleCalls(source).length).toBeGreaterThanOrEqual(2);
   });
 
+  // A tripwire, not a proof. The control that keeps a key out of Workers
+  // Logs is `invocation_logs: false` (asserted below); this only catches the
+  // obvious ways someone might start logging a request. It is walked around
+  // by an alias (`const u = request.url; console.log(u)`), by
+  // `const log = console.log`, by `console["log"](…)`, and by
+  // `console.error(err)` where `err.message` happens to hold a URL. Do not
+  // read a green run as "worker.ts cannot log a URL".
   it("no console.* call in worker.ts mentions the request, its URL, its path or a header", () => {
     for (const call of consoleCalls(source)) {
       expect(call, call).not.toMatch(FORBIDDEN);
@@ -167,9 +174,11 @@ describe("Workers Logs cannot retain a share key — QA4 item 1", () => {
         .map((line) => line.replace(/^\s*\/\/.*$/, ""))
         .join("\n")
         .replace(/,(\s*[}\]])/g, "$1"),
-    ) as { observability: { enabled: boolean; head_sampling_rate: number; logs: { invocation_logs: boolean } } };
+    ) as { observability: { enabled: boolean; head_sampling_rate: number; logs: { enabled: boolean; invocation_logs: boolean } } };
     expect(json.observability.enabled).toBe(true);
     expect(json.observability.head_sampling_rate).toBe(1);
     expect(json.observability.logs.invocation_logs).toBe(false);
+    // Stated, not left to the API default: console output must stay on.
+    expect(json.observability.logs.enabled).toBe(true);
   });
 });

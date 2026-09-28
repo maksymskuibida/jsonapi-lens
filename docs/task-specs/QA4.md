@@ -25,8 +25,10 @@ depends on another. This spec was written by the implementer (none existed when 
 `{ "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } }`. Shape taken from
 Cloudflare's Workers Logs documentation ("Invocation logs can be disabled in wrangler by adding the
 `invocation_logs = false` configuration") and from `node_modules/wrangler/config-schema.json`
-(`Observability.logs.invocation_logs: boolean`). `head_sampling_rate` is not touched. Wrangler's
-`normalizeObservability` fills `logs.enabled` from the top-level `enabled`, so `logs` need not repeat it.
+(`Observability.logs.invocation_logs: boolean`). `head_sampling_rate` is not touched. `logs.enabled: true`
+is stated explicitly: wrangler's upload path sends `config.observability` as written (its
+`normalizeObservability` only feeds the local-versus-remote config diff), so an omitted `logs.enabled`
+would be left to Cloudflare's API default (review round 1, S3).
 
 **2. `src/router.ts`** — new pure function
 `referrerPolicyForRoute(route: Route): "no-referrer" | null`, next to `robotsTagForRoute`:
@@ -38,7 +40,9 @@ append — to (a) the page response and (b) the 405 response (decision below).
 **3. `src/share-toast.ts`** (new, pure) — `shareOpenedToast(messages, { keyExposed, stored })`
 returning `{ text, tone, durationMs? }`, choosing among four copies:
 `share.opened`, `share.openedKeyExposed` (existing) and two new rows `share.openedNotStored`,
-`share.openedKeyExposedNotStored`, in all of `en.ts`, `de.ts`, `uk.ts`.
+`share.openedKeyExposedNotStored`, in all of `en.ts`, `de.ts`, `uk.ts`. A fifth, `share.keyExposedOnly`
+(the warning with no "opened" and no "stored"), via `keyExposedOnlyToast`, is for a bundle link and for a
+`%23` link whose payload decrypted but did not parse (review round 1, S1 and S2).
 `src/main.ts`: `load()` returns a result that says whether persistence succeeded (the
 existing boolean is "document parsed"; it keeps that meaning for its other callers), and
 `loadSharedDocument` picks the copy from it. The `toast.notStored` toast that `load()` shows stays
@@ -97,7 +101,9 @@ methods). `HEAD` gets the same 200 headers with no body per the runtime.
 | Share opened, IndexedDB unavailable, ordinary link | not-stored copy; never says "stored in this browser" |
 | Share opened, IndexedDB unavailable, `%23` link | not-stored copy **plus** the exposed-key warning |
 | Share opened, storage fine | exactly the QA3 copies |
-| Share opened with a bundle payload | bundle import view; toast unchanged (nothing is stored at that point) |
+| Share opened with a bundle payload, `%23` link | bundle import view; the `keyExposedOnly` warning (no "stored" claim: nothing is stored yet). A non-exposed bundle link shows no toast, as before |
+| `%23` link, payload decrypts but does not parse | error card, plus the `keyExposedOnly` warning; no "opened"/"stored" claim |
+| Ordinary link, payload decrypts but does not parse | error card only, as before |
 | `POST/PUT/DELETE/PATCH/OPTIONS /api/health` | 405, `Allow: GET, HEAD`, JSON headers, body `{"error":"Method not allowed."}` |
 | `GET`/`HEAD /api/health` | 200 `{"ok":true}`, as before (deploy smoke test) |
 | `/api/shares`, `/api/shares/<id>` any method | exactly as before |
@@ -118,6 +124,7 @@ methods). `HEAD` gets the same 200 headers with no body per the runtime.
 - [ ] `referrerPolicyForRoute` returns `no-referrer` for `share`, `share-damaged`, and `null` for every other kind.
 - [ ] Under `wrangler dev`, `curl -sD -` of `/d/42` and `/d/42:AAAAAAAAAAAA` shows exactly one `referrer-policy: no-referrer`; `/view` and `/` show exactly one `referrer-policy: strict-origin-when-cross-origin`.
 - [ ] `test/security-headers.test.ts` passes unmodified in meaning.
+- [ ] The bundle-link `%23` toast and the decrypted-but-unparseable `%23` toast use `share.keyExposedOnly`, in en/de/uk.
 - [ ] `shareOpenedToast` returns a not-stored copy when `stored` is false, in en/de/uk, and the exposed-key copy still contains the `%23` warning when not stored.
 - [ ] `en.ts`, `de.ts`, `uk.ts` each carry both new rows; typecheck passes.
 - [ ] `POST /api/health` is 405 with `Allow: GET, HEAD`; `GET`/`HEAD` 200; deploy smoke test's check (`"ok":true` in `GET` body) still holds.

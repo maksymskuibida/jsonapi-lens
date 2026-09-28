@@ -557,7 +557,14 @@ edge analytics, rather than a retained search. A cost was accepted deliberately 
 rate, which would only have made the leak sparser. **Not closed by this:** Cloudflare's own edge/HTTP
 request logs, a different pipeline that this repository cannot configure and `/privacy` already
 documents under *Hosting and server log data*; that is the residue D7's main text describes for
-legacy links. Whether the production Workers Logs pipeline honours the setting was not observable
+legacy links. **One thing the setting is not known to cover:** Cloudflare documents that Workers Logs include
+"errors, and uncaught exceptions", and that the request metadata and headers are captured into the same
+per-invocation trace object; its documentation does not say whether that metadata (the request URL)
+is still attached to an exception entry when invocation logs are off. If it is, an uncaught exception
+thrown while serving a legacy or `%23` link (for example an `env.ASSETS.fetch` rejection in `serveShell`)
+could still write the key. Nothing in this Worker is expected to throw there, and no `console.*` call
+mentions the request, but "exceptions still land in Workers Logs" must not be read as "harmlessly".
+Check it in the dashboard once (STATUS §4) and amend this entry with what is found. Whether the production Workers Logs pipeline honours the setting was not observable
 from a local `wrangler dev` (see `docs/evidence/QA4.md`); it rests on Cloudflare's documented
 behaviour and should be confirmed once in the dashboard after the first deploy.
 

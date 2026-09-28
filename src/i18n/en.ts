@@ -653,6 +653,15 @@ export const en = {
      * stored, a reload loses it — and the exposed-key variant keeps the whole
      * key warning.
      */
+    /**
+     * QA4 review (S1, S2): the exposed-key warning on its own, for the two
+     * places where nothing has been stored *and* "opened" would be wrong — a
+     * bundle link (its import view is still open, nothing is saved yet) and a
+     * `%23` link whose payload decrypted but did not parse (the error card
+     * is up). It makes no claim about storage either way.
+     */
+    keyExposedOnly:
+      "This link's # had been changed to %23, so its key was sent to the server as part of the address. Treat this link as exposed, and share a new one if the document is sensitive.",
     openedNotStored:
       "Opened a shared document, but it could not be stored in this browser, so a reload will lose it.",
     openedKeyExposedNotStored:

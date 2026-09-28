@@ -67,6 +67,9 @@
     "enabled": true,
     "head_sampling_rate": 1,
     "logs": {
+      // Stated rather than left to Cloudflare's API default for a `logs`
+      // object that omits it: `console.*` output should stay on.
+      "enabled": true,
       "invocation_logs": false
     }
   }

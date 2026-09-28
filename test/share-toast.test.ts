@@ -4,7 +4,7 @@ import { de } from "../src/i18n/de.js";
 import { en } from "../src/i18n/en.js";
 import type { Messages } from "../src/i18n/en.js";
 import { uk } from "../src/i18n/uk.js";
-import { EXPOSED_KEY_TOAST_MS, shareOpenedToast } from "../src/share-toast.js";
+import { EXPOSED_KEY_TOAST_MS, keyExposedOnlyToast, shareOpenedToast } from "../src/share-toast.js";
 
 /*
  * QA4 item 3. With IndexedDB unavailable `load()` shows `toast.notStored`,
@@ -51,7 +51,16 @@ describe.each(CATALOGUES)("shareOpenedToast (%s)", (_name, m, claimsStored) => {
     expect(toast.text).not.toMatch(claimsStored);
     // The warning names the rewritten character, which is what makes it this warning.
     expect(toast.text).toContain("%23");
-    expect(toast.text).toBe(m.share.openedKeyExposedNotStored);
+    expect(toast.tone).toBe("error");
+    expect(toast.durationMs).toBe(EXPOSED_KEY_TOAST_MS);
+  });
+
+  it("keyExposedOnlyToast: the warning with no opened/stored claim, error tone, long lifetime (bundle link; decrypted-but-unparseable %23 link)", () => {
+    const toast = keyExposedOnlyToast(m);
+    expect(toast.text).toBe(m.share.keyExposedOnly);
+    expect(toast.text).toContain("%23");
+    expect(toast.text).not.toMatch(claimsStored);
+    expect(toast.text).not.toBe(m.share.openedKeyExposed);
     expect(toast.tone).toBe("error");
     expect(toast.durationMs).toBe(EXPOSED_KEY_TOAST_MS);
   });
@@ -72,6 +81,7 @@ describe("the not-stored copies are translated, not copied", () => {
     for (const m of [de, uk]) {
       expect(m.share.openedNotStored).not.toBe(en.share.openedNotStored);
       expect(m.share.openedKeyExposedNotStored).not.toBe(en.share.openedKeyExposedNotStored);
+      expect(m.share.keyExposedOnly).not.toBe(en.share.keyExposedOnly);
     }
   });
 });

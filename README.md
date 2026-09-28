@@ -326,7 +326,9 @@ site-wide `strict-origin-when-cross-origin`. And the Worker runs with Workers Lo
 *invocation logs* switched off (`observability.logs.invocation_logs: false` in
 [`wrangler.jsonc`](wrangler.jsonc)), so opening a legacy or `%23` link does not write its key into a
 log the operator can read. The cost is that the per-request "GET /path 200" lines are gone for every
-path; the Worker's own `console` output and exceptions still land in Workers Logs. See
+path; the Worker's own `console` output and exceptions still land in Workers Logs (whether an
+exception entry still carries the request URL with invocation logs off is not documented by Cloudflare,
+and is unverified; D7 says what to check). See
 [DECISIONS.md D7](docs/DECISIONS.md).
 
 **One link can carry several documents.** The envelope's first byte is a version: `2` is today's
