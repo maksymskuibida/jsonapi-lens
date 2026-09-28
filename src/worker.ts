@@ -14,9 +14,16 @@
  * `/nope` is not one of them. `parseRoute` — the same function the client
  * routes with — decides which, and the shell goes back under `200` or `404`
  * accordingly.
+ *
+ * `methodStatusForRoute` (`router.ts`) decides the method half of the same
+ * question, for the same reason `parseRoute` is shared rather than
+ * reimplemented: `POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS` on a page path get a
+ * `405` (see `methodNotAllowed`), matching what the asset router already
+ * does for every file-backed path on its own (N2, 2026-09-28).
  */
 
-import { parseRoute, robotsTagForRoute, statusForRoute } from "./router.js";
+import { methodStatusForRoute, parseRoute, robotsTagForRoute } from "./router.js";
+import { SECURITY_HEADERS } from "./security-headers.js";
 
 // `Env` is generated from the bindings in wrangler.jsonc by `wrangler types`,
 // so it cannot drift from the config.
@@ -174,17 +181,45 @@ async function sweep(env: Env): Promise<number> {
 const SWEEP_PROBABILITY = 0.04;
 
 /**
- * Serve the single page, under the status the path deserves.
+ * The `405` this Worker gives a non-GET/HEAD request for a page path (N2,
+ * 2026-09-28). Every file-backed path (`/`, `/impressum`, every asset)
+ * already answers this the same way, from the asset router itself, before
+ * the request ever reaches this script — this is only for the paths that
+ * have no file: `/view`, `/d/<id>`, and anything `unknown` would otherwise
+ * (see `methodStatusForRoute`, `src/router.ts`, for why `unknown` never
+ * reaches this function at all).
+ *
+ * `env.ASSETS.fetch`'s own `405` carries `public/_headers`' security headers
+ * for free; this one builds its own response, so it has to set them by hand.
+ * `SECURITY_HEADERS` (`src/security-headers.ts`) is what keeps those values
+ * from being retyped here and drifting from `_headers` unnoticed.
+ */
+function methodNotAllowed(): Response {
+  const headers = new Headers();
+  for (const [name, value] of SECURITY_HEADERS) headers.set(name, value);
+  headers.set("allow", "GET, HEAD");
+  headers.set("content-length", "0");
+  return new Response(null, { status: 405, headers });
+}
+
+/**
+ * Serve the single page, under the status the path and method deserve.
  *
  * The asset router has already decided there is no file at this path, so the
  * shell is fetched by its own URL and re-wrapped. A `404` still carries the
  * whole app: the client reads the path, says which page does not exist and
  * offers the paste view, which is a better answer than a dead end — but it
  * says so under a status code that is true, so a crawler, a link checker and
- * `curl -f` are all told what a visitor can already see.
+ * `curl -f` are all told what a visitor can already see. A `405` (anything
+ * but GET/HEAD, on a path that names a real page) carries no body at all —
+ * see `methodNotAllowed`.
  */
 async function serveShell(request: Request, env: Env): Promise<Response> {
   const route = parseRoute(new URL(request.url).pathname);
+  const status = methodStatusForRoute(route, request.method);
+
+  if (status === 405) return methodNotAllowed();
+
   // `/`, not `/index.html`: `html_handling` defaults to `auto-trailing-slash`,
   // which answers the explicit filename with a redirect to the directory form.
   const shell = await env.ASSETS.fetch(new URL("/", request.url));
@@ -198,7 +233,7 @@ async function serveShell(request: Request, env: Env): Promise<Response> {
   if (robots) headers.set("x-robots-tag", robots);
 
   return new Response(shell.body, {
-    status: statusForRoute(route),
+    status,
     headers,
   });
 }

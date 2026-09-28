@@ -441,6 +441,116 @@ even if the code has not changed.
 key back in the path contradicts this entry and must amend it in the same pull request — and must
 also correct the two sentences above, which would become false again.
 
+### Amendment (N3, 2026-09-28) · an encoded fragment is accepted, because the exposure already happened
+
+The 2026-09-28 production QA pass (finding N3) found a link whose `#` had been rewritten to
+`%23` by something between sender and recipient — a URL sanitiser, a wiki or Markdown renderer.
+Cloudflare's asset router normalises that path first, so it reaches `parseRoute` still
+percent-encoded, and `parseRoute` already `decodeURIComponent`s the pathname before matching
+anything (it has to, for the legacy `:`-form's own `%3A`). Decoded, `/d/30%23e4iDnHELrg` becomes
+`/d/30#e4iDnHELrg` — a literal `#` sitting inside the *pathname*, which cannot happen for a real
+URL any other way: an *unencoded* `#` always starts the fragment before a pathname is ever built,
+so nothing that went through a browser or a `fetch` could hand this function a genuine `#` there
+unless it started life percent-encoded.
+
+Before this amendment, `parseRoute` treated that shape as `share-damaged` — "this link is missing
+its key" — which was false and actively harmful: the key was not missing, it had already been sent
+to the origin, in the request line, before the page's own JavaScript ever ran. The damaged-link
+message pointed the visitor at the wrong problem (a cut-off link) and hid the real one (a link that
+needs to be treated as burned).
+
+**The rule, extended:** `parseRoute` recognises `/d/<id>#<key>` inside the decoded pathname itself
+and opens the document, exactly as it would the ordinary fragment form — refusing protects nothing
+against the one exposure that has *already* happened by the time this function runs: the browser's
+own request for the page at `/d/<id>%23<key>`, sent before any of this app's JavaScript exists to
+refuse anything. The route carries `keyExposed: true` (`src/router.ts`'s `Route` type) so the
+caller can say so, and `main.ts`'s `loadSharedDocument` does: it shows a distinct toast naming the
+link as exposed instead of the ordinary "opened a shared document" one, for both a single document
+and a bundle.
+
+This does not weaken what the entry above promises. The promise was always about the *ordinary*
+minted form (`shareUrl` still only ever produces `#`, never `%23`); this amendment is about how the
+app responds to a link that was already damaged in transit by something outside the app's control,
+and "pretend it was never opened" does not un-send the request that already went out. A
+double-encoded key (`%2523…`) decodes once to the literal text `%23`, not to a `#` character, so it
+does **not** match this branch and still reaches `share-damaged`, same as before.
+
+#### Which channels this closes, and which it does not (review round 1, S1 — PR #27's implementer draft got this wrong)
+
+The first draft of this entry said the exposure "has already occurred" and left it there, as though
+nothing after that point could still leak the key. That was too strong, and the round-1 review
+(escalated, `crypto.ts`/`share.ts`-adjacent) caught the gap: there are **three separate requests**
+that can carry a path-borne key to this origin, not one, and this amendment only ever closed one of
+them.
+
+1. **The page request** — the browser's `GET /d/<id>%23<key>` (or, for a legacy link,
+   `GET /d/<id>:<key>`) that loads the app in the first place. Nothing client-side can touch this;
+   it is sent before a single line of this app's JavaScript runs. It reaches `worker.ts`, which
+   this Worker's `wrangler.jsonc` configures with `observability.enabled: true` and
+   `head_sampling_rate: 1` — every request is logged, retained, and readable in the operator's
+   dashboard, not merely "on the wire and gone". **This channel is not closed, and cannot be, by
+   anything in this repository's client code.** It is a configuration question for the repository
+   owner — a lower sampling rate, `observability.logs.invocation_logs: false`, or moving `/d/*` off
+   the Worker entirely — tracked as an open ask in `STATUS.md` §4, not fixed by this task.
+2. **This app's own follow-up request**, `fetch("/api/shares/<id>")` in `share.ts`'s `fetchShare`,
+   which decrypts the document once the ciphertext arrives. Before round 1, `loadSharedDocument`
+   called `navigate(VIEW_PATH, { replace: true })` — the line that drops the key from the visible
+   URL — *after* `await fetchShare(...)`, so at the moment that `fetch` fired, `location` was still
+   `/d/<id>%23<key>` (or the legacy `:key` path). This page's referrer policy is
+   `strict-origin-when-cross-origin`; for a same-origin request that sends the *full* current URL as
+   `Referer`, path and all — so this app was handing its own key to the same origin a second time,
+   through a header not even involved in the document's own contents, and that Worker's request
+   logging would have kept that copy too. **This channel is what round 1 actually fixed**:
+   `navigate` now runs *before* `fetchShare`, so by the time that request fires `location` is
+   already `/view`, key-free, and `Referer` carries no key for either the `%23` form or the legacy
+   `:`/`.` form. An ordinary `#`-fragment link was never exposed here in the first place — the
+   Referrer Policy spec strips the fragment from a `Referer` value unconditionally, for every
+   policy, before this app ever had a chance to — so this fix changes nothing for that case.
+3. **The page's own subresource requests** — the module script, the stylesheet, and the small
+   assets `index.html` links (`favicon.svg`, `icon-192.png`, `apple-touch-icon.png`,
+   `site.webmanifest`). The browser issues these while parsing the shell, before `main.ts` has run a
+   single line, so — same as request 2 was before round 1 — each one's `Referer` is still
+   `/d/<id>%23<key>` (or the legacy `:key` path) under this page's `strict-origin-when-cross-origin`
+   policy. Found in review round 2 (S3, PR #27), after round 1 had already fixed request 2 and
+   named request 1. **What is and is not known about this channel:** every one of these paths is a
+   real file, and `wrangler.jsonc`'s `run_worker_first` names only `/api/*` — so, as far as static
+   reading of the config shows, the asset router answers all of them directly and none reaches
+   `worker.ts` or its `observability` config at all. That reading was **not verified against a
+   running Worker** — nobody has confirmed by observation that a subresource request for a share
+   route never invokes the script. Recorded here as what is believed and why, not as a settled fact,
+   because the difference matters: if it turns out these *do* reach the Worker, this channel joins
+   channel 1 (a configuration question, not something this repository's client code can fix); if
+   they genuinely never do, this channel is arguably already closed by Cloudflare's own asset
+   routing, and the only open question is the `Referer` header itself still leaving the browser
+   toward *this* origin — lower-stakes than channel 1's logged-and-retained case, but not nothing.
+   **Left unclosed by this task.** A `Referrer-Policy: no-referrer` (or `strict-origin`) set on the
+   shell response for `share` routes in `serveShell` would close it — and channel 2 as a second,
+   redundant layer alongside the S1 reordering — but that is a behaviour change to a document
+   already reviewed and approved once, so it is deliberately left as a follow-up rather than folded
+   into this round; see `STATUS.md` §4.
+
+So: **the page-request channel (1) stays open, is a deployment decision, and is out of this entry's
+control. The follow-up-request channel (2) is closed, for both link forms that can carry a
+path-borne key. The subresource channel (3) is believed, but not confirmed, to already avoid the
+Worker's own logging — and is left open as a `Referer`-header question regardless, tracked as a
+follow-up.** Saying "the exposure has already occurred" without this distinction let a fixable leak
+look like an already-lost cause; it was not, and channel 3 shows the distinction has to be redrawn
+carefully rather than assumed complete once redrawn once.
+
+#### Why the legacy `:`/`.` in-path forms never get `keyExposed` (review round 1, N1)
+
+Only the new `%23` branch sets `keyExposed: true`. `SHARE_PATTERN` (the `:`/`.` legacy match) runs
+*before* it in `parseRoute` and returns first, so a legacy link never reaches the `%23` branch at
+all — and this is deliberate, not an oversight the pattern order happens to produce. `keyExposed` is
+meant to flag something that happened to *this specific link*, in transit, after it left whoever
+minted it: a `#` a renderer rewrote. A legacy `:`-path link's key was in the path from the moment it
+was minted — under the model this repository used before D7's original 2026-09-21 entry — so there
+is nothing "newly exposed" to report about one; every legacy link has carried this exposure since it
+was created, and saying so on every single legacy link a visitor happens to open would be noise
+repeating a fact D7's main text (above) already states plainly: those links "put their key in a log
+the first time anyone opens them, and that cannot be undone from here." `keyExposed` is about a
+link's *transit*, not its *vintage*.
+
 ### Rejected alternatives
 
 - **A password or passphrase on the link** — rejected: it solves the same problem by making every

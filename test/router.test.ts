@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { shareUrl } from "../src/navigation.js";
-import { IMPRESSUM_PATH, parseRoute, PASTE_PATH, PRIVACY_PATH, VIEW_PATH } from "../src/router.js";
+import {
+  IMPRESSUM_PATH,
+  methodStatusForRoute,
+  parseRoute,
+  PASTE_PATH,
+  PRIVACY_PATH,
+  statusForRoute,
+  VIEW_PATH,
+} from "../src/router.js";
 import { escapeToken, join, parse, resolve, unescapeToken } from "../src/pointer.js";
 
 describe("shareUrl", () => {
@@ -132,6 +140,103 @@ describe("parseRoute", () => {
     }
   });
 
+  it("accepts a share link whose `#` was percent-encoded to `%23` in the path — N3", () => {
+    // Something between sender and recipient rewrote `#` to `%23` (some URL
+    // sanitisers, wiki and Markdown renderers do this), so the key arrived
+    // in the *pathname* rather than the fragment. Refusing it protects
+    // nothing — the request that produced this pathname already carried the
+    // key — so it opens, and is flagged `keyExposed` so the caller can say
+    // so. DECISIONS.md D7.
+    expect(parseRoute("/d/30%23e4iDnHELrgAA")).toEqual({
+      kind: "share",
+      id: 30,
+      secret: "e4iDnHELrgAA",
+      keyExposed: true,
+    });
+  });
+
+  it("accepts the %23 form with a trailing slash", () => {
+    expect(parseRoute("/d/30%23e4iDnHELrgAA/")).toEqual({
+      kind: "share",
+      id: 30,
+      secret: "e4iDnHELrgAA",
+      keyExposed: true,
+    });
+  });
+
+  it("still calls a %23 form with no usable key damaged, not exposed", () => {
+    // A genuinely keyless link — `%23` decoding to a bare `#` with nothing,
+    // or something too short to be a real secret — must reach the same
+    // "missing its key" path an ordinary keyless link does, not the new
+    // accepted one.
+    for (const path of ["/d/30%23", "/d/30%23short", "/d/30%23/"]) {
+      expect(parseRoute(path), path).toEqual({ kind: "share-damaged" });
+    }
+  });
+
+  it("does not accept a double-encoded `%2523` as an exposed key", () => {
+    // `%2523` decodes once to the literal text `%23`, not to a `#`
+    // character, so this must fall through to the same damaged-link path a
+    // literal `%23` would if it were not itself a valid encoding of `#`.
+    // (parseRoute only ever decodeURIComponents once — see its own comment.)
+    expect(parseRoute("/d/30%2523e4iDnHELrgAA")).toEqual({ kind: "share-damaged" });
+  });
+
+  it("a %23-form link with a well-formed but wrong-shaped key still reads as share, not damaged", () => {
+    // The router only validates *shape*; whether the key actually decrypts
+    // anything is a question `crypto.ts`/`share.ts` answer later, down the
+    // same "could not be decrypted" path a normal share link's wrong key
+    // reaches. A well-formed 20-character secret that happens to be wrong
+    // is not the router's business to reject.
+    expect(parseRoute("/d/30%23AAAAAAAAAAAAAAAAAAAA")).toEqual({
+      kind: "share",
+      id: 30,
+      secret: "AAAAAAAAAAAAAAAAAAAA",
+      keyExposed: true,
+    });
+  });
+
+  it("a %23-form key combined with a real #fragment opens on the encoded key and drops the real one", () => {
+    // Review round 1 (B2/reviewer trace): `/d/42%23<k1>#<k2>` reaches the
+    // browser as pathname `/d/42%23<k1>` and hash `#<k2>` (the *unencoded*
+    // `#` always starts the real fragment). Decoded, the pathname alone
+    // already names a well-formed key — `k1` — so this matches the %23
+    // branch and opens on it; `k2` is simply never read. Whether `k1`
+    // actually decrypts anything is unrelated to this test.
+    expect(parseRoute("/d/42%23AAAAAAAAAAAAAAAAAAAA", "#BBBBBBBBBBBBBBBBBBBB")).toEqual({
+      kind: "share",
+      id: 42,
+      secret: "AAAAAAAAAAAAAAAAAAAA",
+      keyExposed: true,
+    });
+  });
+
+  it("two %23-encoded keys in the same pathname is damaged, not a pick between them", () => {
+    // Review round 1 (B2/reviewer trace): `/d/42%23<k1>%23<k2>` decodes to
+    // `/d/42#<k1>#<k2>` — the second literal `#` is outside `SECRET_PATTERN`'s
+    // character class, so nothing after the first `#` up to the required
+    // `\/?$` end-of-string can match, and this falls through to
+    // `share-damaged` rather than guessing which key is meant.
+    expect(
+      parseRoute("/d/42%23AAAAAAAAAAAAAAAAAAAA%23BBBBBBBBBBBBBBBBBBBB"),
+    ).toEqual({ kind: "share-damaged" });
+  });
+
+  it("an encoded %23 with an empty key, alongside a separate real #fragment, is still damaged — N2", () => {
+    // Review round 1 (N2): `/d/42%23#<valid>` reaches the browser as
+    // pathname `/d/42%23` and hash `#<valid>` — a genuinely valid key
+    // sitting in `hash`, right next to a pathname that *also* looks like
+    // the %23 shape but carries no key of its own (decoded: `/d/42#`, empty
+    // capture, below SECRET_PATTERN's 8-character minimum). Deliberately
+    // not special-cased to fall back to `hash` here — see router.ts's own
+    // comment just above the %23 regex for why treating "two candidate
+    // keys, one of them empty" as unambiguous would be the wrong kind of
+    // helpful. This is `share-damaged`, not `share`.
+    expect(parseRoute("/d/42%23", "#AAAAAAAAAAAAAAAAAAAA")).toEqual({
+      kind: "share-damaged",
+    });
+  });
+
   it("rejects a non-numeric share id — that was never a share link", () => {
     // Review B1 (round 1): the test plan's case 12 claims both
     // "/d/notanumber:secret" and bare "/d/notanumber" are covered, but only
@@ -158,6 +263,61 @@ describe("parseRoute", () => {
   it("exports the paths the app navigates between", () => {
     expect(PASTE_PATH).toBe("/");
     expect(VIEW_PATH).toBe("/view");
+  });
+
+  it("does not set keyExposed on an ordinary share link", () => {
+    // A regression guard for the N3 fix: a normal `#`-fragment link, and the
+    // legacy `:`/`.` in-path forms, must never carry `keyExposed` — only the
+    // new `%23`-in-pathname branch does. `toEqual` below is exact, so a stray
+    // `keyExposed: undefined` would already fail it, but this pins the
+    // *value itself* being absent from the object, not merely falsy.
+    const ordinary = parseRoute("/d/42", "#AAAAAAAAAAAAAAAAAAAA");
+    expect(ordinary).toEqual({ kind: "share", id: 42, secret: "AAAAAAAAAAAAAAAAAAAA" });
+    expect("keyExposed" in ordinary).toBe(false);
+
+    const legacy = parseRoute("/d/42:AAAAAAAAAAAAAAAAAAAA");
+    expect("keyExposed" in legacy).toBe(false);
+  });
+});
+
+describe("methodStatusForRoute — N2", () => {
+  it("agrees with statusForRoute for GET and HEAD, on every route kind", () => {
+    const routes = [
+      { kind: "paste" as const },
+      { kind: "view" as const },
+      { kind: "share" as const, id: 1, secret: "AAAAAAAAAAAAAAAAAAAA" },
+      { kind: "share-damaged" as const },
+      { kind: "legal" as const, page: "impressum" as const },
+      { kind: "unknown" as const, pathname: "/nope" },
+    ];
+    for (const route of routes) {
+      for (const method of ["GET", "get", "HEAD", "head"]) {
+        expect(methodStatusForRoute(route, method), `${method} ${route.kind}`).toBe(
+          statusForRoute(route),
+        );
+      }
+    }
+  });
+
+  it("answers 405 for a non-GET/HEAD request on a page that exists", () => {
+    for (const route of [
+      { kind: "paste" as const },
+      { kind: "view" as const },
+      { kind: "share" as const, id: 1, secret: "AAAAAAAAAAAAAAAAAAAA" },
+      { kind: "share-damaged" as const },
+      { kind: "legal" as const, page: "impressum" as const },
+    ]) {
+      for (const method of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+        expect(methodStatusForRoute(route, method), `${method} ${route.kind}`).toBe(405);
+      }
+    }
+  });
+
+  it("keeps an unknown path 404 regardless of method — it is not a page that merely disagrees with the verb", () => {
+    const route = { kind: "unknown" as const, pathname: "/nope" };
+    for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+      expect(methodStatusForRoute(route, method), method).toBe(404);
+    }
   });
 });
 

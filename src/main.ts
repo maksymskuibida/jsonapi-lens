@@ -2136,6 +2136,19 @@ document.addEventListener("keydown", (event) => {
 /* --------------------------------------------------------------- routes --- */
 
 /**
+ * How long the "this link's key was exposed" toast stays up. Review round 1
+ * (S2, PR #27): the ordinary toast's default lifetime (`DEFAULT_TOAST_MS` in
+ * `ui.ts`) was written for a one-line confirmation, not a ~170-character
+ * security notice — most readers would not finish it in time.
+ *
+ * Review round 2 nit: this constant used to sit *between*
+ * `loadSharedDocument`'s doc comment below and the function itself, which
+ * left that doc comment attached to nothing (an editor hovering the function
+ * would not show it). Moved above it for exactly that reason.
+ */
+const EXPOSED_KEY_TOAST_MS = 9000;
+
+/**
  * Load a document that arrived as a share link — or, since T6, a bundle of
  * several. `fetchShare` hands back whichever the link decrypted to;
  * `isBundlePayload` alone is *not* enough to trust `payload.documents`
@@ -2155,11 +2168,26 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
   showView("boot", t().boot.fetchingShare);
 
   try {
-    const payload = await fetchShare(route.id, route.secret);
-    // Drop the key from the visible URL and from history before rendering
-    // either kind, so it does not sit in the address bar or leak through a
-    // later Referer.
+    // Drop the key from the visible URL and from history *before* the
+    // request below, not after. Review round 1 (S1, PR #27): this used to
+    // run after `fetchShare`, which meant `fetchShare`'s own GET of
+    // `/api/shares/<id>` still carried the key — for a legacy
+    // `/d/<id>:<key>` link or a `%23`-exposed one, the key sits in the
+    // *path*, and this page's
+    // referrer policy (`strict-origin-when-cross-origin`) sends the current
+    // URL's path as `Referer` on a same-origin request. That request hits
+    // this Worker, which has invocation-log observability on
+    // (`wrangler.jsonc`), so the header was not just sent, it was kept. An
+    // ordinary `#`-fragment link was never affected — the Referrer Policy
+    // spec strips the fragment before building `Referer`, unconditionally,
+    // for every policy — so moving this line earlier changes nothing for
+    // that case; it only removes a second copy of the key, sent by this
+    // app to the same origin that had already seen the first one in the
+    // page request itself. See DECISIONS.md D7's amendment for what this
+    // does and does not close.
     navigate(VIEW_PATH, { replace: true });
+
+    const payload = await fetchShare(route.id, route.secret);
 
     if (isBundlePayload(payload)) {
       if (!isWellFormedBundlePayload(payload)) {
@@ -2171,6 +2199,13 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
       current = null;
       markBundleEntry();
       showView("bundle");
+      // Review round 1 (S2): shown only now, past the one throw above this
+      // function still uses to reject a malformed bundle — showing it
+      // earlier meant a corrupt bundle said "Opened a shared document…"
+      // and then immediately showed the corrupt-bundle error card instead.
+      if (route.keyExposed) {
+        toast(t().share.openedKeyExposed, "error", EXPOSED_KEY_TOAST_MS);
+      }
       await renderBundleImportView(bundleImportEl, payload, {
         onOpen: (entry) => {
           void load(entry.text, entry.label, { persist: true, push: true });
@@ -2191,7 +2226,15 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
       persist: true,
       exchange: payload.exchange,
     });
-    toast(t().share.opened);
+    // Review round 1 (S2): shown only after `load()` resolves, not before —
+    // `load()` can itself show a toast (`t().toast.notStored`, when
+    // IndexedDB is unavailable), and showing this one first meant that
+    // toast silently replaced it before anyone read it.
+    if (route.keyExposed) {
+      toast(t().share.openedKeyExposed, "error", EXPOSED_KEY_TOAST_MS);
+    } else {
+      toast(t().share.opened);
+    }
   } catch (error) {
     navigate(PASTE_PATH, { replace: true });
     applyRouteMeta({ kind: "paste" });
