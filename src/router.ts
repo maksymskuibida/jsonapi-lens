@@ -222,6 +222,42 @@ export function robotsTagForRoute(route: Route): string | null {
 }
 
 /**
+ * The `Referrer-Policy` a route's page response must carry in place of the
+ * site-wide one, or `null` to leave the site-wide policy
+ * (`strict-origin-when-cross-origin`, `public/_headers`) alone (QA4, 2026-09-28).
+ *
+ * Why share routes are the exception: a legacy `/d/<id>:<key>` link, or one
+ * whose `#` was rewritten to `%23`, has its key in the *path*. The page the
+ * server sends back then asks for its own module script, stylesheet, icons
+ * and manifest before a line of app code has run — and app code is what
+ * strips the key from the address bar (`main.ts#loadSharedDocument`), so
+ * nothing can beat those requests to it. Under the site-wide policy each of
+ * them carries the full path, key included, in `Referer`. `no-referrer`
+ * sent in the page's own response header is the only lever that applies at
+ * that moment. It covers the ordinary `#` link too, harmlessly: the fragment
+ * never reaches a `Referer` under any policy.
+ *
+ * `share-damaged` is the same URL shape as `share` from the server's side
+ * (see `robotsTagForRoute`), so the two are one case here as well.
+ *
+ * The Worker *replaces* the inherited header with this value (`Headers.set`);
+ * two `Referrer-Policy` headers would be combined by browsers into "last
+ * valid one wins", which is an accident to avoid rather than to rely on.
+ */
+export function referrerPolicyForRoute(route: Route): "no-referrer" | null {
+  switch (route.kind) {
+    case "share":
+    case "share-damaged":
+      return "no-referrer";
+    case "paste":
+    case "view":
+    case "legal":
+    case "unknown":
+      return null;
+  }
+}
+
+/**
  * The HTTP status the Worker serves the single page under, for a path.
  *
  * Only `unknown` is a 404. `share-damaged` is deliberately not: it is how the

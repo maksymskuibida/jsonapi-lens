@@ -537,6 +537,50 @@ follow-up.** Saying "the exposure has already occurred" without this distinction
 look like an already-lost cause; it was not, and channel 3 shows the distinction has to be redrawn
 carefully rather than assumed complete once redrawn once.
 
+#### QA4 (2026-09-28): channels 1 and 3 are now closed at the configuration level
+
+**Channel 1, the page request's Workers Logs entry — closed.** `wrangler.jsonc` now has
+`observability.logs.invocation_logs: false` (with `enabled: true` and `head_sampling_rate: 1`
+untouched). Per Cloudflare's Workers Logs documentation, each Fetch invocation otherwise produces one
+invocation log whose message is the request method and URL, with request metadata and headers,
+retained for 7 days; since #26 every page path invokes the Worker, so a legacy or `%23` link's key
+would have been written there. With invocation logs off that entry is not produced. The Worker's own
+`console.*` output and uncaught exceptions still reach Workers Logs, and `test/worker.test.ts` fails
+if a `console.*` call in `worker.ts` ever mentions a URL, path, header or `Referer`. An ordinary `#`
+link was never affected (the fragment never reaches the server).
+
+*What the operator gives up:* the per-request "GET /path — 200" line, the request metadata and the
+per-invocation status/CPU/wall-time record in Workers Logs, **for every path, not only share paths**
+(the log cannot tell a key-bearing path from any other, and there is no redaction). Diagnosing "did
+this request arrive, and what did it get?" now needs `wrangler tail` live, or Cloudflare's separate
+edge analytics, rather than a retained search. A cost was accepted deliberately over a lower sampling
+rate, which would only have made the leak sparser. **Not closed by this:** Cloudflare's own edge/HTTP
+request logs, a different pipeline that this repository cannot configure and `/privacy` already
+documents under *Hosting and server log data*; that is the residue D7's main text describes for
+legacy links. **One thing the setting is not known to cover:** Cloudflare documents that Workers Logs include
+"errors, and uncaught exceptions", and that the request metadata and headers are captured into the same
+per-invocation trace object; its documentation does not say whether that metadata (the request URL)
+is still attached to an exception entry when invocation logs are off. If it is, an uncaught exception
+thrown while serving a legacy or `%23` link (for example an `env.ASSETS.fetch` rejection in `serveShell`)
+could still write the key. Nothing in this Worker is expected to throw there, and no `console.*` call
+mentions the request, but "exceptions still land in Workers Logs" must not be read as "harmlessly".
+Check it in the dashboard once (STATUS §4) and amend this entry with what is found. Whether the production Workers Logs pipeline honours the setting was not observable
+from a local `wrangler dev` (see `docs/evidence/QA4.md`); it rests on Cloudflare's documented
+behaviour and should be confirmed once in the dashboard after the first deploy.
+
+**Channel 3, the subresource `Referer` — closed.** `referrerPolicyForRoute` (`src/router.ts`) makes
+`serveShell` send `Referrer-Policy: no-referrer` on the page response for `share` and `share-damaged`
+routes, replacing (`Headers.set`, exactly one header) the `strict-origin-when-cross-origin` the shell
+inherits from `public/_headers`. The policy governs every request the document makes, including the
+module script, stylesheet, icons and manifest issued before any app code runs, so none of them carries
+the path-borne key in `Referer`. Every other route keeps the site-wide policy. The 405 for a share
+route carries it too, though it is inert there (no body, so no subresources): one rule with no
+exception is easier to state and to test. `SECURITY_HEADERS` still mirrors `public/_headers` exactly;
+the override is applied on top of it, outside that mirror. Side effect: that document sends no
+`Referer` for its whole lifetime, including on its own `/api/shares/<id>` request (channel 2, now
+doubly closed) and on external links clicked from it. Channel 3's former uncertainty about whether
+subresources reach the Worker is moot: either way they now carry no key.
+
 #### Why the legacy `:`/`.` in-path forms never get `keyExposed` (review round 1, N1)
 
 Only the new `%23` branch sets `keyExposed: true`. `SHARE_PATTERN` (the `:`/`.` legacy match) runs

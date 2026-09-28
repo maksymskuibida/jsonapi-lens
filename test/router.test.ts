@@ -6,6 +6,7 @@ import {
   parseRoute,
   PASTE_PATH,
   PRIVACY_PATH,
+  referrerPolicyForRoute,
   statusForRoute,
   VIEW_PATH,
 } from "../src/router.js";
@@ -396,5 +397,30 @@ describe("history entry state", () => {
   it("round-trips through JSON, which is what structured clone must accept", () => {
     const entry = { y: 2400, open: ["r_articles__art_002d1", "r_people__per_002dada"] };
     expect(JSON.parse(JSON.stringify(entry))).toEqual(entry);
+  });
+});
+
+describe("referrerPolicyForRoute — QA4", () => {
+  it("is no-referrer for every share URL shape, so the page's own subresource requests carry no key", () => {
+    // The three forms below are the ones whose key sits in the path. The
+    // ordinary `#` form is included too: same route kind, and harmless.
+    for (const path of ["/d/42:AAAAAAAAAAAA", "/d/42.AAAAAAAAAAAA", "/d/42%23AAAAAAAAAAAA"]) {
+      const route = parseRoute(path);
+      expect(route.kind, path).toBe("share");
+      expect(referrerPolicyForRoute(route), path).toBe("no-referrer");
+    }
+    expect(referrerPolicyForRoute(parseRoute("/d/42", "#AAAAAAAAAAAA"))).toBe("no-referrer");
+  });
+
+  it("is no-referrer for share-damaged, which is how the server sees every valid share link", () => {
+    const route = parseRoute("/d/42");
+    expect(route.kind).toBe("share-damaged");
+    expect(referrerPolicyForRoute(route)).toBe("no-referrer");
+  });
+
+  it("leaves the site-wide policy alone (null) for every other route kind", () => {
+    for (const path of ["/", VIEW_PATH, IMPRESSUM_PATH, PRIVACY_PATH, "/nope", "/d/notanumber"]) {
+      expect(referrerPolicyForRoute(parseRoute(path)), path).toBeNull();
+    }
   });
 });

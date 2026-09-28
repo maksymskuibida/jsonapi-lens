@@ -65,6 +65,7 @@ import type { LegalRoute, Route } from "./router.js";
 import { applyPageMeta, applyRouteMeta, documentMeta, metaForRoute } from "./seo.js";
 import { renderLegalPage } from "./views/legal.js";
 import { fetchShare, openShareModal } from "./share.js";
+import { keyExposedOnlyToast, shareOpenedToast } from "./share-toast.js";
 import { isBundlePayload, ShareError } from "./crypto.js";
 import {
   clearDocument,
@@ -1816,7 +1817,16 @@ function readLoaded(
   return { lens, label, bytes: new TextEncoder().encode(text).byteLength, text, parseMs, exchange };
 }
 
-async function load(text: string, label: string, options: LoadOptions): Promise<boolean> {
+/**
+ * What `load()` did. `ok` is "the text parsed and is on screen"; `saved` is
+ * whether persisting it succeeded — `null` when persisting was not asked for
+ * (a stored document being reopened), so callers that care about the
+ * difference between "failed" and "did not try" (the share-open toast, QA4)
+ * can tell them apart.
+ */
+type LoadResult = { ok: false } | { ok: true; saved: boolean | null };
+
+async function load(text: string, label: string, options: LoadOptions): Promise<LoadResult> {
   hideError();
   hideShapeOffer();
 
@@ -1827,7 +1837,7 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   } catch (error) {
     showView("paste");
     showError(error);
-    return false;
+    return { ok: false };
   }
 
   // A fresh document's exchange starts back at the default mode — nothing
@@ -1850,9 +1860,10 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   renderLoadedView(current);
   showDocument();
 
+  let saved: boolean | null = null;
   if (options.persist) {
     window.scrollTo(0, 0);
-    const saved = await saveDocument({
+    saved = await saveDocument({
       text,
       savedAt: Date.now(),
       label,
@@ -1861,7 +1872,7 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
     if (!saved) toast(t().toast.notStored);
   }
 
-  return true;
+  return { ok: true, saved };
 }
 
 /**
@@ -2136,19 +2147,6 @@ document.addEventListener("keydown", (event) => {
 /* --------------------------------------------------------------- routes --- */
 
 /**
- * How long the "this link's key was exposed" toast stays up. Review round 1
- * (S2, PR #27): the ordinary toast's default lifetime (`DEFAULT_TOAST_MS` in
- * `ui.ts`) was written for a one-line confirmation, not a ~170-character
- * security notice — most readers would not finish it in time.
- *
- * Review round 2 nit: this constant used to sit *between*
- * `loadSharedDocument`'s doc comment below and the function itself, which
- * left that doc comment attached to nothing (an editor hovering the function
- * would not show it). Moved above it for exactly that reason.
- */
-const EXPOSED_KEY_TOAST_MS = 9000;
-
-/**
  * Load a document that arrived as a share link — or, since T6, a bundle of
  * several. `fetchShare` hands back whichever the link decrypted to;
  * `isBundlePayload` alone is *not* enough to trust `payload.documents`
@@ -2174,10 +2172,14 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
     // `/api/shares/<id>` still carried the key — for a legacy
     // `/d/<id>:<key>` link or a `%23`-exposed one, the key sits in the
     // *path*, and this page's
-    // referrer policy (`strict-origin-when-cross-origin`) sends the current
-    // URL's path as `Referer` on a same-origin request. That request hits
-    // this Worker, which has invocation-log observability on
-    // (`wrangler.jsonc`), so the header was not just sent, it was kept. An
+    // referrer policy (then `strict-origin-when-cross-origin`) sends the
+    // current URL's path as `Referer` on a same-origin request. That request
+    // hit this Worker, which then had invocation-log observability on
+    // (`wrangler.jsonc`), so the header was not just sent, it was kept.
+    // QA4 update: share pages now carry `Referrer-Policy: no-referrer` and
+    // invocation logs are off, so this line is defence in depth rather than
+    // the only thing standing in the way — keep it (a second layer costs
+    // nothing; see DECISIONS.md D7's QA4 amendment). An
     // ordinary `#`-fragment link was never affected — the Referrer Policy
     // spec strips the fragment before building `Referer`, unconditionally,
     // for every policy — so moving this line earlier changes nothing for
@@ -2203,8 +2205,13 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
       // function still uses to reject a malformed bundle — showing it
       // earlier meant a corrupt bundle said "Opened a shared document…"
       // and then immediately showed the corrupt-bundle error card instead.
+      //
+      // QA4 review (S1): the warning alone, not `openedKeyExposed` — that
+      // copy says the document "is now stored in this browser", and a bundle
+      // is not stored until an entry is opened from the import view.
       if (route.keyExposed) {
-        toast(t().share.openedKeyExposed, "error", EXPOSED_KEY_TOAST_MS);
+        const warning = keyExposedOnlyToast(t());
+        toast(warning.text, warning.tone, warning.durationMs);
       }
       await renderBundleImportView(bundleImportEl, payload, {
         onOpen: (entry) => {
@@ -2222,7 +2229,7 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
       return;
     }
 
-    await load(payload.text, payload.label || t().labels.sharedDocument(route.id), {
+    const loaded = await load(payload.text, payload.label || t().labels.sharedDocument(route.id), {
       persist: true,
       exchange: payload.exchange,
     });
@@ -2230,10 +2237,24 @@ async function loadSharedDocument(route: Extract<Route, { kind: "share" }>): Pro
     // `load()` can itself show a toast (`t().toast.notStored`, when
     // IndexedDB is unavailable), and showing this one first meant that
     // toast silently replaced it before anyone read it.
-    if (route.keyExposed) {
-      toast(t().share.openedKeyExposed, "error", EXPOSED_KEY_TOAST_MS);
-    } else {
-      toast(t().share.opened);
+    //
+    // QA4: which copy is chosen from whether the save actually succeeded.
+    // Both used to say "stored in this browser" unconditionally, so with
+    // storage blocked this toast replaced `notStored` with its opposite.
+    // If the text did not parse, `load()` has already put the error card up
+    // and returned `ok: false`: there is no "opened" to announce, but a
+    // `%23` link's key was exposed all the same (the payload decrypted, so
+    // it was the right key), so the warning still goes up on its own
+    // (QA4 review, S2).
+    if (loaded.ok) {
+      const opened = shareOpenedToast(t(), {
+        keyExposed: route.keyExposed === true,
+        stored: loaded.saved !== false,
+      });
+      toast(opened.text, opened.tone, opened.durationMs);
+    } else if (route.keyExposed) {
+      const warning = keyExposedOnlyToast(t());
+      toast(warning.text, warning.tone, warning.durationMs);
     }
   } catch (error) {
     navigate(PASTE_PATH, { replace: true });
@@ -2314,7 +2335,7 @@ async function applyRoute(): Promise<void> {
     if (stored) {
       inputEl.value = stored.text;
       updateDropMeta();
-      const ok = await load(stored.text, stored.label ?? t().labels.storedDocument, {
+      const { ok } = await load(stored.text, stored.label ?? t().labels.storedDocument, {
         persist: false,
         exchange: stored.exchange,
       });
