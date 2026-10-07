@@ -51,8 +51,26 @@
   ],
 
 
+  // Workers Logs stays on for the Worker's own `console.*` output and its
+  // exceptions, but the per-request invocation log is off (QA4).
+  //
+  // That log is one entry per invocation carrying the request method and
+  // URL, and request metadata and headers, retained for 7 days. Since #26 every
+  // page path (`not_found_handling: "none"`) invokes this Worker, so a legacy
+  // `/d/<id>:<key>` link, or one whose `#` was rewritten to `%23`, would have
+  // written its key into that log. The fragment of an ordinary link never
+  // reaches the server, so nothing else is affected — but the log cannot tell
+  // the two apart, and there is no redaction. Off is the only setting that
+  // closes it. `head_sampling_rate` is deliberately untouched. See
+  // docs/DECISIONS.md D7's QA4 amendment for what this costs the operator.
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 1,
+    "logs": {
+      // Stated rather than left to Cloudflare's API default for a `logs`
+      // object that omits it: `console.*` output should stay on.
+      "enabled": true,
+      "invocation_logs": false
+    }
   }
 }
