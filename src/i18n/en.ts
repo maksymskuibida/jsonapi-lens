@@ -760,6 +760,14 @@ export const en = {
     createFailed: {
       headline: "The share could not be created.",
       serverStatus: (status: number) => `The server returned ${status}.`,
+      /** One sentence per failure, chosen by HTTP status — the Worker's own JSON text is English and developer-facing, and is never shown. */
+      badRequest: "The server did not accept this share (400). Reload the page and try again.",
+      notFound: "The share service could not be reached at its address (404).",
+      notAllowed: "The server refused this kind of request (405).",
+      tooLarge: (limit: string) => `The encrypted document is over the ${limit} share limit. Share a smaller document.`,
+      serverError: (status: number) => `The server could not store the share (${status}). Try again in a moment.`,
+      network: "The network request failed. Check your connection and try again.",
+      unexpected: "Something went wrong while encrypting or uploading the document. Try again.",
     },
     fetchFailed: {
       headline: "That shared document could not be fetched.",

@@ -639,6 +639,13 @@ export const de: Messages = {
     createFailed: {
       headline: "Der Share-Link konnte nicht erstellt werden.",
       serverStatus: (status) => `Der Server hat ${f.n(status)} zurückgegeben.`,
+      badRequest: "Der Server hat diesen Share nicht akzeptiert (400). Laden Sie die Seite neu und versuchen Sie es noch einmal.",
+      notFound: "Der Share-Dienst war unter seiner Adresse nicht erreichbar (404).",
+      notAllowed: "Der Server hat diese Art von Anfrage abgelehnt (405).",
+      tooLarge: (limit) => `Das verschlüsselte Dokument überschreitet das Share-Limit von ${limit}. Teilen Sie ein kleineres Dokument.`,
+      serverError: (status) => `Der Server konnte den Share nicht speichern (${f.n(status)}). Versuchen Sie es gleich noch einmal.`,
+      network: "Die Netzwerkanfrage ist fehlgeschlagen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+      unexpected: "Beim Verschlüsseln oder Hochladen des Dokuments ist etwas schiefgelaufen. Versuchen Sie es erneut.",
     },
     fetchFailed: {
       headline: "Das geteilte Dokument konnte nicht geladen werden.",

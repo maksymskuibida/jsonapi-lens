@@ -54,23 +54,46 @@ interface CreatedShare {
   expiresAt: number | null;
 }
 
-async function upload(blob: Uint8Array, lifetime: LifetimeKey): Promise<CreatedShare> {
-  const response = await fetch(`/api/shares?lifetime=${encodeURIComponent(lifetime)}`, {
-    method: "POST",
-    headers: { "content-type": "application/octet-stream" },
-    body: blob as BodyInit,
-  });
+/** The Worker's upload limit (`MAX_BYTES` in `worker.ts`), for the one message that names it. */
+export const SHARE_LIMIT_BYTES = 12 * 1024 * 1024;
 
-  if (!response.ok) {
-    const detail = await response
-      .json()
-      .then((body: { error?: string }) => body.error)
-      .catch(() => null);
-    throw new ShareError(
-      t().shareErrors.createFailed.headline,
-      detail ?? t().shareErrors.createFailed.serverStatus(response.status),
-    );
+/**
+ * A failed upload, as catalogue copy chosen **by HTTP status**. The Worker's JSON
+ * `error` is English and written for developers — it is an API — so it is never
+ * shown: a German or Ukrainian reader got an English sentence in the middle of a
+ * translated dialog. There is no upload timeout in this module, so none is mapped.
+ */
+export function uploadFailure(status: number): ShareError {
+  const m = t().shareErrors.createFailed;
+  const hint =
+    status === 400
+      ? m.badRequest
+      : status === 404
+        ? m.notFound
+        : status === 405
+          ? m.notAllowed
+          : status === 413
+            ? m.tooLarge(formatBytes(SHARE_LIMIT_BYTES))
+            : status >= 500
+              ? m.serverError(status)
+              : m.serverStatus(status);
+  return new ShareError(m.headline, hint);
+}
+
+async function upload(blob: Uint8Array, lifetime: LifetimeKey): Promise<CreatedShare> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/shares?lifetime=${encodeURIComponent(lifetime)}`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: blob as BodyInit,
+    });
+  } catch {
+    // The browser's own message ("Failed to fetch", "NetworkError…") is English.
+    throw new ShareError(t().shareErrors.createFailed.headline, t().shareErrors.createFailed.network);
   }
+
+  if (!response.ok) throw uploadFailure(response.status);
 
   return (await response.json()) as CreatedShare;
 }
@@ -274,7 +297,7 @@ function runShareModal(options: {
       const shareError =
         error instanceof ShareError
           ? error
-          : new ShareError(t().shareErrors.createFailed.headline, String(error));
+          : new ShareError(t().shareErrors.createFailed.headline, t().shareErrors.createFailed.unexpected);
       result.replaceChildren(
         el(
           "div",

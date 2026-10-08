@@ -78,4 +78,26 @@ describe("the document's Share dialog", () => {
     openShareModal("{}", "a.json", { request: { body: { raw: '{"amount":100}', contentType: "application/json" } } });
     expect(document.querySelector(".share__note--body")).toBeNull();
   });
+
+  it("a failed upload shows catalogue copy for its status, never the server's English text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "Encrypted document is 13.0 MB, over the 12 MB share limit." }), { status: 413 })),
+    );
+    openShareModal("{}", "a.json");
+    document.querySelector<HTMLButtonElement>(".share__actions .btn--primary")!.click();
+    await vi.waitFor(() => expect(document.querySelector(".share__error-hint")).not.toBeNull());
+    const hint = document.querySelector(".share__error-hint")!.textContent!;
+    expect(hint).not.toContain("13.0 MB");
+    expect(hint).not.toContain("Encrypted document is");
+    expect(hint).toContain(t().shareErrors.createFailed.tooLarge("12.00 MB"));
+  });
+
+  it("a network failure shows catalogue copy, never the browser's own message", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    openShareModal("{}", "a.json");
+    document.querySelector<HTMLButtonElement>(".share__actions .btn--primary")!.click();
+    await vi.waitFor(() => expect(document.querySelector(".share__error-hint")).not.toBeNull());
+    expect(document.querySelector(".share__error-hint")!.textContent).toBe(t().shareErrors.createFailed.network);
+  });
 });
