@@ -72,6 +72,90 @@ export function closeAllModals(): void {
   }
 }
 
+/* ----------------------------------------------------- focus on close --- */
+
+/**
+ * Where focus goes when a dialog closes. The rule, which `docs/task-specs/QA5.md`
+ * states as the contract:
+ *
+ *  1. **The control that opened it**, if it is still in the document.
+ *  2. Otherwise, **the control that opened the dialog this one replaced** (the
+ *     share dialog opened from the saved-documents list takes the list's own
+ *     opener — the top-bar button — when the list's Share button is gone).
+ *  3. Otherwise **the dialog still open underneath**, if there is one, so a
+ *     nested question never leaves focus outside the dialog it was asked in.
+ *  4. Otherwise **the main content** (`#view`, made programmatically
+ *     focusable), never `<body>`: a keyboard user closing a dialog opened by a
+ *     shortcut key must not restart from the top of the page.
+ *
+ * "Opened it" cannot be read from `document.activeElement` alone. Safari and
+ * Firefox on macOS do not focus a button when it is clicked, so at the moment
+ * a click handler opens a dialog the active element is `<body>`; and a script
+ * `.click()` focuses nothing either. So the last *click* target is tracked
+ * too. It is cleared by any keypress, because after a keyboard interaction
+ * `activeElement` is the truth and a click from a minute ago is stale.
+ */
+let lastClicked: HTMLElement | null = null;
+
+const CLICKABLE = 'button, a[href], summary, input, select, textarea, [role="button"], [tabindex]';
+
+if (typeof document !== "undefined") {
+  document.addEventListener(
+    "click",
+    (event) => {
+      lastClicked = event.target instanceof Element ? event.target.closest<HTMLElement>(CLICKABLE) : null;
+    },
+    true,
+  );
+  document.addEventListener("keydown", () => (lastClicked = null), true);
+}
+
+/** Opener chains of the open modals, outermost first; see rule 2 above. */
+const openers = new WeakMap<ModalHandle, HTMLElement[]>();
+
+function isFocusableNow(node: HTMLElement | null | undefined): node is HTMLElement {
+  return (
+    !!node &&
+    node.isConnected &&
+    node !== document.body &&
+    node !== document.documentElement &&
+    !node.hasAttribute("disabled") &&
+    !node.closest("[hidden], [inert]")
+  );
+}
+
+/** The element focused right now, or the control just clicked, whichever really opened this. */
+function currentOpener(): HTMLElement | null {
+  if (isFocusableNow(lastClicked)) return lastClicked;
+  const active = document.activeElement;
+  return active instanceof HTMLElement && isFocusableNow(active) ? active : null;
+}
+
+function restoreFocus(chain: readonly HTMLElement[]): void {
+  const target = chain.find((node) => isFocusableNow(node));
+  if (target) {
+    // `preventScroll`: the page's scroll position is something Back/Forward
+    // restoration works hard to keep, and a dialog closing must not move it.
+    target.focus({ preventScroll: true });
+    return;
+  }
+  const below = modalStack[modalStack.length - 1];
+  if (below) {
+    const inner =
+      below.root.querySelector<HTMLElement>("[data-autofocus]") ??
+      below.root.querySelector<HTMLElement>("button, a[href], input, textarea, select");
+    if (inner) {
+      inner.focus({ preventScroll: true });
+      return;
+    }
+  }
+  const main = document.getElementById("view");
+  if (main) {
+    if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
+    main.focus({ preventScroll: true });
+  }
+}
+
 interface ModalOptions {
   title: string;
   subtitle?: string;
@@ -101,13 +185,18 @@ interface ModalOptions {
 }
 
 export function openModal(options: ModalOptions): ModalHandle {
+  // Taken before anything is closed: opening over a dialog closes it, and the
+  // element that opened *that* one is the fallback for this one (rule 2).
+  const opener = currentOpener();
+  const replaced = !options.stack && modalStack.length > 0 ? openers.get(modalStack[0]!) ?? [] : [];
+
   // Default: one at a time, as before. `stack` opts out.
   if (!options.stack) closeAllModals();
 
   const host = document.getElementById("modal-root");
   if (!host) throw new Error("Missing #modal-root");
 
-  const previouslyFocused = document.activeElement as HTMLElement | null;
+  const chain = [...(opener ? [opener] : []), ...replaced];
 
   const panel = el("div", {
     class: `modal__panel${options.variant ? ` modal__panel--${options.variant}` : ""}`,
@@ -129,7 +218,7 @@ export function openModal(options: ModalOptions): ModalHandle {
       // Only once nothing is left, or closing an inner dialog would unlock
       // scrolling while the list behind it is still open.
       if (modalStack.length === 0) document.body.classList.remove("has-modal");
-      previouslyFocused?.focus?.();
+      restoreFocus(chain);
       // Last, and after the guard above, so it runs exactly once and only for
       // a modal that was actually open.
       options.onClose?.();
@@ -211,6 +300,7 @@ export function openModal(options: ModalOptions): ModalHandle {
     if (event.target === root) handle.close();
   });
 
+  openers.set(handle, chain);
   host.append(root);
   document.body.classList.add("has-modal");
   document.addEventListener("keydown", onKeydown, true);

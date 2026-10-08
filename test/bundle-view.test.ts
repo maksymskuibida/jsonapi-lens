@@ -257,3 +257,93 @@ describe("renderBundleImportView", () => {
     expect(await listLibrary()).toEqual([]);
   });
 });
+
+/**
+ * QA5: `Import selected` used to announce nothing — the view swapped to a
+ * "Saved N of N documents." subtitle, which is easy to miss, and no toast went
+ * up. The toast is what a screen reader hears (`#toast` is a live region).
+ */
+describe("the import toast", () => {
+  const toastText = (): string => document.getElementById("toast")?.textContent ?? "";
+  const toastIsError = (): boolean => document.getElementById("toast")?.classList.contains("toast--error") ?? false;
+
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="toast"></div>';
+  });
+
+  async function importAll(documents: BundlePayload["documents"]): Promise<HTMLElement> {
+    const container = attachedContainer();
+    await renderBundleImportView(container, bundle(documents), {
+      onOpen: () => {},
+      onCancel: () => {},
+      onChange: () => {},
+    });
+    findButton(container, t().bundleUi.importSelected).click();
+    await waitForImportDone(container);
+    return container;
+  }
+
+  it("names how many were imported, with the singular for one", async () => {
+    await importAll([{ label: "a.json", text: "{}" }]);
+    expect(toastText()).toBe(t().bundleUi.importedToast(1));
+    expect(toastText()).toContain("1 document ");
+    expect(toastIsError()).toBe(false);
+  });
+
+  it("names how many were imported, with the plural for several", async () => {
+    await importAll([
+      { label: "a.json", text: "{}" },
+      { label: "b.json", text: "[]" },
+      { label: "c.json", text: "[1]" },
+    ]);
+    expect(toastText()).toBe(t().bundleUi.importedToast(3));
+    expect(toastText()).toContain("3 documents ");
+  });
+
+  it("counts only the ticked ones", async () => {
+    const container = attachedContainer();
+    await renderBundleImportView(
+      container,
+      bundle([
+        { label: "keep.json", text: "{}" },
+        { label: "skip.json", text: "[]" },
+      ]),
+      { onOpen: () => {}, onCancel: () => {}, onChange: () => {} },
+    );
+    checkboxes(container)[1]!.click();
+    findButton(container, t().bundleUi.importSelected).click();
+    await waitForImportDone(container);
+    expect(toastText()).toBe(t().bundleUi.importedToast(1));
+  });
+
+  it("says so, as an error, when only some could be saved", async () => {
+    let calls = 0;
+    const real = store.saveToLibrary;
+    const spy = vi.spyOn(store, "saveToLibrary").mockImplementation(async (draft) => {
+      calls++;
+      return calls === 1 ? null : real(draft);
+    });
+    try {
+      await importAll([
+        { label: "a.json", text: "{}" },
+        { label: "b.json", text: "[]" },
+      ]);
+      expect(toastText()).toBe(t().bundleUi.importedPartialToast(1, 2));
+      expect(toastIsError()).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("says nothing was saved, as an error, never an 'Imported 0 documents'", async () => {
+    const spy = vi.spyOn(store, "saveToLibrary").mockResolvedValue(null);
+    try {
+      await importAll([{ label: "a.json", text: "{}" }]);
+      expect(toastText()).toBe(t().bundleUi.importFailed);
+      expect(toastIsError()).toBe(true);
+      expect(toastText()).not.toMatch(/\b0\b/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

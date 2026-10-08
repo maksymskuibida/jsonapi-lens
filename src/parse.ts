@@ -2,6 +2,7 @@ import { richToText } from "./dom.js";
 import type { RichPart } from "./dom.js";
 import { domId, resourceKey, typeHue, typeSigil } from "./ident.js";
 import { buildJsonIndex } from "./json-index.js";
+import { lineColumnAt, locateSyntaxError } from "./json-syntax.js";
 import { join as pointerJoin } from "./pointer.js";
 import { detectShape } from "./shape.js";
 import { t } from "./i18n/index.js";
@@ -31,31 +32,21 @@ export class DocumentError extends Error {
   readonly hint: string | RichPart[];
   /** 1-based line number, when the failure has a location in the source text. */
   readonly line?: number;
+  /** 1-based column on that line, when the failure's place is exact rather than approximate. */
+  readonly column?: number;
 
-  constructor(headline: string, hint: string | RichPart[], line?: number) {
+  constructor(headline: string, hint: string | RichPart[], line?: number, column?: number) {
     super(`${headline} ${typeof hint === "string" ? hint : richToText(hint)}`);
     this.name = "DocumentError";
     this.headline = headline;
     this.hint = hint;
     this.line = line;
+    this.column = column;
   }
 }
 
 function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Recover a line number from the byte offset in a V8/JSC `JSON.parse` message. */
-function lineFromSyntaxError(message: string, source: string): number | undefined {
-  const match = /position (\d+)/i.exec(message);
-  if (!match) return undefined;
-  const position = Number(match[1]);
-  if (!Number.isFinite(position)) return undefined;
-  let line = 1;
-  for (let i = 0; i < position && i < source.length; i++) {
-    if (source.charCodeAt(i) === 10) line++;
-  }
-  return line;
 }
 
 /**
@@ -72,15 +63,23 @@ export function parseJson(text: string): JsonValue {
 
   try {
     return JSON.parse(trimmed) as JsonValue;
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause);
-    const line = lineFromSyntaxError(message, trimmed);
+  } catch {
+    // The engine's message is deliberately not read: it is English, it differs
+    // between browsers, and it quotes the input. See `json-syntax.ts`.
+    const found = locateSyntaxError(trimmed);
+    // Positions are reported against what the person pasted, not what we
+    // trimmed: leading blank lines count, or the line number would be wrong.
+    const shift = text.length - text.trimStart().length;
+    const where = found ? lineColumnAt(text, shift + found.offset) : undefined;
+    const line = where?.line;
+    const column = where?.column;
 
     if (/^'/.test(trimmed) || /'\s*:\s*/.test(trimmed.slice(0, 400))) {
       throw new DocumentError(
         t().parseErrors.pythonDict.headline,
         t().parseErrors.pythonDict.hint,
         line,
+        column,
       );
     }
     if (/^\s*[A-Za-z]{3,}\s/.test(trimmed) && !trimmed.startsWith("{") && !trimmed.startsWith("[")) {
@@ -88,12 +87,14 @@ export function parseJson(text: string): JsonValue {
         t().parseErrors.notJsonStart.headline,
         t().parseErrors.notJsonStart.hint,
         line,
+        column,
       );
     }
     throw new DocumentError(
       t().parseErrors.invalidJson.headline,
-      t().parseErrors.invalidJson.hint(message.replace(/^JSON\.parse:\s*/, "")),
+      found ? t().parseErrors.invalidJson.hint(found.problem) : t().parseErrors.invalidJson.hintUnlocated,
       line,
+      column,
     );
   }
 }
@@ -120,7 +121,7 @@ export function assertJsonApi(value: JsonValue): JsonObject {
   }
   if (!isPlainObject(value)) {
     throw new DocumentError(
-      t().parseErrors.wrongType.headline(value === null ? "null" : typeof value),
+      t().parseErrors.wrongType.headline(value === null ? "null" : typeof value === "boolean" ? "boolean" : "number"),
       t().parseErrors.wrongType.hint,
     );
   }

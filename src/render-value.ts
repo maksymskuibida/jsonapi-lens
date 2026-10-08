@@ -55,7 +55,7 @@ function renderScalar(value: JsonValue): HTMLElement {
       return el("span", { class: "v v--null", text: "null" });
 
     case "empty-string":
-      return el("span", { class: "v v--empty", text: "empty string" });
+      return el("span", { class: "v v--empty", text: t().value.emptyString });
 
     case "boolean":
       return el("span", { class: `v v--bool v--bool-${String(value)}`, text: String(value) });
@@ -148,7 +148,7 @@ export function rowActions(): HTMLElement {
       type: "button",
       "data-copy": "path",
       title: t().value.copyPointerTitle,
-      "aria-label": "Copy JSON Pointer to this value",
+      "aria-label": t().value.copyPointerTitle,
       text: t().value.copyPointerLabel,
     }),
     el("button", {
@@ -156,7 +156,7 @@ export function rowActions(): HTMLElement {
       type: "button",
       "data-copy": "value",
       title: t().value.copyValueTitle,
-      "aria-label": "Copy this value",
+      "aria-label": t().value.copyValueTitle,
       text: t().value.copyValueLabel,
     }),
   );

@@ -90,7 +90,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   if (body.byteLength > MAX_BYTES) {
     return json(
       {
-        error: `Encrypted document is ${(body.byteLength / 1048576).toFixed(1)} MB, over the ${MAX_BYTES / 1048576} MB share limit.`,
+        error: `Encrypted document is ${(body.byteLength / 1048576).toFixed(1)} MiB, over the ${MAX_BYTES / 1048576} MiB share limit.`,
       },
       413,
     );

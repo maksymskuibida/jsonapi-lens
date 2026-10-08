@@ -1,4 +1,5 @@
 import type { RichPart } from "../dom.js";
+import type { SyntaxProblem } from "../json-syntax.js";
 import { quoted } from "./quote.js";
 /**
  * English — and, because `Messages` is derived from it, the shape every other
@@ -98,6 +99,9 @@ export const en = {
     readHint: (mod: string) =>
       frag(el("kbd", { text: mod }), " ", el("kbd", { text: "↵" }), " to read"),
     errorWhere: (line: number) => `around line ${f.n(line)}`,
+    /** Exact position, when the parser located the problem itself (`json-syntax.ts`). */
+    errorWhereColumn: (line: number, column: number) =>
+      `at line ${f.n(line)}, column ${f.n(column)}`,
   },
 
   resume: {
@@ -428,6 +432,24 @@ export const en = {
     absentChipTitle: (type: string, id: string) =>
       `No resource with type "${type}" and id "${id}" appears in this document`,
     showMore: (n: number) => `Show ${f.n(n)} more`,
+    /** The three labels of the identity strip at the top of an expanded resource. */
+    identityType: "type",
+    identityId: "id",
+    identityAt: "at",
+    /**
+     * The four buttons on an expanded resource. Each title is both the
+     * tooltip and the accessible name — one string, so the two cannot drift.
+     */
+    actions: {
+      raw: "raw",
+      rawTitle: "Show this resource as raw JSON",
+      copy: "copy",
+      copyTitle: "Copy this resource as JSON",
+      path: "path",
+      pathTitle: (pointer: string) => `Copy the JSON Pointer to this resource (${pointer})`,
+      link: "link",
+      linkTitle: "Copy a deep link to this resource",
+    },
   },
 
   relationships: {
@@ -452,6 +474,7 @@ export const en = {
   /* ------------------------------------------------------------ values --- */
 
   value: {
+    emptyString: "empty string",
     emptyArray: "empty array",
     emptyObject: "empty object",
     items: (n: number) => `${f.n(n)} ${f.plural(n, { one: "item", other: "items" })}`,
@@ -600,7 +623,7 @@ export const en = {
     /**
      * Shown before the link is created, when the attached exchange carries
      * anything redaction will mask. The point is that the person finds out
-     * while they can still decide not to share — `copyKindRedacted` and
+     * while they can still decide not to share — `copiedExchange` and
      * `redactedCount` (request.band) say the same thing after the fact for
      * Copy and Download. A `0` count shows nothing; `redactionCaveat` is what
      * covers "nothing was found" honestly.
@@ -717,7 +740,44 @@ export const en = {
     },
     invalidJson: {
       headline: "That is not valid JSON.",
-      hint: (detail: string): RichPart[] => ["The parser stopped here: ", { verbatim: detail }],
+      /**
+       * One sentence per way text stops being JSON, worded here rather than taken
+       * from the browser — its own message is English, differs by engine and
+       * quotes the input. The position is shown beside it (`paste.errorWhereColumn`).
+       */
+      hint: (problem: SyntaxProblem): RichPart[] => {
+        switch (problem.kind) {
+          case "unexpected-char":
+            return [
+              "The parser stopped at an unexpected character: ",
+              ...quoted([problem.char], "\u201c", "\u201d"),
+              ". Look for a missing comma, colon or quote just before it.",
+            ];
+          case "unexpected-end":
+            return [
+              "The document ends too early. A closing `}`, `]` or quote is probably missing — was the text cut off?",
+            ];
+          case "trailing-comma":
+            return ["There is a comma right before a closing `}` or `]`. JSON does not allow a trailing comma."];
+          case "control-in-string":
+            return [
+              "A string contains a raw line break or another control character. Inside a string, write it as `\\n` or `\\t`.",
+            ];
+          case "bad-escape":
+            return [
+              'A string contains an invalid escape sequence. After a backslash, JSON allows only `"`, `\\`, `/`, `b`, `f`, `n`, `r`, `t`, or `u` followed by four hex digits.',
+            ];
+          case "extra-content":
+            return [
+              "There is more text after the end of the JSON document, starting with ",
+              ...quoted([problem.char], "\u201c", "\u201d"),
+              ". A document is a single value — are several documents pasted back to back?",
+            ];
+        }
+      },
+      /** When the parser rejected the text but the scanner found nothing to point at. */
+      hintUnlocated:
+        "The parser rejected this text but could not say where. Check for a missing comma, colon, quote or bracket.",
     },
     bareArray: {
       headline: "This is a bare JSON array, not a JSON:API document.",
@@ -728,7 +788,8 @@ export const en = {
       hint: "The payload has been encoded twice. Unwrap the outer string, then paste the inner document.",
     },
     wrongType: {
-      headline: (what: string) => `This is a JSON ${what}, not a JSON:API document.`,
+      headline: (kind: "null" | "boolean" | "number") =>
+        `This is a JSON ${kind}, not a JSON:API document.`,
       hint: "Paste the whole response body — an object with a top-level `data`, `errors` or `meta` key.",
     },
     notJsonApi: {
@@ -875,8 +936,12 @@ export const en = {
       downloadTitle: "Download the request and response as a JSON file",
       share: "Share",
       shareTitle: "Share this document",
-      copyKind: "the exchange",
-      copyKindRedacted: (n: number) => `the exchange — ${f.n(n)} redacted`,
+      /** The whole toast, not a noun for `toast.copiedLarge`: a German noun phrase has a case, and the toast is a sentence. */
+      copiedExchange: (redacted: number, chars: number) =>
+        redacted > 0
+          ? `Copied the exchange — ${f.n(redacted)} redacted (${f.n(chars)} ${f.plural(chars, { one: "character", other: "characters" })})`
+          : `Copied the exchange (${f.n(chars)} ${f.plural(chars, { one: "character", other: "characters" })})`,
+      copyExchangeFailed: "Could not copy the exchange. Your browser blocked clipboard access.",
       redactedCount: (n: number) =>
         f.plural(n, {
           one: "1 value found and redacted before downloading.",
@@ -1113,6 +1178,12 @@ export const en = {
     imported: (saved: number, total: number) =>
       `Saved ${f.n(saved)} of ${f.n(total)} ${total === 1 ? "document" : "documents"}.`,
     importFailed: "Nothing could be saved. Your browser may be blocking storage.",
+    /** The toast after `Import selected` — every ticked document was saved. */
+    importedToast: (n: number) =>
+      `Imported ${f.n(n)} ${f.plural(n, { one: "document", other: "documents" })} into your saved documents.`,
+    /** Some were saved and some were not; `saved < total`, so `total` is always 2 or more. */
+    importedPartialToast: (saved: number, total: number) =>
+      `Imported ${f.n(saved)} of ${f.n(total)} documents; the rest could not be saved.`,
     done: "Done",
   },
 };

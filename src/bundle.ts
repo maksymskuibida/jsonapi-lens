@@ -41,6 +41,7 @@
 import { el } from "./dom.js";
 import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
+import { toast } from "./ui.js";
 import type { BundleEntry, BundlePayload } from "./crypto.js";
 import { seal, sealBundle } from "./crypto.js";
 import { redactForExport } from "./secrets.js";
@@ -356,6 +357,15 @@ export async function renderBundleImportView(
   }
 
   function renderDone(outcome: ImportOutcome, attempted: number): void {
+    // The done view below says the same thing, but it is a subtitle the person
+    // has to look for; the toast is what announces it (and `#toast` is a live
+    // region, so a screen reader hears it too). Three outcomes, three copies:
+    // all saved, some saved, none saved.
+    if (outcome.saved.length === 0) toast(t().bundleUi.importFailed, "error");
+    else if (outcome.saved.length < attempted) {
+      toast(t().bundleUi.importedPartialToast(outcome.saved.length, attempted), "error");
+    } else toast(t().bundleUi.importedToast(outcome.saved.length));
+
     const summary =
       outcome.saved.length === 0
         ? t().bundleUi.importFailed

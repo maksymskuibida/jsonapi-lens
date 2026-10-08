@@ -180,6 +180,24 @@ Two conventions do most of the work:
 Numbers and dates are formatted in the chosen language rather than the browser's, which is what
 `toLocaleString()` with no argument had been doing.
 
+**Accessible names are copy too.** A button's `aria-label`, a `title`, a `placeholder` and a toast
+all come from the catalogue — a screen reader announced "Copy this value" in a German interface
+because one of them had been left as a literal. [`test/copy-hygiene.test.ts`](test/copy-hygiene.test.ts)
+scans `src/` for exactly that and fails on a string literal in any of those positions.
+
+**JSON syntax errors are worded by the app, not the browser.** When pasted text is not JSON, the
+error card names the kind of mistake (an unexpected character, a truncated document, a trailing
+comma, a raw line break in a string, an invalid escape, text after the end) and the exact line and
+column, in the chosen language. The browser's own `SyntaxError` message is never shown: it is
+English, it differs between engines, and it quotes the input. The one character at the position is
+quoted back; nothing else of what you pasted is.
+
+**Sizes are binary and say so.** The raw view, the saved-documents list, the share dialog and a
+request body line show `B`, `KiB` and `MiB` — divided by 1024, which is what the limits are made of
+(a share is capped at 12 MiB). They used to print `kB`/`MB`, which are the decimal units, so every
+size read about 2.4% small against anything that measures in SI. The unit symbols are not
+translated.
+
 The copy in `index.html` — the shell and the paste view, which paint before the module graph loads —
 is bound to the catalogue by a typed table in [`src/i18n/static-dom.ts`](src/i18n/static-dom.ts).
 The English text left in the markup is a genuine pre-JavaScript fallback rather than a second source
@@ -244,9 +262,17 @@ visitor.
 - **Copy** and **Download** redact by default and say how many values they found and hid — a count of
   what was found, never a claim that nothing else remains. The pass covers header and cookie values
   shaped like credentials; it does not scan the body or the URL, and says so next to the buttons.
-  **Share does not yet carry the request/response into the encrypted link** — sharing a document
-  behaves exactly as it always has, and simply does not include the attached exchange either; see
-  [STATUS.md](docs/STATUS.md) for the small follow-up that closes this.
+- **Share carries the attached request and response into the encrypted link**, redacted the same
+  way, and says how many values it removed *before* the link is created — whether you share the
+  open document or tick it in **Saved documents → Share**. The link opens with the exchange band in
+  place and every credential still masked.
+
+Importing from a bundle link ends with a toast saying how many documents were saved (and, if
+storage refused some, how many were not).
+
+**Focus** returns to the control that opened a dialog when it closes — Escape, ✕ or a click outside.
+If that control is gone, it goes to the control that opened the dialog this one replaced, then to the
+dialog still open underneath, then to the page's main content; never to `<body>`.
 
 **Keyboard** — `?` lists them all. `/` or `g` finds a resource by type or id, `s` saves, `r` raw,
 `e` exports, `l` opens saved documents, `Shift+Esc` leaves the document, `Esc` closes a dialog.
@@ -487,7 +513,7 @@ Chrome 148, Apple Silicon. Fixture: `npm run fixtures` → **25.7 MB, 56,821 res
 The two restoration figures were measured on a re-generated fixture of 61,487 resources rather than
 the 56,821 above; `npm run fixtures` does not produce an identical document twice.
 | Reload from IndexedDB and re-render | ~1.6 s |
-| Create a share link (7.6 kB document) | **~1.0 s**, of which ~200 ms is the KDF |
+| Create a share link (7.6 KiB document) | **~1.0 s**, of which ~200 ms is the KDF |
 
 **What `content-visibility` buys.** Timing a forced full style+layout flush at 56,821 rows:
 
@@ -563,6 +589,7 @@ src/
   router.ts           the five paths, parsed by hand
   seo.ts              the head: canonical, robots, hreflang and cards per route
   parse.ts            validation with specific errors, one-pass index, reverse index
+  json-syntax.ts      where and how text stops being JSON: kind + line/column, engine-independent
   types.ts            structural types for the parts of JSON:API this reads
   format.ts           value classification and typed formatting
   crypto.ts           gzip + AES-GCM + PBKDF2 for the share envelope — one document or a bundle
@@ -575,7 +602,7 @@ src/
   cookies.ts          Cookie and Set-Cookie parsing into name/value/attributes
   secrets.ts          secret-header/credential-shape detection, JWT decoding, redaction
   clipboard.ts        copy and download
-  ui.ts               toast and modal
+  ui.ts               toast, modal, and where focus goes when one closes
   panels.ts           raw view, saved documents (with its selection mode), save, shortcuts
   platform.ts         ⌘ vs Ctrl, and the browser's own history keys per OS
   jump.ts             go-to-resource palette

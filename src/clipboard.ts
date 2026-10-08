@@ -21,11 +21,26 @@ export async function copyText(text: string, what: string): Promise<boolean> {
 
 /** Copy without a preview in the toast — for large blobs where a preview is noise. */
 export async function copyBlob(text: string, what: string): Promise<boolean> {
+  return copyWithMessages(text, {
+    done: t().toast.copiedLarge(what, text.length),
+    failed: t().toast.copyFailed(what),
+  });
+}
+
+/**
+ * Copy, reporting with whole sentences the caller supplies.
+ *
+ * For when the thing copied is not a noun the generic "Copied <what>" template
+ * can sit in — German inflects it (the exchange toast read "den Exchange — 2
+ * geschwärzt kopiert", an accusative fragment), and the redaction count belongs
+ * in the same sentence as the copy.
+ */
+export async function copyWithMessages(
+  text: string,
+  messages: { done: string; failed: string },
+): Promise<boolean> {
   const ok = await write(text);
-  toast(
-    ok ? t().toast.copiedLarge(what, text.length) : t().toast.copyFailed(what),
-    ok ? "info" : "error",
-  );
+  toast(ok ? messages.done : messages.failed, ok ? "info" : "error");
   return ok;
 }
 
