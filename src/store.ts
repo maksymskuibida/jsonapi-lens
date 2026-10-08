@@ -56,6 +56,12 @@ export interface StoredDocument {
   label?: string;
   /** Captured request/response context, when the document came with one. */
   exchange?: Exchange;
+  /**
+   * The library entry this document is, when it was saved or opened as one.
+   * Optional on an existing record, so no schema change: a record without it is
+   * a document that is not a library entry (a paste, a share link, a sample).
+   */
+  libraryId?: number;
 }
 
 /** A document the user explicitly kept, plus enough summary to list it. */
@@ -205,12 +211,42 @@ export async function deleteFromLibrary(id: number): Promise<boolean> {
 }
 
 export async function renameInLibrary(id: number, label: string): Promise<boolean> {
-  try {
-    const entry = await getFromLibrary(id);
-    if (!entry) return false;
+  return updateLibraryEntry(id, (entry) => {
     entry.label = label;
-    await tx(LIBRARY_STORE, "readwrite", (store) => store.put(entry));
-    return true;
+  });
+}
+
+/**
+ * Read-modify-write of one library entry in a **single** `readwrite`
+ * transaction. Two transactions (a `get`, then a `put` of what it returned) let
+ * a write that commits in between be reverted by the stale `put` — a rename
+ * undoing a request edit or the reverse (QA6 review S1). `false` when the entry
+ * does not exist, so a stale id never resurrects a row.
+ */
+async function updateLibraryEntry(id: number, mutate: (entry: LibraryEntry) => void): Promise<boolean> {
+  try {
+    const db = await open();
+    return await new Promise<boolean>((resolve, reject) => {
+      const transaction = db.transaction(LIBRARY_STORE, "readwrite");
+      const store = transaction.objectStore(LIBRARY_STORE);
+      let found = false;
+      const get = store.get(id);
+      get.onsuccess = () => {
+        const entry = get.result as LibraryEntry | undefined;
+        if (!entry) return;
+        found = true;
+        mutate(entry);
+        store.put(entry);
+      };
+      transaction.oncomplete = () => {
+        db.close();
+        resolve(found);
+      };
+      transaction.onabort = transaction.onerror = () => {
+        db.close();
+        reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+      };
+    });
   } catch {
     return false;
   }
@@ -219,43 +255,17 @@ export async function renameInLibrary(id: number, label: string): Promise<boolea
 /**
  * Replace (or, with `null`, remove) one library entry's `exchange`, leaving
  * every other field alone. No schema change: `exchange` was already an optional
- * field of the record (see the `DB_VERSION` note above), and this is one read
- * and one `put`. `false` when the entry no longer exists — deleted in another
- * tab, say — so a caller never resurrects a row by writing to a stale id.
+ * field of the record (see the `DB_VERSION` note above).
+ *
+ * The read and the write are **one `readwrite` transaction**, so a rename that
+ * commits in between cannot be reverted by a stale `put`, and two quick edits
+ * are applied in the order they were issued. `false` when the entry no longer
+ * exists — deleted in another tab, say — so a caller never resurrects a row by
+ * writing to a stale id.
  */
 export async function setExchangeInLibrary(id: number, exchange: Exchange | null): Promise<boolean> {
-  try {
-    const entry = await getFromLibrary(id);
-    if (!entry) return false;
+  return updateLibraryEntry(id, (entry) => {
     if (exchange === null) delete entry.exchange;
     else entry.exchange = exchange;
-    await tx(LIBRARY_STORE, "readwrite", (store) => store.put(entry));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Follow an open document's request into its library entry, and say which entry
- * that was (so the caller can remember it).
- *
- * The entry is the one with this `id` when the caller knows it. Otherwise it is
- * the entry whose text is byte-identical to `text` — the same link a rename
- * follows — but **only when exactly one matches**: with several, there is no
- * telling which one the user has open, and writing to all of them would
- * overwrite a different request on an entry they never touched. With none, or
- * several, nothing is written and the result is `null`.
- */
-export async function followExchangeIntoLibrary(
-  target: { id?: number; text: string },
-  exchange: Exchange | null,
-): Promise<number | null> {
-  let id = target.id;
-  if (id === undefined) {
-    const same = (await listLibrary()).filter((entry) => entry.text === target.text);
-    if (same.length !== 1 || same[0]!.id === undefined) return null;
-    id = same[0]!.id;
-  }
-  return (await setExchangeInLibrary(id, exchange)) ? id : null;
+  });
 }

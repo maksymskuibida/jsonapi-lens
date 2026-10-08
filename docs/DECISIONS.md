@@ -634,17 +634,24 @@ cookie value was still in the document as text, hidden only by `display:none`.
    against the live exchange and inserts the text; hide removes it. Nothing, including attributes
    and `title`s, carries the value. This is the "pointer, not copy" rule of PROCESS §6 applied to
    secrets, and `display:none` is not an implementation of it.
-3. **A library entry follows its open document's request** (`followExchangeIntoLibrary`,
-   `store.ts`): by the id the document was saved or opened under, else by identical text when
-   exactly one entry matches. No schema change.
+3. **A library entry follows its open document's request** only when the document was saved or
+   opened *as* that entry: `libraryId`, carried on the stored current-document record so it survives
+   a reload (an optional field, no schema change). **There is no same-text fallback** — an opened
+   share link or a fresh paste can match a saved entry's text without being it, and writing its
+   request over the entry destroys the saved one. The read and the write are one transaction
+   (`setExchangeInLibrary`).
 4. **An assumed `https://` needs something that could be a host** (`canBeHost`, defined in
    `docs/task-specs/QA6.md`). `host:digits` is a host and a port.
 
 ### What this does not buy
 
-`redactExchange` rewrites headers, cookies, the URL and `query`, a form body and `origin`. A JSON or
-text body is **detected, not rewritten**, and goes into a share as it is — the share dialog now says
-so before the link exists, but it does not remove it. Dropping every flagged body was rejected: the
+**A share is redacted as far as the detector can recognise, not completely.** `redactExchange`
+rewrites header and cookie values, the URL's `user:password@` prefix, its query and fragment,
+`query`, a form body and `origin`. It does **not** catch: a custom-named header with a short value
+(`X-Session: s3cr3t` is not a known credential name and not credential-shaped), a token inside a URL
+**path** segment, or a credential inside a JSON/text body. A JSON or text body is **detected, not
+rewritten**, and goes into a share as it is — the share dialog says so before the link exists, but
+it does not remove it. Nothing in this entry or the UI may claim more than that. Dropping every flagged body was rejected: the
 detector is coarse (24 base64-alphabet characters anywhere), so it would drop most response bodies.
 The decoded-JWT claims panel under a masked `Authorization` header is unchanged and shows claims,
 never the token.

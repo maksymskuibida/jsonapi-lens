@@ -20,6 +20,7 @@ import type { BundleEntry } from "../src/crypto.js";
 import { headerSet } from "../src/headers.js";
 import { decodeParams } from "../src/params.js";
 import { inspectExchangeForShare } from "../src/share.js";
+import { redactExchange } from "../src/secrets.js";
 import type { Exchange } from "../src/exchange.js";
 
 const FAKES = {
@@ -31,6 +32,7 @@ const FAKES = {
   formPass: "qa-fake-formpass-0006-not-real",
   resAuth: "qa-fake-resauth-0007-not-real",
   origin: "qa-fake-origin-0008-not-real",
+  userinfo: "qa-fake-userpw-0009-not-real",
 };
 
 const form = `grant=client&client_secret=${FAKES.formPass}`;
@@ -39,7 +41,7 @@ function fullExchange(): Exchange {
   return {
     request: {
       method: "POST",
-      url: `https://api.example.com/v2/x?api_key=${FAKES.urlKey}&page=2`,
+      url: `https://admin:${FAKES.userinfo}@api.example.com/v2/x?api_key=${FAKES.urlKey}&page=2`,
       query: decodeParams(`api_key=${FAKES.queryKey}&page=2`),
       headers: headerSet([
         { name: "Authorization", value: `Bearer ${FAKES.bearer}` },
@@ -90,8 +92,9 @@ describe("a share seals no credential, on any surface", () => {
   it("the number the dialog states is the number of values actually masked", async () => {
     const { redacting } = inspectExchangeForShare([entry("a.json")]);
     // header, request cookie, response header, response cookie, form field,
-    // origin field, and the URL/query key counted once (two views of one value).
-    expect(redacting).toBe(7);
+    // origin field, the URL password, and the URL/query key counted once (two
+    // views of one value).
+    expect(redacting).toBe(8);
     const secret = generateSecret();
     const opened = await openSealed(await mintShareEnvelope([entry("a.json")], secret), secret);
     expect(JSON.stringify(opened).split("[REDACTED]").length - 1).toBeGreaterThanOrEqual(redacting);
@@ -119,6 +122,71 @@ describe("inspectExchangeForShare", () => {
   });
 
   it("sums across a bundle", () => {
-    expect(inspectExchangeForShare([entry("a"), entry("b")]).redacting).toBe(14);
+    expect(inspectExchangeForShare([entry("a"), entry("b")]).redacting).toBe(16);
+  });
+});
+
+describe("a credential in a URL's user:password@ prefix (QA6 review B2)", () => {
+  const redactedUrl = (url: string) => {
+    const { exchange, count } = redactExchange({ request: { url } });
+    return { url: exchange.request?.url, count };
+  };
+
+  it("masks the password, keeps the user name, counts one", () => {
+    expect(redactedUrl("https://admin:hunter2pass@api.example.com/v1?page=2")).toEqual({
+      url: "https://admin:[REDACTED]@api.example.com/v1?page=2",
+      count: 1,
+    });
+  });
+
+  it("masks a token-only userinfo entirely, since that whole part is the credential", () => {
+    expect(redactedUrl("https://ghp_faketoken123@example.com/o/r")).toEqual({
+      url: "https://[REDACTED]@example.com/o/r",
+      count: 1,
+    });
+  });
+
+  it("handles a scheme-less user:pw@host, a port, and a fragment together", () => {
+    expect(redactedUrl("admin:hunter2pass@api.example.com:8080/x#a=1").url).toBe(
+      "admin:[REDACTED]@api.example.com:8080/x#a=1",
+    );
+  });
+
+  it("counts the userinfo and the query separately", () => {
+    expect(redactedUrl("https://u:pw1@h.example.com/x?api_key=k1234567890").count).toBe(2);
+  });
+
+  it("leaves alone what is not userinfo: no @, an @ in the path or query, a mailto address, a port", () => {
+    for (const url of [
+      "https://api.example.com/x",
+      "https://api.example.com/users/@me",
+      "https://api.example.com/x?email=a@b.example.com",
+      "mailto:someone@example.com",
+      "localhost:8080/x",
+    ]) {
+      expect(redactedUrl(url), url).toEqual({ url, count: 0 });
+    }
+  });
+
+  it("is idempotent: redacting twice neither double-counts nor changes the text", () => {
+    const once = redactExchange({ request: { url: "https://admin:hunter2pass@api.example.com/" } });
+    const twice = redactExchange(once.exchange);
+    expect(twice.count).toBe(0);
+    expect(twice.exchange.request?.url).toBe(once.exchange.request?.url);
+  });
+
+  it("never reaches a sealed single share or bundle", async () => {
+    const withPassword = (label: string): BundleEntry => ({
+      label,
+      text: "{}",
+      exchange: { request: { url: "https://admin:qa-fake-urlpw-only-not-real@api.example.com/v1" } },
+    });
+    for (const documents of [[withPassword("a")], [withPassword("a"), withPassword("b")]]) {
+      const secret = generateSecret();
+      const opened = await openSealed(await mintShareEnvelope(documents, secret), secret);
+      expect(JSON.stringify(opened)).not.toContain("qa-fake-urlpw-only-not-real");
+      expect(JSON.stringify(opened)).toContain("admin:[REDACTED]@api.example.com");
+    }
+    expect(inspectExchangeForShare([withPassword("a")]).redacting).toBe(1);
   });
 });

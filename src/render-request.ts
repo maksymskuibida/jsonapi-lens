@@ -371,13 +371,17 @@ export function resolveSecret(exchange: Exchange, ref: string): string | null {
   return entry === undefined ? null : entry.value;
 }
 
+/**
+ * One accessible pattern, not two: the button's *name* flips (Reveal this value
+ * / Hide this value) and it carries no `aria-pressed`. Both together read as
+ * "Hide this value, toggle button, pressed" — a double negative (review S3).
+ */
 function setRevealState(wrap: HTMLElement, button: HTMLElement, revealed: boolean): void {
   const m = t().request.review;
   wrap.setAttribute(REVEAL_ATTR, revealed ? "true" : "false");
   button.textContent = revealed ? m.hide : m.reveal;
   button.setAttribute("aria-label", revealed ? m.hideLabel : m.revealLabel);
   button.setAttribute("title", revealed ? m.hideTitle : m.revealTitle);
-  button.setAttribute("aria-pressed", String(revealed));
 }
 
 /**

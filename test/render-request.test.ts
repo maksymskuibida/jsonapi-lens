@@ -487,6 +487,23 @@ describe("parseRequestUrl: only text that could be a host gets an assumed scheme
     expect(band!.textContent).not.toContain("assumed");
   });
 
+  it("the new host:port branch can only ever produce an https link; a given scheme is never linked (S6)", () => {
+    const hrefOf = (url: string) => {
+      const band = renderExchangeBand({ exchange: { request: { url } }, mode: "request", currentDocument: null });
+      return band!.querySelector<HTMLAnchorElement>(".xurl a")?.getAttribute("href") ?? null;
+    };
+    for (const input of ["javascript:1", "JAVASCRIPT:1", "data:123", "tel:555"]) {
+      const href = hrefOf(input);
+      expect(href, input).not.toBeNull();
+      expect(href!.startsWith("https://"), input).toBe(true);
+    }
+    expect(hrefOf("javascript:alert(1)")).toBeNull();
+    expect(hrefOf("data:text/html,<script>alert(1)</script>")).toBeNull();
+    // `tel:5551234` is a port above 65535, so it is text; `tel:555` is the linked case.
+    expect(parseRequestUrl("tel:5551234")).toBeNull();
+    expect(parseRequestUrl("tel:555")?.url.href).toBe("https://tel:555/");
+  });
+
   it("canBeHost is a shape check on the authority only", () => {
     expect(canBeHost("example.com/a b c")).toBe(true);
     expect(canBeHost("example.com?q=a b")).toBe(true);
@@ -559,11 +576,11 @@ describe("masked values are not in the DOM until revealed (QA6)", () => {
     const button = toggles()[0]!;
     expect(button.tagName).toBe("BUTTON");
     expect(button.getAttribute("aria-label")).toBe(t().request.review.revealLabel);
-    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.hasAttribute("aria-pressed")).toBe(false); // one pattern: the name flips (S3)
     toggleMaskedValue(button, exchange);
     expect(button.getAttribute("aria-label")).toBe(t().request.review.hideLabel);
     expect(button.textContent).toBe(t().request.review.hide);
-    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(button.hasAttribute("aria-pressed")).toBe(false);
     expect(t().request.review.hideLabel).not.toBe(t().request.review.revealLabel);
   });
 
@@ -582,7 +599,7 @@ describe("masked values are not in the DOM until revealed (QA6)", () => {
     mount();
     toggleMaskedValue(toggles()[0]!, { request: { headers: headerSet([]) } });
     expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(0);
-    expect(toggles()[0]!.getAttribute("aria-pressed")).toBe("false");
+    expect(toggles()[0]!.getAttribute("aria-label")).toBe(t().request.review.revealLabel);
   });
 
   it("a rebuilt band is masked again, and a duplicate header is located by position", () => {

@@ -461,21 +461,56 @@ function redactQueryShapedText(text: string, tally: RedactionTally): string {
 }
 
 /**
+ * Mask the credential in a URL's `user[:password]@` prefix (QA6, review B2).
+ *
+ * `https://admin:hunter2pass@api.example.com/x` carries a password in the part
+ * of the URL that comes *before* the query, which `redactUrl` used to keep
+ * verbatim — and which the review band does not display, so nobody could even
+ * see it was there. The rule:
+ *   - with a password (`user:pw@`), the **password** is masked and the user
+ *     name kept: a name identifies the account, which is what a reader of the
+ *     request needs, and it is not the secret;
+ *   - with no colon (`token@host`, the form `https://<token>@github.com` takes)
+ *     the whole userinfo is the credential, so all of it is masked.
+ * The authority ends at the first `/`, so an `@` in a path never matches. A
+ * `mailto:` address is not userinfo. A scheme-less `user:pw@host/x` is treated
+ * the same as a schemed one, because the request form accepts it. One value,
+ * one count.
+ */
+function redactUserinfo(prefix: string, tally: RedactionTally): string {
+  const schemeEnd = prefix.indexOf("://");
+  const start = schemeEnd >= 0 ? schemeEnd + 3 : 0;
+  if (schemeEnd < 0 && /^mailto:/i.test(prefix)) return prefix;
+  const slash = prefix.indexOf("/", start);
+  const authorityEnd = slash < 0 ? prefix.length : slash;
+  const authority = prefix.slice(start, authorityEnd);
+  const at = authority.lastIndexOf("@");
+  if (at < 0) return prefix;
+  const userinfo = authority.slice(0, at);
+  const colon = userinfo.indexOf(":");
+  const masked = colon < 0 ? REDACTED_VALUE : `${userinfo.slice(0, colon)}:${REDACTED_VALUE}`;
+  if (masked === userinfo) return prefix; // already redacted: idempotent, and not counted twice
+  tally.count++;
+  return `${prefix.slice(0, start)}${masked}${authority.slice(at)}${prefix.slice(authorityEnd)}`;
+}
+
+/**
  * Redact credential-shaped parameters from a URL's query string **and its
  * fragment**, rewriting the URL string itself — see this module's header
  * comment for why leaving the original text next to a scrubbed copy would be
  * worse than not scrubbing at all. The fragment matters as much as the query:
  * `#access_token=…` is where the OAuth 2.0 implicit flow returns a bearer
  * token, at least as common a place for a real credential as `?api_key=`,
- * and it is exactly as query-shaped. Out of scope: a credential embedded in
- * the URL's path.
+ * and it is exactly as query-shaped. Also masked: the `user:password@` prefix
+ * (`redactUserinfo`). Out of scope: a credential embedded in the URL's path.
  */
 function redactUrl(url: string | undefined, tally: RedactionTally): string | undefined {
   if (!url) return url;
-  const { prefix, query, fragment } = splitUrl(url);
+  const { prefix: originalPrefix, query, fragment } = splitUrl(url);
+  const prefix = redactUserinfo(originalPrefix, tally);
   const redactedQuery = redactQueryShapedText(query, tally);
   const redactedFragment = redactQueryShapedText(fragment, tally);
-  if (redactedQuery === query && redactedFragment === fragment) return url;
+  if (prefix === originalPrefix && redactedQuery === query && redactedFragment === fragment) return url;
 
   // `||`, not a plain truthiness check on the redacted text alone: an
   // originally-present-but-now-empty query/fragment (only reachable via a

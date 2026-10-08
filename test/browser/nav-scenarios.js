@@ -665,10 +665,11 @@
       const toggle = band.querySelector('.xmask__toggle');
       if (!toggle) return { name: '31 masked value not in the DOM', ok: false, driftPx: 0, detail: 'no toggle' };
 
+      const before0 = toggle.getAttribute('aria-label');
       const before = everything().includes(SECRET);
       toggle.click();
       await N.settle(100);
-      const revealed = everything().includes(SECRET) && toggle.getAttribute('aria-pressed') === 'true';
+      const revealed = everything().includes(SECRET) && toggle.getAttribute('aria-label') !== before0;
       toggle.click();
       await N.settle(100);
       const after = everything().includes(SECRET);

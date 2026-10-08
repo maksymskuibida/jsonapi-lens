@@ -70,12 +70,12 @@ import { isBundlePayload, ShareError } from "./crypto.js";
 import {
   clearDocument,
   countLibrary,
-  followExchangeIntoLibrary,
   loadDocument,
   saveDocument,
   saveToLibrary,
+  setExchangeInLibrary,
 } from "./store.js";
-import type { LibraryEntry } from "./store.js";
+import type { LibraryEntry, StoredDocument } from "./store.js";
 import { closeAllModals, closeModal, modalIsOpen, toast } from "./ui.js";
 import type { DocumentIndex, JsonIndex, JsonValue, Lens, Resource } from "./types.js";
 
@@ -354,13 +354,24 @@ function refreshExchangeBand(): void {
 /** Persist `current.exchange` the same way the document itself is persisted — a convenience over duplicating the `saveDocument` call at every edit site. */
 function persistCurrentExchange(): void {
   if (!current) return;
-  void saveDocument({
-    text: current.text,
-    savedAt: Date.now(),
-    label: current.label,
-    ...(Object.keys(current.exchange).length > 0 ? { exchange: current.exchange } : {}),
-  });
+  void saveDocument(storedRecordOf(current));
   void syncLibraryExchange(current);
+}
+
+/**
+ * The record that remembers the open document across a reload. `libraryId`
+ * rides along (an optional field on the existing record — no schema change) so
+ * that after a reload the document still knows which saved entry it *is*; that
+ * link is the only thing that lets an edit to its request reach the library.
+ */
+function storedRecordOf(loaded: Loaded): StoredDocument {
+  return {
+    text: loaded.text,
+    savedAt: Date.now(),
+    label: loaded.label,
+    ...(Object.keys(loaded.exchange).length > 0 ? { exchange: loaded.exchange } : {}),
+    ...(loaded.libraryId !== undefined ? { libraryId: loaded.libraryId } : {}),
+  };
 }
 
 /**
@@ -368,8 +379,11 @@ function persistCurrentExchange(): void {
  *
  * A save used to be a snapshot, so a request attached afterwards never reached
  * the entry and Library → Share of that row carried none of it (QA6, gap 9).
- * Which entry is `followExchangeIntoLibrary`'s rule (`store.ts`): this
- * document's `libraryId`, else the single entry with identical text.
+ * **Only a document that was saved or opened *as* a library entry follows**
+ * (`libraryId`). There is deliberately no fallback to "the entry with the same
+ * text": an opened share link, a fresh paste or a sample can have text identical
+ * to a saved entry without being it, and writing its (redacted, or different)
+ * request over that entry silently destroys the saved one (review B1).
  * Fire-and-forget like the current document's own save; storage failing changes
  * nothing on screen.
  *
@@ -377,11 +391,8 @@ function persistCurrentExchange(): void {
  * local storage; redaction happens on the way out (Copy, Download, Share).
  */
 async function syncLibraryExchange(loaded: Loaded): Promise<void> {
-  const id = await followExchangeIntoLibrary(
-    { text: loaded.text, ...(loaded.libraryId !== undefined ? { id: loaded.libraryId } : {}) },
-    Object.keys(loaded.exchange).length > 0 ? loaded.exchange : null,
-  );
-  if (id !== null) loaded.libraryId = id;
+  if (loaded.libraryId === undefined) return;
+  await setExchangeInLibrary(loaded.libraryId, Object.keys(loaded.exchange).length > 0 ? loaded.exchange : null);
 }
 
 /** Open the form, pre-filled from whatever is already attached, and fold whatever comes back into `current.exchange`. */
@@ -1699,6 +1710,8 @@ function saveCurrent(): void {
     }
     loaded.label = label;
     loaded.libraryId = id;
+    // The record that survives a reload must learn which entry this is now.
+    if (current === loaded) void saveDocument(storedRecordOf(loaded));
     showDocumentName(label);
     void refreshLibraryCount();
     toast(t().save.done(label));
@@ -1901,12 +1914,7 @@ async function load(text: string, label: string, options: LoadOptions): Promise<
   let saved: boolean | null = null;
   if (options.persist) {
     window.scrollTo(0, 0);
-    saved = await saveDocument({
-      text,
-      savedAt: Date.now(),
-      label,
-      ...(Object.keys(current.exchange).length > 0 ? { exchange: current.exchange } : {}),
-    });
+    saved = await saveDocument({ ...storedRecordOf(current), text, label });
     if (!saved) toast(t().toast.notStored);
   }
 
@@ -2376,6 +2384,7 @@ async function applyRoute(): Promise<void> {
       const { ok } = await load(stored.text, stored.label ?? t().labels.storedDocument, {
         persist: false,
         exchange: stored.exchange,
+        ...(stored.libraryId !== undefined ? { libraryId: stored.libraryId } : {}),
       });
       // The browser tried to scroll to the fragment before any of this existed,
       // so that attempt hit nothing. Now the sections are in the DOM.
@@ -2464,6 +2473,7 @@ async function boot(): Promise<void> {
   // here even if the shape is not `jsonapi`.
   try {
     current = readLoaded(stored.text, stored.label ?? t().labels.storedDocument, stored.exchange ?? {});
+    if (stored.libraryId !== undefined) current.libraryId = stored.libraryId;
     exchangeMode = "both";
     offerResume();
   } catch {

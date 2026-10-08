@@ -17,7 +17,6 @@ import {
   listLibrary,
   loadDocument,
   renameInLibrary,
-  followExchangeIntoLibrary,
   setExchangeInLibrary,
   saveDocument,
   saveToLibrary,
@@ -306,42 +305,31 @@ describe("setExchangeInLibrary (QA6)", () => {
   });
 });
 
-describe("followExchangeIntoLibrary (QA6)", () => {
-  const exchange = { request: { method: "GET", url: "https://api.example.com/x" } };
-
-  it("finds the entry by its id, and reports it", async () => {
+describe("setExchangeInLibrary, one transaction (QA6 review S1)", () => {
+  it("a rename racing an exchange write loses neither", async () => {
     const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2 });
-    expect(await followExchangeIntoLibrary({ id: id!, text: "{}" }, exchange)).toBe(id);
-    expect((await getFromLibrary(id!))?.exchange).toEqual(exchange);
+    const exchange = { request: { method: "GET" } };
+    await Promise.all([renameInLibrary(id!, "renamed"), setExchangeInLibrary(id!, exchange)]);
+    const after = await getFromLibrary(id!);
+    expect(after?.label).toBe("renamed");
+    expect(after?.exchange).toEqual(exchange);
   });
 
-  it("falls back to the one entry with identical text, which is how a request attached after saving reaches it", async () => {
-    await saveToLibrary({ label: "other", text: '{"x":1}', savedAt: 1, bytes: 2 });
-    const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 2, bytes: 2 });
-    expect(await followExchangeIntoLibrary({ text: "{}" }, exchange)).toBe(id);
-    expect((await getFromLibrary(id!))?.exchange).toEqual(exchange);
-    expect((await listLibrary()).filter((e) => e.exchange)).toHaveLength(1);
-  });
-
-  it("removes the exchange when the request is removed", async () => {
-    const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2, exchange });
-    expect(await followExchangeIntoLibrary({ text: "{}" }, null)).toBe(id);
-    expect((await getFromLibrary(id!))?.exchange).toBeUndefined();
-  });
-
-  it("writes nothing when two entries share the text and the id is not known", async () => {
-    const a = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2 });
-    const b = await saveToLibrary({ label: "b", text: "{}", savedAt: 2, bytes: 2 });
-    expect(await followExchangeIntoLibrary({ text: "{}" }, exchange)).toBeNull();
-    expect((await getFromLibrary(a!))?.exchange).toBeUndefined();
-    expect((await getFromLibrary(b!))?.exchange).toBeUndefined();
-  });
-
-  it("writes nothing for a document that was never saved, and does not resurrect a deleted entry", async () => {
-    expect(await followExchangeIntoLibrary({ text: "{}" }, exchange)).toBeNull();
+  it("two quick edits land in the order they were issued", async () => {
     const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2 });
-    await deleteFromLibrary(id!);
-    expect(await followExchangeIntoLibrary({ id: id!, text: "{}" }, exchange)).toBeNull();
-    expect(await listLibrary()).toEqual([]);
+    await Promise.all([
+      setExchangeInLibrary(id!, { request: { method: "GET" } }),
+      setExchangeInLibrary(id!, { request: { method: "POST" } }),
+    ]);
+    expect((await getFromLibrary(id!))?.exchange).toEqual({ request: { method: "POST" } });
+  });
+});
+
+describe("the current-document record carries libraryId (QA6 review B1)", () => {
+  it("round-trips an optional libraryId, and a record without one is still valid", async () => {
+    expect(await saveDocument({ text: "{}", savedAt: 1, label: "a", libraryId: 7 })).toBe(true);
+    expect((await loadDocument())?.libraryId).toBe(7);
+    expect(await saveDocument({ text: "{}", savedAt: 2 })).toBe(true);
+    expect((await loadDocument())?.libraryId).toBeUndefined();
   });
 });

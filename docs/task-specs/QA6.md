@@ -56,17 +56,23 @@ The button's accessible name is `request.review.revealLabel` when hidden and the
 `request.review.hideLabel` when revealed (visible text `reveal` / new `hide`); the button is a real
 `<button>`, so Enter and Space work.
 
-**3.** `store.ts`: new `setExchangeInLibrary(id, exchange | null): Promise<boolean>` (read, change
-one field, `put`) and `followExchangeIntoLibrary({id?, text}, exchange | null): Promise<number | null>`,
-which picks the entry (below) and reports which. **`DB_VERSION` and the object stores are unchanged.** `main.ts`: `Loaded` gains
+**3.** `store.ts`: new `setExchangeInLibrary(id, exchange | null): Promise<boolean>` (read and `put` in
+**one** `readwrite` transaction). **`DB_VERSION` and the object stores are unchanged.** `main.ts`: `Loaded` gains
 `libraryId?: number`, set when the document is saved (`saveCurrent`) or opened from the library;
-`persistCurrentExchange` also calls `followExchangeIntoLibrary`. Resolution order: `libraryId`, else the
-**single** library entry whose text is byte-identical (the link rename already uses); with zero or
-several text matches and no id, nothing is updated (updating several would overwrite a different
-request attached to a same-text entry the user did not open).
+`persistCurrentExchange` also calls `setExchangeInLibrary`. `StoredDocument` (the current-document
+record) gains an optional `libraryId`, so the link survives a reload; a record without it is valid.
+A document follows into the library **only when it was saved or opened as that entry**
+(`libraryId`). There is **no** "same text" fallback: an opened share link, a fresh paste, a sample or a
+file can have text identical to a saved entry without being it, and writing its (possibly redacted)
+request over the saved one destroys the saved request (review B1).
 
 **4.** `render-request.ts#parseRequestUrl`: before assuming `https://`, the text must pass
 `canBeHost`.
+
+**5. (review B2)** `secrets.ts#redactUrl` also masks the credential in a URL's `user[:password]@`
+prefix: with a password the **password** is masked and the user name kept (a name identifies the
+account and is not the secret); with no colon the whole userinfo is masked (it is the token). One
+count. `mailto:` addresses, an `@` in a path or query, and `host:port` are not userinfo.
 
 ## Behaviour
 
@@ -85,8 +91,9 @@ unparseable; IPv6 with or without a port (#23) is accepted.
 the end or `/ ? #`) used to be read by the URL parser as the *scheme* `host:` — origin `null`, shown
 as `null`, nothing to link — and a test pinned that as "not something this fix changes". It is now
 a host and a port, and gets the assumed `https://`. A colon followed by anything else (`host:notaport`,
-`a.b:80:80`) stays a given scheme, as before: not linked, no scheme assumed. Cost: `tel:5551234`
-would now be read as host `tel` port 5551234; this tool reviews HTTP requests. A single-label host (`localhost`,
+`a.b:80:80`) stays a given scheme, as before: not linked, no scheme assumed. Cost: `tel:555` would now
+be read as host `tel`, port 555 (`https://tel:555/`); `tel:5551234` has a port above 65535 and stays text.
+This tool reviews HTTP requests. A single-label host (`localhost`,
 `intranet`) is accepted — hosts without a dot are real.
 
 **1, redaction coverage.** Everything `redactExchange` covers is masked on every share path:
@@ -94,7 +101,7 @@ request/response header and cookie values, the URL and `query` parameters, a for
 (including its `raw` text), and `origin`. Non-form bodies are not rewritten; that is disclosed in the
 dialog, not hidden (see Out of scope).
 
-**3, timing.** The library write happens in the same step as the existing
+**3, link.** The library write happens in the same step as the existing
 `persistCurrentExchange` (fire-and-forget; a failure changes nothing on screen, as with the current
 document's own save). It stores the **unredacted** exchange, exactly as `saveCurrent` always has —
 the library is local storage, and redaction applies on the way out (Copy, Download, Share).
@@ -116,6 +123,9 @@ the library is local storage, and redaction applies on the way out (Copy, Downlo
 | Attach request on a saved doc, then reload and open it from Library | Entry carries the request |
 | Remove the request on a saved doc | Entry's `exchange` field is removed |
 | Two library entries with the same text, doc opened from one | Only that entry changes |
+| Document with identical text to a saved entry, but not that entry (an opened share link, a fresh paste) | The saved entry is never written: not on edit, not on remove |
+| Reload, then edit the request of a saved document | The entry still follows (`libraryId` was stored) |
+| `https://admin:PASS@host/`, `https://TOKEN@host/`, `admin:PASS@host/x` | Password (or token) masked, user name kept, counted once; absent from the sealed payload |
 | Doc never saved | No library write |
 | Library entry deleted while its doc is open, then request edited | No error, no resurrected entry |
 | `api.example.com/v2/x`, `localhost:8080`, `intranet`, `[::1]:8080/x`, `münchen.de/x`, `a.b./x` | Link under assumed `https://`, with the assumed-scheme note |
@@ -124,7 +134,8 @@ the library is local storage, and redaction applies on the way out (Copy, Downlo
 
 ## Out of scope
 
-- Redacting the inside of a non-form body (JSON, text). The detector is deliberately coarse (24
+- Credentials the detector cannot recognise: a custom-named header with a short value
+  (`X-Session: s3cr3t`), a token in a URL **path** segment, and the inside of a non-form body (JSON, text). The detector is deliberately coarse (24
   base64-alphabet characters anywhere flags a body), so dropping flagged bodies from shares would
   drop most response bodies. Raised for the owner in the PR body.
 - The decoded JWT claims panel under a masked `Authorization` header: it shows `sub`/`iss`/`scope`/
