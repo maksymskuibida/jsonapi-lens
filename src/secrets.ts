@@ -241,8 +241,14 @@ function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally):
   const entries = headers.entries.map((entry) => {
     if (!shouldMaskHeader(entry.name, entry.value)) {
       if (!URL_VALUED_HEADERS.has(entry.name.toLowerCase())) return entry;
-      const value = redactUrl(entry.value, tally);
+      // A fresh tally per header value: `countedNames` exists so that a request's
+      // `url` and `query` (two views of one table) count a parameter once. Two
+      // different headers are two values, and sharing it made `Location` and
+      // `Content-Location` carrying the same parameter name count as one (N5).
+      const own = freshTally();
+      const value = redactUrl(entry.value, own);
       if (value === undefined || value === entry.value) return entry;
+      tally.count += own.count;
       changed = true;
       return { name: entry.name, value };
     }

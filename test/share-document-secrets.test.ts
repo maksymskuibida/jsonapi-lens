@@ -212,3 +212,41 @@ describe("a header whose value is a URL is scanned like the request URL (QA6 rev
     expect(count).toBe(2);
   });
 });
+
+describe("the number the dialog states is exact (QA6 review N5)", () => {
+  it("equals the number of masked values in the sealed payload, with the same parameter name in every header and the URL", async () => {
+    // No `query` ParamSet: it is a second view of the URL's table, so a value
+    // present in both is counted once but appears twice. Here every masked value
+    // appears exactly once, which makes "count == occurrences" a real equality.
+    const entry: BundleEntry = {
+      label: "a.json",
+      text: "{}",
+      exchange: {
+        request: {
+          url: "https://u:pw@api.example.com/x?access_token=qa-fake-tok-0000000001-not-real&page=2",
+          headers: headerSet([
+            { name: "Authorization", value: "Bearer qa-fake-not-real" },
+            { name: "Referer", value: "https://v:pw2@app.example.com/p?access_token=qa-fake-tok-0000000002-not-real" },
+            { name: "Accept", value: "application/vnd.api+json" },
+          ]),
+          cookies: { entries: [{ name: "s", value: "qa-fake-cookie-not-real" }] },
+        },
+        response: {
+          headers: headerSet([
+            { name: "Location", value: "https://app.example.com/cb?access_token=qa-fake-tok-0000000003-not-real" },
+            { name: "Content-Location", value: "/v2/x?access_token=qa-fake-tok-0000000004-not-real" },
+          ]),
+        },
+      },
+    };
+    const { redacting } = inspectExchangeForShare([entry]);
+    const secret = generateSecret();
+    const opened = await openSealed(await mintShareEnvelope([entry], secret), secret);
+    const json = JSON.stringify(opened);
+    const occurrences = (json.match(/\[REDACTED\]|%5BREDACTED%5D/g) ?? []).length;
+    expect(json).not.toContain("qa-fake-");
+    expect(json).toContain("page=2");
+    expect(redacting).toBe(occurrences);
+    expect(redacting).toBe(8); // url userinfo+token, Authorization, Referer userinfo+token, cookie, Location, Content-Location
+  });
+});
