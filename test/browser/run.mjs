@@ -1266,7 +1266,7 @@ try {
         r.onsuccess = () => {
           const db = r.result;
           const g = db.transaction("library").objectStore("library").getAll();
-          g.onsuccess = () => { db.close(); res(g.result.map((e) => JSON.stringify(e.exchange || null))); };
+          g.onsuccess = () => { db.close(); res(g.result.filter((e) => e.label === "QA6 library doc").map((e) => JSON.stringify(e.exchange || null))); };
         };
       });
     `;
@@ -1318,7 +1318,7 @@ try {
       await wait(800);
       d.getElementById("open-library").click();
       await wait(800);
-      d.querySelector(".modal .library__open")?.click();
+      [...d.querySelectorAll(".modal .library__open")].find((b) => b.title.includes("QA6 library doc"))?.click();
       await wait(1500);
       if (!d.getElementById("edit-request")) return JSON.stringify({ reason: "entry did not open" });
       await attach("FAKE-QA6-D");

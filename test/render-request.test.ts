@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   effectiveMode,
   hasExchangeContent,
@@ -627,4 +627,33 @@ describe("masked values are not in the DOM until revealed (QA6)", () => {
       expect(resolveSecret(exchange, bad)).toBeNull();
     }
   });
+});
+
+describe("an invalid-JSON request body reads as text, in every language (QA6)", () => {
+  // `DocumentError.hint` is `string | RichPart[]`; interpolating it printed
+  // `[object Object]`. The locale is memoised on first use, so each language gets
+  // a fresh module graph with its choice already stored.
+  for (const lang of ["en", "de", "uk"] as const) {
+    it(`${lang}: headline and hint are readable, nothing is [object Object], and the raw text stays`, async () => {
+      vi.resetModules();
+      localStorage.setItem("jsonapi-lens:locale", lang);
+      try {
+        const { renderBodyPart: render } = await import("../src/render-request.js");
+        const i18n = await import("../src/i18n/index.js");
+        expect(i18n.locale()).toBe(lang);
+        const hostile = '{"a": <img src=x onerror=alert(1)>';
+        const el = render({ raw: hostile, contentType: "application/json" });
+        const note = el?.querySelector(".xrow__note--conflict");
+        expect(note).not.toBeNull();
+        expect(note!.textContent).not.toContain("[object Object]");
+        expect(note!.textContent!.trim().length).toBeGreaterThan(15);
+        // the note is catalogue text plus text nodes; the payload is only in the <pre>
+        expect(el!.querySelector("img")).toBeNull();
+        expect(el!.querySelector("pre")!.textContent).toBe(hostile);
+      } finally {
+        localStorage.setItem("jsonapi-lens:locale", "en");
+        vi.resetModules();
+      }
+    });
+  }
 });

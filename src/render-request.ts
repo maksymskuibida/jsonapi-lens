@@ -64,7 +64,7 @@
  * reads one and renders it.
  */
 
-import { el } from "./dom.js";
+import { el, setRichText } from "./dom.js";
 import { t } from "./i18n/index.js";
 import {
   requestFieldDomId,
@@ -879,11 +879,18 @@ function renderTextBody(raw: string, contentType: string | undefined): HTMLEleme
       parseJson(raw);
     } catch (error) {
       if (error instanceof DocumentError) {
+        // `hint` is `string | RichPart[]`; interpolating it printed
+        // `[object Object]`. It goes through `setRichText` like the document-level
+        // error does — text nodes and `code` spans, never markup.
+        const hint = el("span", { class: "xrow__note-hint" });
+        setRichText(hint, error.hint);
         wrap.append(
           el(
             "p",
             { class: "xrow__note xrow__note--conflict" },
-            `${error.headline} ${error.hint}`,
+            error.headline,
+            " ",
+            hint,
             error.line !== undefined ? ` (${t().paste.errorWhere(error.line)})` : "",
           ),
         );
