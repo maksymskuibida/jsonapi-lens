@@ -882,14 +882,20 @@ function renderTextBody(raw: string, contentType: string | undefined): HTMLEleme
         // `hint` is `string | RichPart[]`; interpolating it printed
         // `[object Object]`. It goes through `setRichText` like the document-level
         // error does — text nodes and `code` spans, never markup.
+        //
+        // Except for "not valid JSON": its hint carries the JS engine's own
+        // English `SyntaxError` text, which a German or Ukrainian reader would
+        // see in the middle of a translated sentence. That one is shown as the
+        // translated headline and the position only (QA6 review S9); the parse
+        // error copy is QA5's, which will align both paths.
         const hint = el("span", { class: "xrow__note-hint" });
-        setRichText(hint, error.hint);
+        if (error.headline !== t().parseErrors.invalidJson.headline) setRichText(hint, error.hint);
         wrap.append(
           el(
             "p",
             { class: "xrow__note xrow__note--conflict" },
             error.headline,
-            " ",
+            hint.hasChildNodes() ? " " : "",
             hint,
             error.line !== undefined ? ` (${t().paste.errorWhere(error.line)})` : "",
           ),

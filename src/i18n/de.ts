@@ -735,7 +735,7 @@ export const de: Messages = {
           other: `${f.n(n)} Werte gefunden und vor dem Download geschwärzt.`,
         }),
       redactionCaveat:
-        "Die Schwärzung erfasst Header- und Cookie-Werte, die wie Zugangsdaten aussehen. Body und URL werden nicht durchsucht — prüfen Sie diese vor dem Teilen selbst.",
+        "Kopieren, Herunterladen und Teilen schwärzen, was als Zugangsdaten erkannt wird: Header- und Cookie-Werte, Benutzername und Passwort in einer URL sowie zugangsdatenähnliche Parameter in der URL und in Formular-Bodys. Ein JSON- oder Text-Body wird nicht verändert, und ein Geheimnis mit unbekanntem Namen oder Aufbau kann durchrutschen — prüfen Sie die Anfrage vor dem Teilen selbst.",
       saved: "Request gespeichert.",
       removed: "Request entfernt.",
       modeResponse: "Response",

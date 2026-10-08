@@ -647,9 +647,55 @@ describe("an invalid-JSON request body reads as text, in every language (QA6)", 
         expect(note).not.toBeNull();
         expect(note!.textContent).not.toContain("[object Object]");
         expect(note!.textContent!.trim().length).toBeGreaterThan(15);
+        // The JS engine's own English message must not reach any language (S9).
+        expect(note!.textContent).not.toMatch(/Expected|Unexpected|position \d|property name|JSON\.parse/);
         // the note is catalogue text plus text nodes; the payload is only in the <pre>
         expect(el!.querySelector("img")).toBeNull();
         expect(el!.querySelector("pre")!.textContent).toBe(hostile);
+      } finally {
+        localStorage.setItem("jsonapi-lens:locale", "en");
+        vi.resetModules();
+      }
+    });
+  }
+});
+
+describe("the band's redaction caveat says what redaction does, and no more (QA6)", () => {
+  it("redactExchange does everything the caveat claims, and does not rewrite a JSON body", async () => {
+    const { redactExchange } = await import("../src/secrets.js");
+    const { decodeParams } = await import("../src/params.js");
+    const form = "a=1&client_secret=qa-fake-form-not-real";
+    const json = '{"password":"qa-fake-json-not-real"}';
+    const { exchange } = redactExchange({
+      request: {
+        url: "https://user:qa-fake-pw-not-real@api.example.com/x?api_key=qa-fake-key-0123456789-not-real",
+        headers: headerSet([{ name: "Authorization", value: "Bearer qa-fake-not-real" }]),
+        cookies: { entries: [{ name: "s", value: "qa-fake-cookie-not-real" }] },
+        body: { raw: form, contentType: "application/x-www-form-urlencoded", form: decodeParams(form) },
+      },
+      response: { body: { raw: json, contentType: "application/json" } },
+    });
+    const out = JSON.stringify(exchange);
+    for (const fake of ["qa-fake-not-real", "qa-fake-cookie", "qa-fake-pw", "qa-fake-key", "qa-fake-form"]) {
+      expect(out, fake).not.toContain(fake);
+    }
+    expect(exchange.response?.body?.raw).toBe(json); // "not rewritten", as the caveat says
+  });
+
+  const words = {
+    en: ["user name", "form", "JSON", "review"],
+    de: ["Benutzername", "Formular", "JSON", "prüfen"],
+    uk: ["імʼя користувача", "форм", "JSON", "перегляньте"],
+  } as const;
+  for (const lang of ["en", "de", "uk"] as const) {
+    it(`${lang}: the caveat names userinfo, form bodies and the unrewritten JSON body, and no longer says the URL is not scanned`, async () => {
+      vi.resetModules();
+      localStorage.setItem("jsonapi-lens:locale", lang);
+      try {
+        const { t: tt } = await import("../src/i18n/index.js");
+        const text = tt().request.band.redactionCaveat;
+        for (const word of words[lang]) expect(text, word).toContain(word);
+        expect(text).not.toMatch(/does not scan the body or the URL|Body und URL werden nicht|не перевіряються/);
       } finally {
         localStorage.setItem("jsonapi-lens:locale", "en");
         vi.resetModules();

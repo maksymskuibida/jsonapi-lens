@@ -646,12 +646,25 @@ cookie value was still in the document as text, hidden only by `display:none`.
 ### What this does not buy
 
 **A share is redacted as far as the detector can recognise, not completely.** `redactExchange`
-rewrites header and cookie values, the URL's `user:password@` prefix, its query and fragment,
-`query`, a form body and `origin`. It does **not** catch: a custom-named header with a short value
-(`X-Session: s3cr3t` is not a known credential name and not credential-shaped), a token inside a URL
-**path** segment, or a credential inside a JSON/text body. A JSON or text body is **detected, not
-rewritten**, and goes into a share as it is — the share dialog says so before the link exists, but
-it does not remove it. Nothing in this entry or the UI may claim more than that. Dropping every flagged body was rejected: the
+rewrites header and cookie values, the URL's userinfo, query and fragment, the value of `Location`,
+`Referer` and `Content-Location` (through the same URL redaction), `query`, a form body and `origin`.
+
+**The userinfo rule.** The *whole* `user[:password]@` prefix is masked as one counted value
+(`https://[REDACTED]@host/…`), never just the password and never conditionally on the user name
+"looking like a credential". Stripe (`https://sk_live_…:@<api host>`) and GitHub
+(`https://<token>:x-oauth-basic@<git host>`) put the secret in the **user name**, and deciding by
+shape is the detector gap this rule exists to avoid. Cost: an ordinary user name is hidden too.
+(`sip:alice:secret@host` over-redacts to `sip:[REDACTED]@host`; harmless, not what this tool reviews.)
+
+It does **not** catch:
+- a custom-named header with a short value (`X-Session: s3cr3t` is neither a known credential name
+  nor credential-shaped);
+- any other header whose value is a URL with a credential in it (only `Location`, `Referer` and
+  `Content-Location` are scanned);
+- a token inside a URL **path** segment;
+- a credential inside a JSON/text body. That body is **detected, not rewritten**, and goes into a
+  share as it is — the share dialog says so before the link exists, but it does not remove it.
+Nothing in this entry or the UI may claim more than that. Dropping every flagged body was rejected: the
 detector is coarse (24 base64-alphabet characters anywhere), so it would drop most response bodies.
 The decoded-JWT claims panel under a masked `Authorization` header is unchanged and shows claims,
 never the token.

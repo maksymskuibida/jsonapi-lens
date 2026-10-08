@@ -4,6 +4,7 @@ import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
 import { mintShareEnvelope } from "./bundle.js";
 import {
+  MAX_BUNDLE_BYTES,
   generateSecret,
   open as openSealed,
   ShareError,
@@ -54,9 +55,6 @@ interface CreatedShare {
   expiresAt: number | null;
 }
 
-/** The Worker's upload limit (`MAX_BYTES` in `worker.ts`), for the one message that names it. */
-export const SHARE_LIMIT_BYTES = 12 * 1024 * 1024;
-
 /**
  * A failed upload, as catalogue copy chosen **by HTTP status**. The Worker's JSON
  * `error` is English and written for developers — it is an API — so it is never
@@ -73,7 +71,7 @@ export function uploadFailure(status: number): ShareError {
         : status === 405
           ? m.notAllowed
           : status === 413
-            ? m.tooLarge(formatBytes(SHARE_LIMIT_BYTES))
+            ? m.tooLarge(formatBytes(MAX_BUNDLE_BYTES))
             : status >= 500
               ? m.serverError(status)
               : m.serverStatus(status);

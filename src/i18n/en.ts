@@ -892,7 +892,7 @@ export const en = {
        * list changes and this file did not.
        */
       redactionCaveat:
-        "Redaction targets header and cookie values shaped like credentials. It does not scan the body or the URL — review those yourself before sharing.",
+        "Copy, Download and Share mask what they recognise as a credential: header and cookie values, the user name and password in a URL, and credential-like parameters in the URL and in form bodies. A JSON or text body is not rewritten, and a secret with an unfamiliar name or shape can slip through — review the request yourself before sharing.",
       saved: "Request saved.",
       // Removing is not a kind of saving, and this line is the only
       // confirmation a screen reader gets: the band it would have read

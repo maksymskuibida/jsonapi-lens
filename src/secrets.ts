@@ -227,11 +227,25 @@ export interface RedactionResult {
   bodyMayContainSecret: boolean;
 }
 
+/**
+ * Headers whose value is a URL. `Location: …/cb?access_token=…` and a `Referer`
+ * carrying a token are common leaks and neither name is a credential name, so
+ * `shouldMaskHeader` misses them; their value goes through the same URL
+ * redaction as the request URL (userinfo, query, fragment).
+ */
+const URL_VALUED_HEADERS = new Set(["location", "referer", "content-location"]);
+
 function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally): HeaderSet | undefined {
   if (!headers) return headers;
   let changed = false;
   const entries = headers.entries.map((entry) => {
-    if (!shouldMaskHeader(entry.name, entry.value)) return entry;
+    if (!shouldMaskHeader(entry.name, entry.value)) {
+      if (!URL_VALUED_HEADERS.has(entry.name.toLowerCase())) return entry;
+      const value = redactUrl(entry.value, tally);
+      if (value === undefined || value === entry.value) return entry;
+      changed = true;
+      return { name: entry.name, value };
+    }
     changed = true;
     tally.count++;
     return { name: entry.name, value: REDACTED_VALUE };
@@ -461,21 +475,25 @@ function redactQueryShapedText(text: string, tally: RedactionTally): string {
 }
 
 /**
- * Mask the credential in a URL's `user[:password]@` prefix (QA6, review B2).
+ * Mask a URL's `user[:password]@` prefix — **all of it**, as one counted value
+ * (QA6 review B2, then B3).
  *
  * `https://admin:hunter2pass@api.example.com/x` carries a password in the part
  * of the URL that comes *before* the query, which `redactUrl` used to keep
- * verbatim — and which the review band does not display, so nobody could even
- * see it was there. The rule:
- *   - with a password (`user:pw@`), the **password** is masked and the user
- *     name kept: a name identifies the account, which is what a reader of the
- *     request needs, and it is not the secret;
- *   - with no colon (`token@host`, the form `https://<token>@github.com` takes)
- *     the whole userinfo is the credential, so all of it is masked.
+ * verbatim — and the review band does not display it, so nobody could even see
+ * it was there. The first fix masked only the password and kept the user name;
+ * that leaks exactly the forms where the **user name** is the secret —
+ * Stripe's `https://sk_live_…:@api.stripe.com` and GitHub's
+ * `https://<token>:x-oauth-basic@github.com`. Deciding whether a user name
+ * "looks like a credential" is the same detector gap that caused the bug, so
+ * the rule does not depend on it: the whole userinfo becomes
+ * `[REDACTED]`, `https://[REDACTED]@host/…`. The cost is that an ordinary user
+ * name is hidden too; a reader still sees that one was present.
  * The authority ends at the first `/`, so an `@` in a path never matches. A
  * `mailto:` address is not userinfo. A scheme-less `user:pw@host/x` is treated
- * the same as a schemed one, because the request form accepts it. One value,
- * one count.
+ * like a schemed one, because the request form accepts it. A non-hierarchical
+ * scheme with an `@` (`sip:alice:secret@host`) is over-redacted to
+ * `sip:[REDACTED]@host`-shaped text; harmless, and not what this tool reviews.
  */
 function redactUserinfo(prefix: string, tally: RedactionTally): string {
   const schemeEnd = prefix.indexOf("://");
@@ -485,13 +503,10 @@ function redactUserinfo(prefix: string, tally: RedactionTally): string {
   const authorityEnd = slash < 0 ? prefix.length : slash;
   const authority = prefix.slice(start, authorityEnd);
   const at = authority.lastIndexOf("@");
-  if (at < 0) return prefix;
-  const userinfo = authority.slice(0, at);
-  const colon = userinfo.indexOf(":");
-  const masked = colon < 0 ? REDACTED_VALUE : `${userinfo.slice(0, colon)}:${REDACTED_VALUE}`;
-  if (masked === userinfo) return prefix; // already redacted: idempotent, and not counted twice
+  if (at <= 0) return prefix; // no userinfo, or an empty one (`https://@host`): nothing to hide
+  if (authority.slice(0, at) === REDACTED_VALUE) return prefix; // already redacted: idempotent, not counted twice
   tally.count++;
-  return `${prefix.slice(0, start)}${masked}${authority.slice(at)}${prefix.slice(authorityEnd)}`;
+  return `${prefix.slice(0, start)}${REDACTED_VALUE}${authority.slice(at)}${prefix.slice(authorityEnd)}`;
 }
 
 /**

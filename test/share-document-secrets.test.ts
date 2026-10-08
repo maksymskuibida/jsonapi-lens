@@ -126,39 +126,39 @@ describe("inspectExchangeForShare", () => {
   });
 });
 
-describe("a credential in a URL's user:password@ prefix (QA6 review B2)", () => {
+describe("a credential in a URL's user[:password]@ prefix (QA6 review B2, B3)", () => {
   const redactedUrl = (url: string) => {
     const { exchange, count } = redactExchange({ request: { url } });
     return { url: exchange.request?.url, count };
   };
 
-  it("masks the password, keeps the user name, counts one", () => {
-    expect(redactedUrl("https://admin:hunter2pass@api.example.com/v1?page=2")).toEqual({
-      url: "https://admin:[REDACTED]@api.example.com/v1?page=2",
-      count: 1,
+  // The whole userinfo is masked, never just the password: in these two real
+  // forms the *user name* is the secret.
+  // Assembled at runtime: a literal key-shaped string in the source trips GitHub push protection.
+  const STRIPE = ["sk", "live", "FAKE0notREAL0stripe0key00"].join("_");
+  const GITHUB = "0123456789abcdef0123456789abcdef01234567";
+  const forms: Array<[string, string, string]> = [
+    ["a user and a password", "https://admin:hunter2pass@api.example.com/v1?page=2", "https://[REDACTED]@api.example.com/v1?page=2"],
+    ["Stripe's key as the user name, empty password", `https://${STRIPE}:@api.example.com/v1/charges`, "https://[REDACTED]@api.example.com/v1/charges"],
+    ["GitHub's token as the user name", `https://${GITHUB}:x-oauth-basic@api.example.com/user`, "https://[REDACTED]@api.example.com/user"],
+    ["a token alone", "https://faketoken123@api.example.com/o/r", "https://[REDACTED]@api.example.com/o/r"],
+    ["an empty password", "https://admin:@api.example.com/x", "https://[REDACTED]@api.example.com/x"],
+    ["scheme-less with a port and a fragment", "admin:hunter2pass@api.example.com:8080/x#a=1", "[REDACTED]@api.example.com:8080/x#a=1"],
+  ];
+  for (const [name, input, expected] of forms) {
+    it(`masks the whole userinfo, counted once: ${name}`, () => {
+      expect(redactedUrl(input)).toEqual({ url: expected, count: 1 });
     });
-  });
-
-  it("masks a token-only userinfo entirely, since that whole part is the credential", () => {
-    expect(redactedUrl("https://ghp_faketoken123@example.com/o/r")).toEqual({
-      url: "https://[REDACTED]@example.com/o/r",
-      count: 1,
-    });
-  });
-
-  it("handles a scheme-less user:pw@host, a port, and a fragment together", () => {
-    expect(redactedUrl("admin:hunter2pass@api.example.com:8080/x#a=1").url).toBe(
-      "admin:[REDACTED]@api.example.com:8080/x#a=1",
-    );
-  });
+  }
 
   it("counts the userinfo and the query separately", () => {
     expect(redactedUrl("https://u:pw1@h.example.com/x?api_key=k1234567890").count).toBe(2);
   });
 
-  it("leaves alone what is not userinfo: no @, an @ in the path or query, a mailto address, a port", () => {
+  it("leaves alone what is not userinfo: no @, an empty userinfo, an @ in the path or query, a mailto address, a port", () => {
     for (const url of [
       "https://api.example.com/x",
+      "https://@api.example.com/x",
       "https://api.example.com/users/@me",
       "https://api.example.com/x?email=a@b.example.com",
       "mailto:someone@example.com",
@@ -175,18 +175,40 @@ describe("a credential in a URL's user:password@ prefix (QA6 review B2)", () => 
     expect(twice.exchange.request?.url).toBe(once.exchange.request?.url);
   });
 
-  it("never reaches a sealed single share or bundle", async () => {
-    const withPassword = (label: string): BundleEntry => ({
-      label,
-      text: "{}",
-      exchange: { request: { url: "https://admin:qa-fake-urlpw-only-not-real@api.example.com/v1" } },
-    });
-    for (const documents of [[withPassword("a")], [withPassword("a"), withPassword("b")]]) {
+  it("never reaches a sealed single share or bundle, by either share path", async () => {
+    const urls = [`https://${STRIPE}:@api.example.com/v1`, `https://${GITHUB}:x-oauth-basic@api.example.com/u`, "https://admin:qa-fake-urlpw-only-not-real@api.example.com/v1", "https://:qa-fake-emptyuser-pw-not-real@api.example.com/v1"];
+    const entries = (label: string): BundleEntry[] =>
+      urls.map((url, i) => ({ label: `${label}${i}`, text: "{}", exchange: { request: { url } } }));
+    const fakes = [STRIPE, GITHUB, "qa-fake-urlpw-only-not-real", "qa-fake-emptyuser-pw-not-real", "x-oauth-basic"];
+    for (const documents of [[entries("a")[0]!], [entries("a")[1]!], [entries("a")[2]!], [entries("a")[3]!], entries("b")]) {
       const secret = generateSecret();
       const opened = await openSealed(await mintShareEnvelope(documents, secret), secret);
-      expect(JSON.stringify(opened)).not.toContain("qa-fake-urlpw-only-not-real");
-      expect(JSON.stringify(opened)).toContain("admin:[REDACTED]@api.example.com");
+      const json = JSON.stringify(opened);
+      for (const fake of fakes) expect(json, fake).not.toContain(fake);
+      expect(json).toContain("https://[REDACTED]@api.example.com");
     }
-    expect(inspectExchangeForShare([withPassword("a")]).redacting).toBe(1);
+    expect(inspectExchangeForShare(entries("a")).redacting).toBe(4);
+  });
+});
+
+describe("a header whose value is a URL is scanned like the request URL (QA6 review S7)", () => {
+  it("masks a credential in Location, Referer and Content-Location, and leaves a clean one alone", () => {
+    const { exchange, count } = redactExchange({
+      response: {
+        headers: headerSet([
+          { name: "Location", value: "https://app.example.com/cb?access_token=qa-fake-tok-0123456789-not-real&state=1" },
+          { name: "Referer", value: "https://u:pw@app.example.com/x" },
+          { name: "Content-Location", value: "/v2/articles/1" },
+          { name: "Link", value: "</v2?page=2>; rel=next" },
+        ]),
+      },
+    });
+    const values = exchange.response!.headers!.entries.map((e) => e.value);
+    expect(values[0]).not.toContain("qa-fake-tok");
+    expect(values[0]).toContain("state=1");
+    expect(values[1]).toBe("https://[REDACTED]@app.example.com/x");
+    expect(values[2]).toBe("/v2/articles/1");
+    expect(values[3]).toBe("</v2?page=2>; rel=next");
+    expect(count).toBe(2);
   });
 });

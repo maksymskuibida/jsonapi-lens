@@ -69,10 +69,13 @@ request over the saved one destroys the saved request (review B1).
 **4.** `render-request.ts#parseRequestUrl`: before assuming `https://`, the text must pass
 `canBeHost`.
 
-**5. (review B2)** `secrets.ts#redactUrl` also masks the credential in a URL's `user[:password]@`
-prefix: with a password the **password** is masked and the user name kept (a name identifies the
-account and is not the secret); with no colon the whole userinfo is masked (it is the token). One
-count. `mailto:` addresses, an `@` in a path or query, and `host:port` are not userinfo.
+**5. (review B2, B3)** `secrets.ts#redactUrl` masks a URL's `user[:password]@` prefix **entirely**, as
+one counted value: `https://[REDACTED]@host/…`. Not just the password, and not conditional on the user
+name looking like a credential: Stripe and GitHub put the secret in the user name. `mailto:`
+addresses, an empty userinfo (`https://@host`), an `@` in a path or query, and `host:port` are not
+userinfo. Header values of `Location`, `Referer` and `Content-Location` go through the same URL
+redaction (review S7). The request-body invalid-JSON note shows the translated headline and the
+position only, never the engine's English text (review S9).
 
 ## Behaviour
 
@@ -125,7 +128,7 @@ the library is local storage, and redaction applies on the way out (Copy, Downlo
 | Two library entries with the same text, doc opened from one | Only that entry changes |
 | Document with identical text to a saved entry, but not that entry (an opened share link, a fresh paste) | The saved entry is never written: not on edit, not on remove |
 | Reload, then edit the request of a saved document | The entry still follows (`libraryId` was stored) |
-| `https://admin:PASS@host/`, `https://TOKEN@host/`, `admin:PASS@host/x` | Password (or token) masked, user name kept, counted once; absent from the sealed payload |
+| `https://admin:PASS@host/`, `https://sk_live_…:@host/`, `https://<hex>:x-oauth-basic@host/`, `https://TOKEN@host/`, `admin:PASS@host/x`, `https://admin:@host/` | Whole userinfo masked as `[REDACTED]@`, counted once; absent from the sealed payload |
 | Doc never saved | No library write |
 | Library entry deleted while its doc is open, then request edited | No error, no resurrected entry |
 | `api.example.com/v2/x`, `localhost:8080`, `intranet`, `[::1]:8080/x`, `münchen.de/x`, `a.b./x` | Link under assumed `https://`, with the assumed-scheme note |
