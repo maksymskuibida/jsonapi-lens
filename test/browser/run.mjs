@@ -1185,7 +1185,9 @@ try {
         plainVisible: getComputedStyle(valueOf(plain)).display !== "none",
         plainWidth: Math.round(plainBox.width),
         plainText: (plain.querySelector(".xrow__value") || {}).innerText.trim(),
-        secretHidden: getComputedStyle(valueOf(secret)).display === "none",
+        // QA6: masked means *absent*, not display:none — the value must not be
+        // in the row's text at all until it is revealed.
+        secretHidden: !valueOf(secret) && !secret.textContent.includes("SECRETSESSIONVALUE123"),
         secretHasToggle: !!secret.querySelector(".xmask__toggle"),
         dots: (secret.querySelector(".xmask__dots") || { textContent: "" }).textContent.length,
         secretLength: "Bearer SECRETSESSIONVALUE123".length,

@@ -17,6 +17,8 @@ import {
   listLibrary,
   loadDocument,
   renameInLibrary,
+  followExchangeIntoLibrary,
+  setExchangeInLibrary,
   saveDocument,
   saveToLibrary,
 } from "../src/store.js";
@@ -261,5 +263,85 @@ describe("the v2 → v3 upgrade, on a real existing database", () => {
     expect(await deleteFromLibrary(seededId)).toBe(true);
     expect(await getFromLibrary(seededId)).toBeNull();
     expect(await getFromLibrary(v3Id!)).not.toBeNull();
+  });
+});
+
+describe("setExchangeInLibrary (QA6)", () => {
+  const exchange = { request: { method: "GET", url: "https://api.example.com/x" } };
+
+  it("adds, replaces and removes an entry's exchange, leaving every other field alone", async () => {
+    const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 5, bytes: 2, resources: 1, shape: "data{1}" });
+    expect(await setExchangeInLibrary(id!, exchange)).toBe(true);
+    expect(await getFromLibrary(id!)).toEqual({
+      id, label: "a", text: "{}", savedAt: 5, bytes: 2, resources: 1, shape: "data{1}", exchange,
+    });
+
+    const replaced = { request: { method: "POST" } };
+    expect(await setExchangeInLibrary(id!, replaced)).toBe(true);
+    expect((await getFromLibrary(id!))?.exchange).toEqual(replaced);
+
+    expect(await setExchangeInLibrary(id!, null)).toBe(true);
+    const after = await getFromLibrary(id!);
+    expect(after).not.toBeNull();
+    expect("exchange" in after!).toBe(false);
+    expect(after?.label).toBe("a");
+  });
+
+  it("does not create a row for an id that no longer exists", async () => {
+    expect(await setExchangeInLibrary(999, exchange)).toBe(false);
+    expect(await listLibrary()).toEqual([]);
+  });
+
+  it("changes only the entry it was given, even when another has the same text", async () => {
+    const a = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2 });
+    const b = await saveToLibrary({ label: "b", text: "{}", savedAt: 2, bytes: 2, exchange: { request: { method: "PUT" } } });
+    await setExchangeInLibrary(a!, exchange);
+    expect((await getFromLibrary(b!))?.exchange).toEqual({ request: { method: "PUT" } });
+  });
+
+  it("needs no schema change: the database stays at version 3", async () => {
+    await setExchangeInLibrary((await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2 }))!, exchange);
+    const dbs = await indexedDB.databases();
+    expect(dbs.find((d) => d.name === "jsonapi-lens")?.version).toBe(3);
+  });
+});
+
+describe("followExchangeIntoLibrary (QA6)", () => {
+  const exchange = { request: { method: "GET", url: "https://api.example.com/x" } };
+
+  it("finds the entry by its id, and reports it", async () => {
+    const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2 });
+    expect(await followExchangeIntoLibrary({ id: id!, text: "{}" }, exchange)).toBe(id);
+    expect((await getFromLibrary(id!))?.exchange).toEqual(exchange);
+  });
+
+  it("falls back to the one entry with identical text, which is how a request attached after saving reaches it", async () => {
+    await saveToLibrary({ label: "other", text: '{"x":1}', savedAt: 1, bytes: 2 });
+    const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 2, bytes: 2 });
+    expect(await followExchangeIntoLibrary({ text: "{}" }, exchange)).toBe(id);
+    expect((await getFromLibrary(id!))?.exchange).toEqual(exchange);
+    expect((await listLibrary()).filter((e) => e.exchange)).toHaveLength(1);
+  });
+
+  it("removes the exchange when the request is removed", async () => {
+    const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2, exchange });
+    expect(await followExchangeIntoLibrary({ text: "{}" }, null)).toBe(id);
+    expect((await getFromLibrary(id!))?.exchange).toBeUndefined();
+  });
+
+  it("writes nothing when two entries share the text and the id is not known", async () => {
+    const a = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2 });
+    const b = await saveToLibrary({ label: "b", text: "{}", savedAt: 2, bytes: 2 });
+    expect(await followExchangeIntoLibrary({ text: "{}" }, exchange)).toBeNull();
+    expect((await getFromLibrary(a!))?.exchange).toBeUndefined();
+    expect((await getFromLibrary(b!))?.exchange).toBeUndefined();
+  });
+
+  it("writes nothing for a document that was never saved, and does not resurrect a deleted entry", async () => {
+    expect(await followExchangeIntoLibrary({ text: "{}" }, exchange)).toBeNull();
+    const id = await saveToLibrary({ label: "a", text: "{}", savedAt: 1, bytes: 2 });
+    await deleteFromLibrary(id!);
+    expect(await followExchangeIntoLibrary({ id: id!, text: "{}" }, exchange)).toBeNull();
+    expect(await listLibrary()).toEqual([]);
   });
 });

@@ -3,7 +3,11 @@ import {
   effectiveMode,
   hasExchangeContent,
   parseReqResourceMarker,
+  canBeHost,
   parseRequestUrl,
+  resolveSecret,
+  secretRef,
+  toggleMaskedValue,
   readBodyLens,
   renderBodyPart,
   renderExchangeBand,
@@ -11,6 +15,7 @@ import {
   requestBodyRoot,
   responseReferenceTime,
 } from "../src/render-request.js";
+import { t } from "../src/i18n/index.js";
 import { requestResourceDomId, requestNodeDomId } from "../src/ident.js";
 import { buildIndex } from "../src/parse.js";
 import { groupsHtml } from "../src/render-document.js";
@@ -201,15 +206,16 @@ describe("parseRequestUrl", () => {
     expect(parseRequestUrl("[::1]://x")?.url.origin).toBe("https://[::1]");
   });
 
-  it("leaves `host:port` alone, which the URL parser reads as a scheme", () => {
-    // Not something this fix changes, and worth pinning rather than leaving to
-    // be rediscovered: `api.example.com` is a syntactically valid scheme, so
-    // `new URL` accepts `api.example.com:8080/x` on the first attempt and the
-    // assumed-scheme path — and therefore the malformed-scheme check — is never
-    // reached. The result is an opaque URL whose origin is "null".
+  it("reads `host:port` as a host and a port (changed in QA6; it used to be an opaque `api.example.com:` URL)", () => {
+    // `api.example.com` is a syntactically valid scheme, so `new URL` accepted
+    // `api.example.com:8080/x` on the first attempt — origin "null", nothing to
+    // link — and this test pinned that as "not something this fix changes".
+    // QA6's boundary pass listed `localhost:8080` as a genuine scheme-less host,
+    // which is what `claimsScheme`'s own comment says it should be: digits after
+    // the colon are a port. Anything else after a colon is still a scheme.
     const parsed = parseRequestUrl("api.example.com:8080/x");
-    expect(parsed?.assumedScheme).toBe(false);
-    expect(parsed?.url.protocol).toBe("api.example.com:");
+    expect(parsed?.assumedScheme).toBe(true);
+    expect(parsed?.url.href).toBe("https://api.example.com:8080/x");
   });
 });
 
@@ -411,3 +417,197 @@ describe("D1 — a request-body document and the response share every identity w
 // leading docblock — writing it out in prose here previously made this whole
 // file silently run without a DOM and fail 19 tests with "document is not
 // defined". Say what it did wrong, never how, if this comment is edited again.
+
+describe("parseRequestUrl: only text that could be a host gets an assumed scheme (QA6)", () => {
+  const linked: Array<[string, string]> = [
+    ["api.example.com/v2/x", "https://api.example.com/v2/x"],
+    ["localhost:8080", "https://localhost:8080/"],
+    ["localhost:8080/a?b=1", "https://localhost:8080/a?b=1"],
+    ["intranet", "https://intranet/"],
+    ["[::1]:8080/x", "https://[::1]:8080/x"],
+    ["[2001:db8::1]/x", "https://[2001:db8::1]/x"],
+    ["münchen.de/x", "https://xn--mnchen-3ya.de/x"],
+    ["api.example.com./x", "https://api.example.com./x"],
+    ["user@api.example.com/x", "https://user@api.example.com/x"],
+    ["my_host.example.com", "https://my_host.example.com/"],
+    ["192.0.2.1:3000", "https://192.0.2.1:3000/"],
+  ];
+  for (const [input, href] of linked) {
+    it(`links ${JSON.stringify(input)} under an assumed https`, () => {
+      const parsed = parseRequestUrl(input);
+      expect(parsed?.assumedScheme).toBe(true);
+      expect(parsed?.url.href).toBe(href);
+    });
+  }
+
+  const text = [
+    "not a url",
+    "a b.com/x",
+    ":8080/x",
+    "user@",
+    "a..b",
+    ".example.com",
+    "%20.com",
+    "ex ample",
+    "[::1",
+    "[nothex]/x",
+  ];
+  for (const input of text) {
+    it(`keeps ${JSON.stringify(input)} as text`, () => {
+      expect(parseRequestUrl(input)).toBeNull();
+    });
+  }
+
+  it("still refuses a claimed-but-invalid scheme and a bare path, and still accepts a given scheme", () => {
+    expect(parseRequestUrl("ht!tp://example.com")).toBeNull();
+    expect(parseRequestUrl("/just/a/path")).toBeNull();
+    expect(parseRequestUrl("https://a.example/x")?.assumedScheme).toBe(false);
+  });
+
+  it("a port above 65535 is the URL parser's to refuse", () => {
+    expect(parseRequestUrl("host:99999/x")).toBeNull();
+  });
+
+  it("host:notaport is a scheme, not a host — read as given, never an assumed https, never a link", () => {
+    // Digits after the colon make a port; anything else is something trying to
+    // be a scheme (`claimsScheme`'s rule), so it is not given an https it did
+    // not claim.
+    for (const input of ["host:notaport", "api.example.com:80:80"]) {
+      expect(parseRequestUrl(input)?.assumedScheme).toBe(false);
+      const band = renderExchangeBand({ exchange: { request: { url: input } }, mode: "request", currentDocument: null });
+      expect(band!.querySelector(".xurl a")).toBeNull();
+    }
+  });
+
+  it("renders text with the unparseable note and no link, and never the assumed-scheme note", () => {
+    const band = renderExchangeBand({ exchange: { request: { url: "not a url" } }, mode: "request", currentDocument: null });
+    expect(band!.querySelector(".xurl a")).toBeNull();
+    expect(band!.textContent).toContain("not a url");
+    expect(band!.textContent).toContain(t().request.review.urlUnparseable);
+    expect(band!.textContent).not.toContain("assumed");
+  });
+
+  it("canBeHost is a shape check on the authority only", () => {
+    expect(canBeHost("example.com/a b c")).toBe(true);
+    expect(canBeHost("example.com?q=a b")).toBe(true);
+    expect(canBeHost("")).toBe(false);
+  });
+});
+
+describe("masked values are not in the DOM until revealed (QA6)", () => {
+  const TOKEN = "qa-fake-bearer-9f3a1c-not-real";
+  const COOKIE = "qa-fake-session-7b2e-not-real";
+  const SETCOOKIE = "qa-fake-setcookie-4d8a-not-real";
+  const exchange: Exchange = {
+    request: {
+      headers: headerSet([
+        { name: "Authorization", value: `Bearer ${TOKEN}` },
+        { name: "Accept", value: "application/vnd.api+json" },
+      ]),
+      cookies: { entries: [{ name: "session", value: COOKIE }] },
+    },
+    response: { status: 200, cookies: { entries: [{ name: "sid", value: SETCOOKIE }] } },
+  };
+
+  const mount = (ex: Exchange = exchange) => {
+    const band = renderExchangeBand({ exchange: ex, mode: "both", currentDocument: null })!;
+    document.body.replaceChildren(band);
+    return band;
+  };
+  const toggles = () => Array.from(document.querySelectorAll<HTMLElement>(".xmask__toggle"));
+  const everywhere = () => {
+    // text, markup, and every attribute of every element: "the DOM" is all three.
+    const attrs = Array.from(document.querySelectorAll("*")).flatMap((n) =>
+      Array.from(n.attributes).map((a) => a.value),
+    );
+    return [document.body.textContent, document.body.innerHTML, ...attrs].join("\n");
+  };
+
+  it("renders only the mask for each secret, and the ordinary header in full", () => {
+    mount();
+    const all = everywhere();
+    for (const secret of [TOKEN, COOKIE, SETCOOKIE]) expect(all).not.toContain(secret);
+    expect(document.body.textContent).toContain("application/vnd.api+json");
+    expect(toggles()).toHaveLength(3);
+    expect(document.querySelectorAll(".xmask__dots")).toHaveLength(3);
+    expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(0);
+  });
+
+  it("reveals one value, and only that one, from the exchange", () => {
+    mount();
+    toggleMaskedValue(toggles()[0]!, exchange);
+    expect(document.body.textContent).toContain(TOKEN);
+    expect(document.body.textContent).not.toContain(COOKIE);
+    expect(document.body.textContent).not.toContain(SETCOOKIE);
+    expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(1);
+  });
+
+  it("hides again by removing the text from the DOM, and can reveal a second time", () => {
+    mount();
+    const button = toggles()[0]!;
+    toggleMaskedValue(button, exchange);
+    toggleMaskedValue(button, exchange);
+    expect(everywhere()).not.toContain(TOKEN);
+    expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(0);
+    toggleMaskedValue(button, exchange);
+    expect(document.body.textContent).toContain(TOKEN);
+    expect(document.body.textContent!.split(TOKEN)).toHaveLength(2); // exactly one copy
+  });
+
+  it("keeps the toggle a real button with a translated name that follows its state", () => {
+    mount();
+    const button = toggles()[0]!;
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.getAttribute("aria-label")).toBe(t().request.review.revealLabel);
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    toggleMaskedValue(button, exchange);
+    expect(button.getAttribute("aria-label")).toBe(t().request.review.hideLabel);
+    expect(button.textContent).toBe(t().request.review.hide);
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(t().request.review.hideLabel).not.toBe(t().request.review.revealLabel);
+  });
+
+  it("puts a hostile value in the DOM as text, never as markup", () => {
+    const hostile = '"><img src=x onerror=alert(1)><script>alert(2)</script>';
+    const ex: Exchange = { request: { headers: headerSet([{ name: "Authorization", value: hostile }]) } };
+    mount(ex);
+    expect(everywhere()).not.toContain("onerror");
+    toggleMaskedValue(toggles()[0]!, ex);
+    expect(document.querySelector("img")).toBeNull();
+    expect(document.querySelector("script")).toBeNull();
+    expect(document.querySelector(".xmask__value")!.textContent).toBe(hostile);
+  });
+
+  it("shows nothing when the exchange no longer has the entry the locator points at", () => {
+    mount();
+    toggleMaskedValue(toggles()[0]!, { request: { headers: headerSet([]) } });
+    expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(0);
+    expect(toggles()[0]!.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("a rebuilt band is masked again, and a duplicate header is located by position", () => {
+    const dup: Exchange = {
+      request: {
+        headers: headerSet([
+          { name: "Authorization", value: "Bearer first-fake-not-real" },
+          { name: "Authorization", value: "Bearer second-fake-not-real" },
+        ]),
+      },
+    };
+    mount(dup);
+    toggleMaskedValue(toggles()[1]!, dup);
+    expect(document.body.textContent).toContain("second-fake-not-real");
+    expect(document.body.textContent).not.toContain("first-fake-not-real");
+    mount(dup);
+    expect(everywhere()).not.toContain("second-fake-not-real");
+  });
+
+  it("resolveSecret accepts only its own locator format", () => {
+    expect(resolveSecret(exchange, secretRef("req", "header", 0))).toBe(`Bearer ${TOKEN}`);
+    expect(resolveSecret(exchange, secretRef("req", "cookie", 0))).toBe(COOKIE);
+    expect(resolveSecret(exchange, secretRef("res", "cookie", 0))).toBe(SETCOOKIE);
+    for (const bad of ["", "req.header.9", "req.header.-1", "req.header.0.x", "__proto__", "req.body.0", "res.header.0"]) {
+      expect(resolveSecret(exchange, bad)).toBeNull();
+    }
+  });
+});

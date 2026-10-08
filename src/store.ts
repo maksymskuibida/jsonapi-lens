@@ -215,3 +215,47 @@ export async function renameInLibrary(id: number, label: string): Promise<boolea
     return false;
   }
 }
+
+/**
+ * Replace (or, with `null`, remove) one library entry's `exchange`, leaving
+ * every other field alone. No schema change: `exchange` was already an optional
+ * field of the record (see the `DB_VERSION` note above), and this is one read
+ * and one `put`. `false` when the entry no longer exists — deleted in another
+ * tab, say — so a caller never resurrects a row by writing to a stale id.
+ */
+export async function setExchangeInLibrary(id: number, exchange: Exchange | null): Promise<boolean> {
+  try {
+    const entry = await getFromLibrary(id);
+    if (!entry) return false;
+    if (exchange === null) delete entry.exchange;
+    else entry.exchange = exchange;
+    await tx(LIBRARY_STORE, "readwrite", (store) => store.put(entry));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Follow an open document's request into its library entry, and say which entry
+ * that was (so the caller can remember it).
+ *
+ * The entry is the one with this `id` when the caller knows it. Otherwise it is
+ * the entry whose text is byte-identical to `text` — the same link a rename
+ * follows — but **only when exactly one matches**: with several, there is no
+ * telling which one the user has open, and writing to all of them would
+ * overwrite a different request on an entry they never touched. With none, or
+ * several, nothing is written and the result is `null`.
+ */
+export async function followExchangeIntoLibrary(
+  target: { id?: number; text: string },
+  exchange: Exchange | null,
+): Promise<number | null> {
+  let id = target.id;
+  if (id === undefined) {
+    const same = (await listLibrary()).filter((entry) => entry.text === target.text);
+    if (same.length !== 1 || same[0]!.id === undefined) return null;
+    id = same[0]!.id;
+  }
+  return (await setExchangeInLibrary(id, exchange)) ? id : null;
+}

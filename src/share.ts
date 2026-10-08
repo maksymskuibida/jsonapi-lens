@@ -149,6 +149,12 @@ function runShareModal(options: {
    * that said nothing was the one silent mask left in the app.
    */
   redacting: number;
+  /**
+   * Whether an attached body is not redacted but looks as if it may carry a
+   * credential (`redactExchange`'s `bodyMayContainSecret`). Said before the link
+   * exists for the same reason the count is.
+   */
+  bodyUnredacted: boolean;
   mint: (secret: string) => Promise<Uint8Array<ArrayBuffer>>;
 }): void {
   let lifetime = readLifetime();
@@ -198,6 +204,10 @@ function runShareModal(options: {
     body.append(
       el("p", { class: "share__note share__note--redacting" }, t().share.redacting(options.redacting)),
     );
+  }
+
+  if (options.bodyUnredacted) {
+    body.append(el("p", { class: "share__note share__note--body" }, t().share.bodyNotRedacted));
   }
 
   body.append(status, result);
@@ -281,31 +291,41 @@ function runShareModal(options: {
 }
 
 /**
- * How many values redaction will mask across every entry about to be sealed.
+ * What redaction will do to the entries about to be sealed: how many values it
+ * masks, and whether any body is left as it is despite looking like it may carry
+ * a credential.
  *
  * This runs `redactExchange` a second time — `mintShareEnvelope` does the
- * masking itself and drops the count — and that duplication is deliberate.
+ * masking itself and drops the result — and that duplication is deliberate.
  * Redaction stays inside `mintShareEnvelope` because it is the one function
  * every share path funnels through, so a caller added later cannot forget it;
  * moving it out here to reuse the count would trade that guarantee for one
- * avoided pass over a handful of headers.
+ * avoided pass over a handful of headers. Both share dialogs call this one
+ * function, which is what keeps "the document's Share" and "Library → Share"
+ * saying the same thing about the same exchange.
  */
-function countRedactions(documents: BundleEntry[]): number {
+export function inspectExchangeForShare(documents: BundleEntry[]): { redacting: number; bodyUnredacted: boolean } {
   // No emptiness guard of its own: `redactExchange({})` tallies 0, and a second
   // copy of `redactEntryExchange`'s check (bundle.ts) is exactly the kind of
   // duplication that drifts. That one exists to preserve object identity for an
-  // entry with nothing to mask; this only needs the number.
-  return documents.reduce((sum, entry) => sum + redactExchange(entry.exchange ?? {}).count, 0);
+  // entry with nothing to mask; this only needs the figures.
+  let redacting = 0;
+  let bodyUnredacted = false;
+  for (const entry of documents) {
+    const result = redactExchange(entry.exchange ?? {});
+    redacting += result.count;
+    if (result.bodyMayContainSecret) bodyUnredacted = true;
+  }
+  return { redacting, bodyUnredacted };
 }
 
 /**
  * Share the currently open document. Unchanged in shape since before
  * bundles existed: routing through `mintShareEnvelope` with a one-document
  * list still calls `seal` underneath (see that function), so this produces
- * the exact version-2 blob it always has. `exchange` is optional and new —
- * T2 wires a real value through once it lands; every existing caller that
- * passes only `text`/`label` keeps compiling and keeps sealing the same
- * bytes.
+ * the exact version-2 blob it always has. `exchange` is optional: both the
+ * document's own Share (`main.ts#shareDocument`) and Library → Share pass the
+ * attached request, and a call without one seals the same bytes as before.
  */
 export function openShareModal(text: string, label: string, exchange?: Exchange): void {
   if (!shareSupported()) {
@@ -317,7 +337,7 @@ export function openShareModal(text: string, label: string, exchange?: Exchange)
   runShareModal({
     subtitle: `${label} · ${formatBytes(originalBytes)}`,
     originalBytes,
-    redacting: countRedactions([{ label, text, exchange }]),
+    ...inspectExchangeForShare([{ label, text, exchange }]),
     mint: (secret) => mintShareEnvelope([{ label, text, exchange }], secret),
   });
 }
@@ -344,7 +364,7 @@ export function openBundleShareModal(documents: BundleEntry[]): void {
   runShareModal({
     subtitle: t().bundleUi.shareSubtitle(documents.length, formatBytes(originalBytes)),
     originalBytes,
-    redacting: countRedactions(documents),
+    ...inspectExchangeForShare(documents),
     mint: (secret) => mintShareEnvelope(documents, secret),
   });
 }

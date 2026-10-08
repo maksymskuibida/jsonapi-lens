@@ -522,6 +522,8 @@ export const de: Messages = {
         one: "1 Wert in der angehängten Anfrage sieht nach Zugangsdaten aus und wird entfernt, bevor dieser Link erstellt wird.",
         other: `${f.n(n)} Werte in der angehängten Anfrage sehen nach Zugangsdaten aus und werden entfernt, bevor dieser Link erstellt wird.`,
       }),
+    bodyNotRedacted:
+      "Die angehängte Anfrage oder Antwort hat einen Body, der Zugangsdaten enthalten könnte. Bodys werden nicht geschwärzt — er wird unverändert in diesen Link aufgenommen.",
     create: "Link erstellen",
     deriving: "Schlüssel wird abgeleitet und verschlüsselt …",
     uploading: (size) => `${size} werden hochgeladen …`,
@@ -758,6 +760,9 @@ export const de: Messages = {
       reveal: "anzeigen",
       revealLabel: "Diesen Wert anzeigen",
       revealTitle: "Geschwärzt, weil es wie ein Zugangsdatum aussieht — zum Anzeigen klicken",
+      hide: "verbergen",
+      hideLabel: "Diesen Wert verbergen",
+      hideTitle: "Klicken, um diesen Wert wieder zu verbergen",
 
       jwt: {
         title: "Dekodiertes JWT (Signatur nicht geprüft)",

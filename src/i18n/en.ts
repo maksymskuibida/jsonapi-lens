@@ -610,6 +610,8 @@ export const en = {
         one: "1 value in the attached request looks like a credential and will be removed before this link is created.",
         other: `${f.n(n)} values in the attached request look like credentials and will be removed before this link is created.`,
       }),
+    bodyNotRedacted:
+      "The attached request or response has a body that may contain credentials. Bodies are not redacted — it will be included in this link as it is.",
     create: "Create link",
     deriving: "Deriving the key and encrypting…",
     uploading: (size: string) => `Uploading ${size}…`,
@@ -917,6 +919,9 @@ export const en = {
       reveal: "reveal",
       revealLabel: "Reveal this value",
       revealTitle: "Masked because it looks like a credential — click to reveal",
+      hide: "hide",
+      hideLabel: "Hide this value",
+      hideTitle: "Click to hide this value again",
 
       jwt: {
         title: "Decoded JWT (signature not verified)",

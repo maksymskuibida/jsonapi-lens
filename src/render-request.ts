@@ -214,10 +214,17 @@ export interface ParsedRequestUrl {
 export function parseRequestUrl(raw: string): ParsedRequestUrl | null {
   const trimmed = raw.trim();
   if (trimmed === "") return null;
-  try {
-    return { url: new URL(trimmed), assumedScheme: false };
-  } catch {
-    /* fall through to the assumed-scheme attempt */
+  // `localhost:8080` is a host and a port, but the URL parser reads it as the
+  // scheme `localhost:` with an opaque path — origin `null`, nothing to link
+  // (found in the QA6 boundary pass; the comment on `claimsScheme` always said
+  // this case gets a scheme assumed). A colon followed by digits only is a port;
+  // anything else after a colon stays a scheme, as before.
+  if (!HOST_PORT.test(trimmed)) {
+    try {
+      return { url: new URL(trimmed), assumedScheme: false };
+    } catch {
+      /* fall through to the assumed-scheme attempt */
+    }
   }
   // A leading `/` means "this is a path, not a bare host" — assuming a scheme
   // in front of it would parse to a URL with an empty host, which is not what
@@ -229,6 +236,11 @@ export function parseRequestUrl(raw: string): ParsedRequestUrl | null {
   // a note reading "No scheme was given". A tool people open precisely because
   // a request looks wrong must not invent the part they came to check.
   if (claimsScheme(trimmed)) return null;
+  // Assuming a scheme is only honest when what follows could be a host. `not a
+  // url` used to come out as a link to `https://not%20a%20url/` in some
+  // engines, under a note saying a scheme had been assumed — an invented
+  // origin, the same harm as the F5 case above.
+  if (!canBeHost(trimmed)) return null;
   try {
     return { url: new URL(`https://${trimmed}`), assumedScheme: true };
   } catch {
@@ -268,44 +280,151 @@ function claimsScheme(text: string): boolean {
   return !/^\d+$/.test(authority.slice(colon + 1));
 }
 
+/** `host:digits`, then the end or the start of a path, query or fragment — a port, not a scheme. */
+const HOST_PORT = /^[^\s/?#:@[\]]+:\d+(?:[/?#]|$)/;
+/** A hostname: dot-separated labels of letters, digits, `-` or `_` (Unicode letters, so an IDN passes), one trailing dot allowed, no empty label. */
+const HOSTNAME = /^[\p{L}\p{N}_-]+(\.[\p{L}\p{N}_-]+)*\.?$/u;
+/** An IPv6 literal as it appears in a URL: brackets around hex digits, colons and dots. Validity of the address itself is left to the URL parser. */
+const IPV6_LITERAL = /^\[[0-9A-Fa-f:.]+\]$/;
+
+/**
+ * Could the text in front of the first `/`, `?` or `#` be a host, with an
+ * optional port and optional `user[:pass]@`? The definition is in
+ * `docs/task-specs/QA6.md`. Deliberately a shape check and not a validity
+ * check: the URL parser still has the last word (a port of 99999, an address
+ * of `[::zz]`), this only refuses to *invent* an origin out of text that has no
+ * host-like part at all — spaces, an empty host, `:8080/x`.
+ */
+export function canBeHost(text: string): boolean {
+  let authority = text.split(/[/?#]/, 1)[0] ?? "";
+  if (/[\s\u0000-\u001f\u007f]/.test(authority)) return false;
+  const at = authority.lastIndexOf("@");
+  if (at >= 0) authority = authority.slice(at + 1);
+  if (authority === "") return false;
+
+  let host = authority;
+  let port: string | null = null;
+  if (authority.startsWith("[")) {
+    const close = authority.indexOf("]");
+    if (close < 0) return false;
+    host = authority.slice(0, close + 1);
+    const rest = authority.slice(close + 1);
+    if (rest !== "") {
+      if (!rest.startsWith(":")) return false;
+      port = rest.slice(1);
+    }
+    if (!IPV6_LITERAL.test(host)) return false;
+  } else {
+    const colon = authority.lastIndexOf(":");
+    if (colon >= 0) {
+      host = authority.slice(0, colon);
+      port = authority.slice(colon + 1);
+    }
+    if (!HOSTNAME.test(host)) return false;
+  }
+  return port === null || /^\d*$/.test(port);
+}
+
 /** A scheme, as RFC 3986 spells it: a letter, then letters, digits, `+`, `-` or `.`. */
 const SCHEME_TOKEN = /^[A-Za-z][A-Za-z0-9+.-]*$/;
 
 /* -------------------------------------------------------- masked values --- */
 
 /**
- * One value that may be secret-shaped: both the masked placeholder and the
- * real value are in the DOM from the start, and a click toggles which is
- * visible via `REVEAL_ATTR` — no re-render, no value duplicated anywhere it
- * was not already going to be (the real value already had to be in the DOM
- * for the unmasked case). "Click to reveal, one at a time" — each value has
- * its own toggle; revealing one never affects any other.
+ * A secret-shaped value is **not in the DOM** until the user reveals it.
+ *
+ * Until QA6 both the dots and the real text were rendered and CSS hid one of
+ * them. Hidden is not absent: `display:none` text is still in `textContent`,
+ * readable by an extension, an injected script or a "select all" on a page
+ * somebody then pastes from. What is rendered now is the mask, a toggle, and a
+ * *locator* — `data-x-secret="req.header.2"`, which side, which table, which
+ * position — never the value or anything derived from it. Revealing resolves
+ * the locator against the live exchange (`resolveSecret`) and inserts the text;
+ * hiding removes the node again. That is the same rule the response view
+ * follows (PROCESS §6): a row carries a pointer and resolves on demand.
+ *
+ * "Click to reveal, one at a time" still holds: each value has its own toggle.
  */
 const MASK_DOTS = 12;
 
-function maskableValue(value: string, masked: boolean): HTMLElement {
-  const wrap = el("span", { class: "xmask" });
-  if (!masked) {
-    wrap.append(el("span", { class: "xmask__value", text: value }));
-    return wrap;
-  }
+export const SECRET_REF_ATTR = "data-x-secret";
 
-  wrap.setAttribute(REVEAL_ATTR, "false");
+export type SecretSide = "req" | "res";
+export type SecretKind = "header" | "cookie";
+
+/** The locator of one masked value: `<side>.<kind>.<index into that side's entries>`. */
+export function secretRef(side: SecretSide, kind: SecretKind, index: number): string {
+  return `${side}.${kind}.${index}`;
+}
+
+/**
+ * The real text behind a locator, or `null` when nothing is there any more —
+ * the exchange was edited, or the attribute was tampered with. Strict about the
+ * format so a hostile attribute can only ever select an entry, never a path.
+ */
+export function resolveSecret(exchange: Exchange, ref: string): string | null {
+  const match = /^(req|res)\.(header|cookie)\.(\d{1,6})$/.exec(ref);
+  if (!match) return null;
+  const part = match[1] === "req" ? exchange.request : exchange.response;
+  const set = match[2] === "header" ? part?.headers : part?.cookies;
+  const entry = set?.entries[Number(match[3])];
+  return entry === undefined ? null : entry.value;
+}
+
+function setRevealState(wrap: HTMLElement, button: HTMLElement, revealed: boolean): void {
+  const m = t().request.review;
+  wrap.setAttribute(REVEAL_ATTR, revealed ? "true" : "false");
+  button.textContent = revealed ? m.hide : m.reveal;
+  button.setAttribute("aria-label", revealed ? m.hideLabel : m.revealLabel);
+  button.setAttribute("title", revealed ? m.hideTitle : m.revealTitle);
+  button.setAttribute("aria-pressed", String(revealed));
+}
+
+/**
+ * Flip one masked value between its mask and its text. Reveal inserts the node
+ * and hide removes it, so the text exists in the document only while it is
+ * showing. Does nothing when the locator no longer resolves.
+ */
+export function toggleMaskedValue(button: HTMLElement, exchange: Exchange): void {
+  const wrap = button.closest<HTMLElement>(".xmask");
+  if (!wrap) return;
+  const showing = wrap.querySelector(".xmask__value");
+  if (showing) {
+    showing.remove();
+    setRevealState(wrap, button, false);
+    return;
+  }
+  const ref = wrap.getAttribute(SECRET_REF_ATTR);
+  const value = ref === null ? null : resolveSecret(exchange, ref);
+  if (value === null) return;
+  button.before(el("span", { class: "xmask__value", text: value }));
+  setRevealState(wrap, button, true);
+}
+
+/** A value that needs no mask: its text, directly. `masked` values go through `maskedValue`. */
+function plainValue(value: string): HTMLElement {
+  return el("span", { class: "xmask" }, el("span", { class: "xmask__value", text: value }));
+}
+
+function maskedValue(ref: string): HTMLElement {
+  const wrap = el("span", { class: "xmask", [SECRET_REF_ATTR]: ref });
   // A fixed run, not one derived from the value. Scaling it to the length
   // counted the secret out on screen — a 21-character session id showed exactly
   // 21 dots — which is the one thing a mask must not do.
   const dots = el("span", { class: "xmask__dots", text: "•".repeat(MASK_DOTS) });
-  const real = el("span", { class: "xmask__value", text: value });
   const button = el("button", {
     class: "xmask__toggle",
     type: "button",
     [BAND_ACTION_ATTR]: "reveal",
-    "aria-label": t().request.review.revealLabel,
-    title: t().request.review.revealTitle,
     text: t().request.review.reveal,
   });
-  wrap.append(dots, real, button);
+  setRevealState(wrap, button, false);
+  wrap.append(dots, button);
   return wrap;
+}
+
+function maskableValue(value: string, ref: string | null): HTMLElement {
+  return ref === null ? plainValue(value) : maskedValue(ref);
 }
 
 /* ------------------------------------------------------------------ jwt --- */
@@ -381,6 +500,9 @@ interface HeaderRowOptions {
   /** Set exactly for the first row with this name — a repeated header/cookie name still renders every row, but only the first gets a deep-linkable anchor, so two rows can never mint the same `q_` id. */
   anchorName: string | null;
   referenceTime: number | null;
+  /** Which side's header table this is, and the entry's position in it — the locator a masked value is revealed through. */
+  side: SecretSide;
+  index: number;
 }
 
 function headerRow(name: string, value: string, options: HeaderRowOptions): HTMLElement {
@@ -391,7 +513,7 @@ function headerRow(name: string, value: string, options: HeaderRowOptions): HTML
   });
   row.append(
     el("code", { class: "xrow__name", text: name }),
-    el("div", { class: "xrow__value" }, maskableValue(value, masked)),
+    el("div", { class: "xrow__value" }, maskableValue(value, masked ? secretRef(options.side, "header", options.index) : null)),
   );
 
   const shape = detectCredentialShape(value);
@@ -419,7 +541,7 @@ function renderHeaderTable(headers: HeaderSet, fieldKind: FieldKind, referenceTi
   }
 
   const anchored = new Set<string>();
-  for (const entry of headers.entries) {
+  headers.entries.forEach((entry, index) => {
     const lower = entry.name.toLowerCase();
     const isFirst = !anchored.has(lower);
     if (isFirst) anchored.add(lower);
@@ -427,13 +549,15 @@ function renderHeaderTable(headers: HeaderSet, fieldKind: FieldKind, referenceTi
       fieldKind,
       anchorName: isFirst ? entry.name : null,
       referenceTime,
+      side: fieldKind === "reqHeader" ? "req" : "res",
+      index,
     });
     const count = totalByName.get(lower) ?? 1;
     if (count > 1) {
       row.append(el("span", { class: "xrow__badge", text: t().request.review.duplicateHeader(count) }));
     }
     list.append(row);
-  }
+  });
   return list;
 }
 
@@ -446,7 +570,7 @@ function renderRequestCookieTable(cookies: CookieSet): HTMLElement {
     return list;
   }
   const anchored = new Set<string>();
-  for (const cookie of cookies.entries) {
+  cookies.entries.forEach((cookie, index) => {
     const isFirst = !anchored.has(cookie.name);
     if (isFirst) anchored.add(cookie.name);
     list.append(
@@ -457,10 +581,10 @@ function renderRequestCookieTable(cookies: CookieSet): HTMLElement {
           id: isFirst ? requestFieldDomId("reqCookie", cookie.name) : undefined,
         },
         el("code", { class: "xrow__name", text: cookie.name }),
-        el("div", { class: "xrow__value" }, maskableValue(cookie.value, true)),
+        el("div", { class: "xrow__value" }, maskableValue(cookie.value, secretRef("req", "cookie", index))),
       ),
     );
-  }
+  });
   return list;
 }
 
@@ -505,7 +629,7 @@ function renderResponseCookieTable(cookies: SetCookieSet): HTMLElement {
         id: isFirst ? requestFieldDomId("resCookie", cookie.name) : undefined,
       },
       el("code", { class: "xrow__name", text: cookie.name || t().request.review.unnamedCookie(index + 1) }),
-      el("div", { class: "xrow__value" }, maskableValue(cookie.value, true)),
+      el("div", { class: "xrow__value" }, maskableValue(cookie.value, secretRef("res", "cookie", index))),
     );
     const chips = cookieAttributeChips(cookie);
     if (chips.length) row.append(el("div", { class: "xrow__attrs" }, ...chips));

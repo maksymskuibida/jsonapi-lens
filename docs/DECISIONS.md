@@ -607,3 +607,54 @@ link's *transit*, not its *vintage*.
   HTTP log pipeline, is Enterprise-only, and its filters drop whole records rather than redacting a
   field. The reachable mitigation for already-logged keys is to delete the shares they open, not to
   edit the log.
+
+---
+
+## D8 · Every share carries the attached request, redacted in one place; a masked value is absent from the DOM, not hidden
+
+**Date:** 2026-10-08 · **Settles:** what a share contains, and where a secret may exist in the page,
+for `src/share.ts`, `src/bundle.ts`, `src/render-request.ts` and `src/main.ts`
+
+### Why this is load-bearing
+
+PROCESS §4 says masking that can be walked around by exporting or sharing is not masking. Until QA6
+the app had two Share buttons that disagreed: Library → Share sealed the request (redacted) and
+stated the count, while the overview's own Share silently dropped it. And a "masked" header or
+cookie value was still in the document as text, hidden only by `display:none`.
+
+### The rules
+
+1. **Every share path seals the request, and `mintShareEnvelope` (`bundle.ts`) is the only place that
+   masks it.** Both dialogs are one function, `openShareModal`/`runShareModal`, and both state the
+   count (and the unredacted-body note) through one function, `inspectExchangeForShare`. A caller
+   that forgets to redact cannot leak, because redaction is below the callers, not in them. Adding a
+   share entry point means passing the exchange to `mintShareEnvelope`, never a second masker.
+2. **A secret-shaped value is not in the DOM until revealed.** The cell holds a mask, a button and a
+   *locator* (`data-x-secret="req.header.2"`: side, table, position). Reveal resolves the locator
+   against the live exchange and inserts the text; hide removes it. Nothing, including attributes
+   and `title`s, carries the value. This is the "pointer, not copy" rule of PROCESS §6 applied to
+   secrets, and `display:none` is not an implementation of it.
+3. **A library entry follows its open document's request** (`followExchangeIntoLibrary`,
+   `store.ts`): by the id the document was saved or opened under, else by identical text when
+   exactly one entry matches. No schema change.
+4. **An assumed `https://` needs something that could be a host** (`canBeHost`, defined in
+   `docs/task-specs/QA6.md`). `host:digits` is a host and a port.
+
+### What this does not buy
+
+`redactExchange` rewrites headers, cookies, the URL and `query`, a form body and `origin`. A JSON or
+text body is **detected, not rewritten**, and goes into a share as it is — the share dialog now says
+so before the link exists, but it does not remove it. Dropping every flagged body was rejected: the
+detector is coarse (24 base64-alphabet characters anywhere), so it would drop most response bodies.
+The decoded-JWT claims panel under a masked `Authorization` header is unchanged and shows claims,
+never the token.
+
+### Rejected alternatives
+
+- **Keep omitting the request from the document's Share and say so** — rejected: the two buttons
+  would still disagree, and the request is most of what a recipient needs.
+- **Hide the value with CSS, as before** — rejected: not hidden from scripts or extensions.
+- **Reveal by re-rendering the band with the value** — rejected: it would lose scroll and fold state
+  that the in-place toggle keeps; the toggle edits one cell.
+- **Update every library entry with the same text** — rejected: overwrites a request the user attached
+  to a different saved copy.
