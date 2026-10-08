@@ -261,7 +261,8 @@ visitor.
   relative to the response's own `Date` header when there is one.
 - **Copy** and **Download** redact by default and say how many values they found and hid — a count of
   what was found, never a claim that nothing else remains. The pass covers header and cookie values
-  shaped like credentials; it does not scan the body or the URL, and says so next to the buttons.
+  shaped like credentials, credential-shaped URL query parameters and form-urlencoded body values, and
+  the origin. A JSON or text body is **not** scanned, and the page says so next to the buttons.
 - **Share carries the attached request and response into the encrypted link**, redacted the same
   way, and says how many values it removed *before* the link is created — whether you share the
   open document or tick it in **Saved documents → Share**. The link opens with the exchange band in

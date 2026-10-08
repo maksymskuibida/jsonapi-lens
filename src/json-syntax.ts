@@ -68,14 +68,14 @@ function isHex(code: number): boolean {
  * The whole code point at `offset`, as something a person can read in a
  * sentence: an astral character is not reported as half a surrogate pair, and
  * one that cannot be seen (a non-breaking space, a zero-width joiner, a control
- * character) is named by its code point instead, since a hint reading
+ * character, a lone combining mark that would fuse with the quote beside it) is named by its code point instead, since a hint reading
  * "unexpected character: " followed by nothing is no hint at all.
  */
 function charAt(text: string, offset: number): string {
   const point = text.codePointAt(offset);
   if (point === undefined) return "";
   const ch = String.fromCodePoint(point);
-  if (/[\p{C}\p{Z}]/u.test(ch)) return `U+${point.toString(16).toUpperCase().padStart(4, "0")}`;
+  if (/[\p{C}\p{Z}\p{M}]/u.test(ch)) return `U+${point.toString(16).toUpperCase().padStart(4, "0")}`;
   return ch;
 }
 

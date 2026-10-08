@@ -57,8 +57,11 @@ resource identity strip (`type`, `id`, `at`), the "not in document" chip text an
 "empty string" scalar come from the catalogue at render time. `aria-label` equals `title` for these
 buttons. A repository test scans `src/` (excluding `src/i18n/` and `src/legal/`) and fails on a
 string literal in `aria-label`/`title`/`placeholder`/`alt`/`text:`/`textContent`/`toast(`/an error
-constructor/the copy arguments of a button helper. A button-shaped helper the scan has not been told
-about fails it. Exemptions are listed in the test with a reason and are checked to still match.
+constructor/the copy arguments of a button helper. Any helper whose name looks like a button
+(`\w*Button`, `btn`) that the scan has not been told about fails it. It also reads the whole value
+expression (`x ?? "…"`, ternaries), computed keys, string children of `el()`/`append()`, and words
+between tags in markup. Not caught, and said so in the test's header: a literal assigned to a
+variable first, concatenation, literals inside `${}` holes or a nested call's arguments. Exemptions are listed in the test with a reason and are checked to still match.
 
 **2. German toast.** `Request und Response wurden kopiert (535 Zeichen).`, and with redaction
 `…(535 Zeichen); 2 Werte wurden geschwärzt.` / `1 Wert wurde geschwärzt.` Ukrainian
@@ -145,8 +148,12 @@ symbols are not translated, so the three catalogues need no row. Documented in t
   from outside the app ("25.7 MB" in the FAQ, `llms.txt`, `og.svg`, the README performance table)
   and `mcp/`'s "12 MB" text: not changed; the first are claims about a file, the second is a
   separate program.
-- The server's English `{ "error": … }` JSON bodies other than the 413 unit: API responses, not
-  interface text; `share.ts` words its own errors from the catalogue.
+- The server's English `{ "error": … }` JSON bodies other than the 413 unit. **Correction (review
+  S2):** these are not only API responses — `share.ts` forwards `body.error` as the error hint
+  (`:65-71`, rendered at `:273`) and shows `String(error)` for a network failure (`:267`), so the
+  Worker's English text, including the 413 line edited here, reaches a German or Ukrainian user.
+  That is a `share.ts` fix (QA6's file): ignore `body.error` and key a catalogue row on the status.
+  Tracked outside QA5.
 - A done-view redesign for the bundle import.
 
 ## Acceptance criteria

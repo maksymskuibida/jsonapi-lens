@@ -30,22 +30,23 @@ interface ChipOptions {
   extraClass?: string;
 }
 
-/** String form, for the bulk row path. */
-function chipHtml(type: string, id: string, resolved: boolean, options: ChipOptions = {}): string {
-  const classes = ["chip", resolved ? "chip--link" : "chip--absent", options.extraClass]
-    .filter(Boolean)
-    .join(" ");
+/**
+ * String form, for the bulk row path. Only ever a *resolved* chip: a row's own
+ * identity chip is a link to itself. The unresolved ("not in document") chip is
+ * built by `chip()` below, on the DOM path, and the string form of it that used
+ * to live here had no caller (QA5 review, S1) — and an unreachable `innerHTML`
+ * branch is one nobody tests.
+ */
+function chipHtml(type: string, id: string, options: ChipOptions = {}): string {
+  const classes = ["chip", "chip--link", options.extraClass].filter(Boolean).join(" ");
   const inner =
     `<b class="chip__sigil">${escapeHtml(typeSigil(type))}</b>` +
     (options.implyType ? "" : `<span class="chip__type">${escapeHtml(type)}</span>`) +
-    `<span class="chip__id">${escapeHtml(id)}</span>` +
-    (resolved ? "" : `<span class="chip__absent">${escapeHtml(t().resource.notInDocument)}</span>`);
+    `<span class="chip__id">${escapeHtml(id)}</span>`;
 
   // `domId` output is `[A-Za-z0-9_]` by construction, so it is safe unquoted —
   // it is still emitted inside quotes for uniformity with the escaped values.
-  return resolved
-    ? `<a class="${classes}" data-hue="${typeHue(type)}" href="${resourceHref(type, id)}">${inner}</a>`
-    : `<span class="${classes}" data-hue="${typeHue(type)}" title="${escapeHtml(t().resource.absentChipTitle(type, id))}">${inner}</span>`;
+  return `<a class="${classes}" data-hue="${typeHue(type)}" href="${resourceHref(type, id)}">${inner}</a>`;
 }
 
 /** DOM form, for the detail path. */
@@ -127,7 +128,7 @@ function rowHtml(resource: Resource): string {
     `<details class="res__d">` +
     `<summary class="res__row">` +
     `<span class="res__caret" aria-hidden="true"></span>` +
-    chipHtml(resource.type, resource.id, true, { implyType: true, extraClass: "chip--self" }) +
+    chipHtml(resource.type, resource.id, { implyType: true, extraClass: "chip--self" }) +
     summaryHtml +
     `<span class="res__tags">${tagsHtml(resource)}</span>` +
     `</summary>` +

@@ -63,6 +63,10 @@ describe("locateSyntaxError", () => {
     expect(at('{"a":​1}')).toEqual({ kind: "unexpected-char", offset: 5, char: "U+200B" });
   });
 
+  it("names a lone combining mark by code point, since beside the quote it would be invisible", () => {
+    expect(at("\u0301{}")).toEqual({ kind: "unexpected-char", offset: 0, char: "U+0301" });
+  });
+
   it("reports an astral character whole, not as half a surrogate pair", () => {
     expect(at("\u{1F682} train")).toEqual({ kind: "unexpected-char", offset: 0, char: "\u{1F682}" });
   });

@@ -68,7 +68,10 @@ describe("the import toast", () => {
     expect(de.bundleUi.importedToast(2)).toBe("Es wurden 2 Dokumente in Ihre gespeicherten Dokumente importiert.");
     expect(de.bundleUi.importedToast(1000)).toContain("1.000 Dokumente");
     expect(de.bundleUi.importedPartialToast(1, 3)).toBe(
-      "Es wurden 1 von 3 Dokumenten importiert; der Rest konnte nicht gespeichert werden.",
+      "Es wurde 1 von 3 Dokumenten importiert; der Rest konnte nicht gespeichert werden.",
+    );
+    expect(de.bundleUi.importedPartialToast(2, 3)).toBe(
+      "Es wurden 2 von 3 Dokumenten importiert; der Rest konnte nicht gespeichert werden.",
     );
   });
 

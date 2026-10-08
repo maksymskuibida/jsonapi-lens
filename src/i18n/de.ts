@@ -1001,7 +1001,7 @@ export const de: Messages = {
         other: `Es wurden ${f.n(n)} Dokumente in Ihre gespeicherten Dokumente importiert.`,
       }),
     importedPartialToast: (saved, total) =>
-      `Es wurden ${f.n(saved)} von ${f.n(total)} Dokumenten importiert; der Rest konnte nicht gespeichert werden.`,
+      `${f.plural(saved, { one: "Es wurde", other: "Es wurden" })} ${f.n(saved)} von ${f.n(total)} Dokumenten importiert; der Rest konnte nicht gespeichert werden.`,
     done: "Fertig",
   },
 };
