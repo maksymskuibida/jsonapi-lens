@@ -34,7 +34,7 @@ interface ChipOptions {
  * String form, for the bulk row path. Only ever a *resolved* chip: a row's own
  * identity chip is a link to itself. The unresolved ("not in document") chip is
  * built by `chip()` below, on the DOM path, and the string form of it that used
- * to live here had no caller (QA5 review, S1) — and an unreachable `innerHTML`
+ * to live here had no caller (QA5 review, S1) — and an unreachable HTML-string
  * branch is one nobody tests.
  */
 function chipHtml(type: string, id: string, options: ChipOptions = {}): string {
