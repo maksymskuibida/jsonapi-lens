@@ -81,6 +81,16 @@ describe("a top-level dialog", () => {
     expect(document.activeElement).toBe($("view"));
   });
 
+  it("moves on when the opener is in the document but cannot take focus (collapsed <details>, display: none)", () => {
+    // jsdom has no layout, so a hidden element would still accept focus; stand in for the
+    // browser's silent no-op, which is the behaviour that matters.
+    $("opener").focus();
+    openModal({ title: "T", body: body() });
+    $("opener").focus = () => {};
+    escape();
+    expect(document.activeElement).toBe($("view"));
+  });
+
   it("does not focus a disabled opener", () => {
     $("opener").focus();
     openModal({ title: "T", body: body() });

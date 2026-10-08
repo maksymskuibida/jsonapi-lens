@@ -132,27 +132,31 @@ function currentOpener(): HTMLElement | null {
 }
 
 function restoreFocus(chain: readonly HTMLElement[]): void {
-  const target = chain.find((node) => isFocusableNow(node));
-  if (target) {
+  // Each candidate is tried and *checked*: `focus()` on an element that is in
+  // the document but not rendered (inside a collapsed `<details>`, `display:
+  // none`) does nothing and does not throw, which would end the chain on
+  // `<body>` having "succeeded".
+  const tryFocus = (node: HTMLElement | null | undefined): boolean => {
+    if (!isFocusableNow(node)) return false;
     // `preventScroll`: the page's scroll position is something Back/Forward
     // restoration works hard to keep, and a dialog closing must not move it.
-    target.focus({ preventScroll: true });
-    return;
-  }
+    node.focus({ preventScroll: true });
+    return document.activeElement === node;
+  };
+
+  if (chain.some(tryFocus)) return;
+
   const below = modalStack[modalStack.length - 1];
   if (below) {
     const inner =
       below.root.querySelector<HTMLElement>("[data-autofocus]") ??
       below.root.querySelector<HTMLElement>("button, a[href], input, textarea, select");
-    if (inner) {
-      inner.focus({ preventScroll: true });
-      return;
-    }
+    if (tryFocus(inner)) return;
   }
   const main = document.getElementById("view");
   if (main) {
     if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
-    main.focus({ preventScroll: true });
+    tryFocus(main);
   }
 }
 
