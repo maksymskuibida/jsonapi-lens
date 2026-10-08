@@ -268,7 +268,9 @@ describe("the import toast", () => {
   const toastIsError = (): boolean => document.getElementById("toast")?.classList.contains("toast--error") ?? false;
 
   beforeEach(() => {
-    document.body.innerHTML = '<div id="toast"></div>';
+    const toastNode = document.createElement("div");
+    toastNode.id = "toast";
+    document.body.replaceChildren(toastNode);
   });
 
   async function importAll(documents: BundlePayload["documents"]): Promise<HTMLElement> {

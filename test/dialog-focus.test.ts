@@ -13,11 +13,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeAllModals, confirmModal, openModal, promptModal } from "../src/ui.js";
 
+/** Static test markup, parsed as a document so no element is ever assigned HTML. */
+const parse = (html: string): ChildNode[] => [...new DOMParser().parseFromString(html, "text/html").body.childNodes];
+
 beforeEach(() => {
-  document.body.innerHTML =
-    '<header><button id="opener">Open</button><button id="other">Other</button></header>' +
-    '<main id="view"><button id="inside-main">In main</button></main>' +
-    '<div id="modal-root"></div><div id="toast"></div>';
+  document.body.replaceChildren(
+    ...parse(
+      '<header><button id="opener">Open</button><button id="other">Other</button></header>' +
+        '<main id="view"><button id="inside-main">In main</button></main>' +
+        '<div id="modal-root"></div><div id="toast"></div>',
+    ),
+  );
 });
 afterEach(() => closeAllModals());
 
@@ -27,7 +33,7 @@ const escape = (): void => {
 };
 const body = (): HTMLElement => {
   const div = document.createElement("div");
-  div.innerHTML = '<button id="in-dialog">x</button>';
+  div.append(...parse('<button id="in-dialog">x</button>'));
   return div;
 };
 

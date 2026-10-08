@@ -131,7 +131,9 @@ describe("escaping on the row path that this change touched", () => {
       const { parse, document: doc } = await inLanguage(lang);
       const index = parse.buildIndex(DOC as never);
       const host = document.createElement("div");
-      host.innerHTML = doc.groupsHtml(index);
+      // Parsed as a document, not assigned to an element: nothing in it can run, and the
+      // assertions below are about which elements exist.
+      host.append(...new DOMParser().parseFromString(doc.groupsHtml(index), "text/html").body.childNodes);
       expect(host.querySelector("img")).toBeNull();
       expect(host.querySelector("script")).toBeNull();
       expect(host.textContent).toContain(HOSTILE_ID);
