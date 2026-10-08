@@ -520,7 +520,7 @@ describe("masked values are not in the DOM until revealed (QA6)", () => {
     const attrs = Array.from(document.querySelectorAll("*")).flatMap((n) =>
       Array.from(n.attributes).map((a) => a.value),
     );
-    return [document.body.textContent, document.body.innerHTML, ...attrs].join("\n");
+    return [document.body.textContent, new XMLSerializer().serializeToString(document.body), ...attrs].join("\n");
   };
 
   it("renders only the mask for each secret, and the ordinary header in full", () => {

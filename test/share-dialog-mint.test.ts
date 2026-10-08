@@ -25,7 +25,11 @@ import { t } from "../src/i18n/index.js";
 import type { Exchange } from "../src/exchange.js";
 
 beforeEach(() => {
-  document.body.innerHTML = '<div id="modal-root"></div><div id="toast"></div>';
+  const root = document.createElement("div");
+  root.id = "modal-root";
+  const toastEl = document.createElement("div");
+  toastEl.id = "toast";
+  document.body.replaceChildren(root, toastEl);
   minted.calls.length = 0;
   vi.stubGlobal(
     "fetch",

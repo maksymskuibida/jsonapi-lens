@@ -138,7 +138,7 @@ the library is local storage, and redaction applies on the way out (Copy, Downlo
       share made from it contains `[REDACTED]` and none of the fake secrets.
 - [ ] Library → Share and the document's Share both reach `mintShareEnvelope`; there is one
       redaction implementation.
-- [ ] With a request attached, `document.body.textContent`, `innerHTML` and every attribute value
+- [ ] With a request attached, `document.body.textContent`, its serialised markup and every attribute value
       contain none of the masked values until revealed, and none again after hiding.
 - [ ] A saved document's library entry gains, changes and loses its `exchange` with the open
       document; `DB_VERSION` is still 3.

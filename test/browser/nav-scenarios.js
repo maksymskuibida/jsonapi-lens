@@ -641,7 +641,7 @@
       const SECRET = 'qa-fake-bearer-31-not-real';
       const everything = () => {
         const attrs = Array.from(document.querySelectorAll('*')).flatMap((n) => Array.from(n.attributes).map((a) => a.value));
-        return [document.documentElement.textContent, document.documentElement.innerHTML, ...attrs].join('\n');
+        return [document.documentElement.textContent, new XMLSerializer().serializeToString(document.documentElement), ...attrs].join('\n');
       };
       await N.fresh();
       document.getElementById('edit-request').click();
