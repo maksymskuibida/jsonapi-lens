@@ -32,10 +32,10 @@ describe("uploadFailure maps each status to translated copy", () => {
     it(`${lang}: 400, 404, 405, 413, 500, 502, 503 and an unlisted status`, async () => {
       try {
         const { uploadFailure } = await inLanguage(lang);
-        const statuses = [400, 404, 405, 413, 500, 502, 503, 418];
+        const statuses = [400, 404, 405, 413, 429, 500, 502, 503, 418];
         const hints = statuses.map((s) => uploadFailure(s).hint);
         // every status has its own sentence, except the 5xx family sharing one shape
-        expect(new Set(hints.slice(0, 5)).size).toBe(5);
+        expect(new Set(hints.slice(0, 6)).size).toBe(6);
         for (const [i, hint] of hints.entries()) {
           expect(hint.length, String(statuses[i])).toBeGreaterThan(10);
           if (lang !== "en") for (const english of SERVER_ENGLISH) expect(hint).not.toContain(english);
@@ -56,11 +56,11 @@ describe("uploadFailure maps each status to translated copy", () => {
     const out: Record<string, string[]> = {};
     for (const lang of ["en", "de", "uk"] as const) {
       const { uploadFailure } = await inLanguage(lang);
-      out[lang] = [400, 404, 405, 413, 500].map((s) => uploadFailure(s).hint);
+      out[lang] = [400, 404, 405, 413, 429, 500].map((s) => uploadFailure(s).hint);
     }
     localStorage.setItem("jsonapi-lens:locale", "en");
     vi.resetModules();
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       expect(out["de"]![i]).not.toBe(out["en"]![i]);
       expect(out["uk"]![i]).not.toBe(out["en"]![i]);
     }

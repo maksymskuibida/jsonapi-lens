@@ -42,10 +42,14 @@
  *     where only one is scrubbed is worse than neither, because whichever one
  *     a later reader reaches for is a coin flip.
  *   - **A form-urlencoded body**: fully redacted, the same way, for the same
- *     reason — `BodyPart.form` is a `ParamSet` like `query`, so the same
- *     redaction reuses the same code, and `BodyPart.raw` is **rewritten** from
- *     the redacted form for the same reason the URL string is.
- *   - **Any other body** (JSON, plain text, anything `form` was not decoded
+    reason, **read from what is stored**: the request form keeps a body as
+    `{ raw, contentType }` only (`BodyPart.form` is never populated), so
+    `formParamsOf` decodes `raw` when the content type is
+    `application/x-www-form-urlencoded`, or is empty / `text/plain` and the text
+    is cleanly `k=v&k=v`. `raw` is **rewritten** from the redacted parameters.
+  - **Header values that are URLs** (`Location`, `Referer`, `Content-Location`,
+    `Origin`) and a URL's `user[:password]@` prefix: see `redactUrl`.
+  - **Any other body** (JSON, plain text, anything `form` was not decoded
  *     from): **detected, not redacted.** Rewriting arbitrary body text without
  *     corrupting it is a bigger job than this module attempts tonight, so
  *     `redactExchange` instead sets `bodyMayContainSecret: true` when a
@@ -233,7 +237,7 @@ export interface RedactionResult {
  * `shouldMaskHeader` misses them; their value goes through the same URL
  * redaction as the request URL (userinfo, query, fragment).
  */
-const URL_VALUED_HEADERS = new Set(["location", "referer", "content-location"]);
+const URL_VALUED_HEADERS = new Set(["location", "referer", "content-location", "origin"]);
 
 function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally): HeaderSet | undefined {
   if (!headers) return headers;
@@ -356,6 +360,10 @@ function valueHasCredentialShape(value: ParamValue | undefined): boolean {
  * Should this parameter be redacted — by name, or because any reading of its
  * value looks like a credential?
  */
+export function isSecretParam(entry: ParamEntry): boolean {
+  return shouldRedactParam(entry);
+}
+
 function shouldRedactParam(entry: ParamEntry): boolean {
   if (isSecretParamName(entry.name)) return true;
   if (valueHasCredentialShape(entry.value)) return true;
@@ -408,10 +416,16 @@ interface RedactionTally {
    * with a body — those are genuinely independent surfaces.
    */
   countedNames: Set<string>;
+  /**
+   * Whether `countedNames` applies. True for the surfaces that have a twin
+   * (`url` and `query`); false for a body, where two parameters with the same
+   * name are two values and each is counted (QA6: "every masked value counted").
+   */
+  dedupeNames: boolean;
 }
 
-function freshTally(): RedactionTally {
-  return { count: 0, countedNames: new Set() };
+function freshTally(dedupeNames = true): RedactionTally {
+  return { count: 0, countedNames: new Set(), dedupeNames };
 }
 
 /** Is this decoded value actually *something* — not the absence of a value, and not an empty string? Redacting either removes nothing, so it must not be counted as a drop. */
@@ -433,8 +447,12 @@ function redactEntries(entries: ParamEntry[], tally: RedactionTally): { entries:
   const result = entries.map((entry) => {
     if (!shouldRedactParam(entry)) return entry;
     changed = true;
-    if (!isEmptyParamValue(entry.value) && !tally.countedNames.has(entry.name)) {
-      tally.count++;
+    if (!isEmptyParamValue(entry.value) && !(tally.dedupeNames && tally.countedNames.has(entry.name))) {
+      // A body has no twin to dedupe against, and `decodeParams` folds two
+      // parameters of one name into one entry — so each non-empty wire pair is a
+      // value that was masked and is counted.
+      const pairs = tally.dedupeNames ? 1 : Math.max(1, entry.raw.filter((pair) => pair.value !== null && pair.value !== "").length);
+      tally.count += pairs;
       tally.countedNames.add(entry.name);
     }
     return redactParamEntry(entry);
@@ -542,6 +560,16 @@ function redactUrl(url: string | undefined, tally: RedactionTally): string | und
   return `${prefix}${queryPart}${fragmentPart}`;
 }
 
+/**
+ * A URL as it may be shown on screen: userinfo and credential-like query or
+ * fragment parameters replaced, everything else byte for byte. The same
+ * redaction Copy/Download/Share apply, so what is on screen is never more than
+ * what could be exported (QA6, gap A).
+ */
+export function maskUrlForDisplay(url: string): string {
+  return redactUrl(url, freshTally()) ?? url;
+}
+
 /* -------------------------------------------------------- body detection --- */
 
 /**
@@ -593,14 +621,48 @@ function bodyMightContainCredential(raw: string): boolean {
  * moment anything serialises `raw`. Any other body is left untouched and
  * merely sniffed via `bodyMightContainCredential`.
  */
+/**
+ * The parameters of a body that is form-urlencoded, **read from what is stored**.
+ *
+ * The request form stores a body as `{ raw, contentType }` and nothing else —
+ * `BodyPart.form` is never populated anywhere in the app — so redaction that
+ * waited for `form` redacted nothing in the real product while every test that
+ * seeded `form` by hand passed (QA6 local QA, finding 1). A body counts as a
+ * form when its content type is `application/x-www-form-urlencoded` (any
+ * parameters, any case), **or** when the content type is empty or `text/plain`
+ * and the text is cleanly `k=v&k=v`: people leave the content type blank, and
+ * over-redacting a body that happened to look like a form is safe where
+ * under-redacting one is not. A JSON/XML-looking body never qualifies.
+ */
+const FORM_CONTENT_TYPE_RE = /^\s*application\/x-www-form-urlencoded\s*(?:;|$)/i;
+const PLAIN_OR_EMPTY_CONTENT_TYPE_RE = /^\s*(?:text\/plain\s*(?:;.*)?)?$/i;
+const CLEAN_FORM_TEXT_RE = /^[^{["<\s=&][^=&\s]*=[^&\s]*(?:&[^=&\s]+=[^&\s]*)*$/;
+
+function formParamsOf(body: BodyPart): ParamSet | null {
+  if (body.form) return body.form;
+  const contentType = body.contentType ?? "";
+  if (FORM_CONTENT_TYPE_RE.test(contentType)) return decodeParams(body.raw);
+  if (PLAIN_OR_EMPTY_CONTENT_TYPE_RE.test(contentType) && CLEAN_FORM_TEXT_RE.test(body.raw.trim())) {
+    return decodeParams(body.raw.trim());
+  }
+  return null;
+}
+
+/**
+ * A form body is redacted exactly like `query` — the same `ParamSet` path — and
+ * `raw` is **rewritten** from the redacted parameters, so nothing unredacted is
+ * left beside them. Any other body is left untouched and merely sniffed via
+ * `bodyMightContainCredential`.
+ */
 function redactBodyPart(
   body: BodyPart | undefined,
   tally: RedactionTally,
 ): { body: BodyPart | undefined; mayContainSecret: boolean } {
   if (!body) return { body, mayContainSecret: false };
 
-  if (body.form) {
-    const { entries, changed } = redactEntries(body.form.entries, tally);
+  const form = formParamsOf(body);
+  if (form) {
+    const { entries, changed } = redactEntries(form.entries, tally);
     if (changed) {
       const redactedForm: ParamSet = { entries };
       return { body: { ...body, raw: encodeParams(redactedForm), form: redactedForm }, mayContainSecret: false };
@@ -695,9 +757,9 @@ function redactOrigin(origin: OriginMeta | undefined, tally: RedactionTally): Or
 export function redactExchange(exchange: Exchange): RedactionResult {
   const requestUrlQueryTally = freshTally();
   const requestHeaderCookieTally = freshTally();
-  const requestBodyTally = freshTally();
+  const requestBodyTally = freshTally(false);
   const responseHeaderCookieTally = freshTally();
-  const responseBodyTally = freshTally();
+  const responseBodyTally = freshTally(false);
   const originTally = freshTally();
 
   const requestBody = redactBodyPart(exchange.request?.body, requestBodyTally);

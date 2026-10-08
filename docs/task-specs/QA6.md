@@ -168,3 +168,48 @@ the library is local storage, and redaction applies on the way out (Copy, Downlo
       any serialisation of the payload; same for a bundle.
 - [ ] `test/store.test.ts`: `setExchangeInLibrary` set/clear/missing id, schema version.
 - [ ] Browser scenario: the DOM contains no masked value in a real page (`test/browser`).
+
+
+## Round 3 amendments (blind local QA, 2026-10-09)
+
+Written after QA found, in the built product, what unit tests, review and my decrypted-share proof all
+missed: **a form-urlencoded body was never redacted**, because redaction waited for `BodyPart.form`,
+which nothing in the app populates (the request form stores `{ raw, contentType }`), while every test
+seeded `form` by hand.
+
+- **Form body, from what is stored.** A body is a form when its content type is
+  `application/x-www-form-urlencoded` (any parameters, any case), **or** its content type is empty or
+  `text/plain` and the text is cleanly `k=v&k=v` (not starting with `{ [ " <`). *Decision:* the empty and
+  `text/plain` cases count, because people leave the content type blank and over-redacting a body that
+  merely looked like a form is safe where under-redacting one is not. A JSON/XML-looking body never
+  qualifies, whatever its content type. It is redacted through the same parameter path as `query`, and
+  `raw` is re-encoded from the redacted parameters. **Each masked wire pair is counted** (two `password=`
+  parameters count 2).
+- **What "origin" means.** Two different things, both redacted: the **`Origin` header** (treated like
+  `Referer`/`Location`/`Content-Location`: userinfo, credential-like query parameters, fragment) and
+  the exchange's provenance field **`origin`** (`OriginMeta`; no UI writes it today).
+- **Dialog counts (G).** One combined count covers headers, cookies, URL, form body and `origin`. The
+  "body may contain credentials" note shows only when a **non-form** body remains that the detector
+  flags; a redacted form body never triggers it.
+- **Display masking (gap A).** On screen, the request URL's userinfo and credential-like query
+  parameters, and credential-like query and form-body parameters, are masked exactly like header/cookie
+  values: only the mask is in the DOM until revealed. The URL is shown redacted (`https://[REDACTED]@host/…`,
+  `api_key=%5BREDACTED%5D`), its link is **not** an `href` until revealed (the band's collapsed summary
+  shows the redacted URL and has no reveal). A parameter row shows its name and a mask; reveal builds its
+  whole reading. A JSON/text request body is shown as text as before (out of scope, D8).
+- **Scheme-only URLs (finding 5).** `host:notaport` and `javascript:alert(1)` show the text as typed,
+  unlinked, no `null`.
+- **Invalid-JSON body note (finding 4).** Always a translated headline **and** a translated hint
+  (`request.review.invalidJsonBody`), never the engine's text; QA5 will align it with its located errors.
+- **Request button (E).** The overview button reads "Attach request" until a request exists and "Edit
+  request" after, updating on attach, edit and removal.
+- **Mode switch (D).** Switching Request/Response/Both keeps the band's open/closed state.
+- **Share size (F).** "from N of JSON" counts the document **and** its (redacted) request, because that
+  is what is sealed.
+- **Share failures.** 429 has its own translated sentence; the 413 limit goes through `formatBytes`
+  (whatever unit the app uses; QA5 changes it).
+- **Out of scope (H).** `Referer: …?code=…` (a `code` parameter) is not recognised as a credential.
+
+**Test rule added:** every redaction test uses the shape the real UI produces. `test/form-redaction.test.ts`
+types into the real request form (`openRequestForm`) and passes what `onSave` returns to redaction.
+Fixture audit: the hand-populated fields the form never fills were `BodyPart.form` and `Exchange.origin`.

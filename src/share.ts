@@ -72,7 +72,9 @@ export function uploadFailure(status: number): ShareError {
           ? m.notAllowed
           : status === 413
             ? m.tooLarge(formatBytes(MAX_BUNDLE_BYTES))
-            : status >= 500
+            : status === 429
+              ? m.tooManyRequests
+              : status >= 500
               ? m.serverError(status)
               : m.serverStatus(status);
   return new ShareError(m.headline, hint);
@@ -311,6 +313,14 @@ function runShareModal(options: {
   });
 }
 
+/** Bytes of the JSON a document contributes to a share: its text, plus its (redacted) request when it has one. */
+function sealedJsonBytes(entry: BundleEntry): number {
+  const encoder = new TextEncoder();
+  const text = encoder.encode(entry.text).byteLength;
+  if (!entry.exchange || Object.keys(entry.exchange).length === 0) return text;
+  return text + encoder.encode(JSON.stringify(redactExchange(entry.exchange).exchange)).byteLength;
+}
+
 /**
  * What redaction will do to the entries about to be sealed: how many values it
  * masks, and whether any body is left as it is despite looking like it may carry
@@ -354,7 +364,9 @@ export function openShareModal(text: string, label: string, exchange?: Exchange)
     return;
   }
 
-  const originalBytes = new TextEncoder().encode(text).byteLength;
+  // "from N of JSON" must describe what is sealed: the document *and* the request
+  // that rides with it (QA6 gap F).
+  const originalBytes = sealedJsonBytes({ label, text, exchange });
   runShareModal({
     subtitle: `${label} · ${formatBytes(originalBytes)}`,
     originalBytes,
@@ -378,10 +390,7 @@ export function openBundleShareModal(documents: BundleEntry[]): void {
     return;
   }
 
-  const originalBytes = documents.reduce(
-    (sum, doc) => sum + new TextEncoder().encode(doc.text).byteLength,
-    0,
-  );
+  const originalBytes = documents.reduce((sum, doc) => sum + sealedJsonBytes(doc), 0);
   runShareModal({
     subtitle: t().bundleUi.shareSubtitle(documents.length, formatBytes(originalBytes)),
     originalBytes,

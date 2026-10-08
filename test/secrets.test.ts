@@ -369,10 +369,14 @@ describe("redactExchange", () => {
     // long hex/base64 run -- detectCredentialShape alone would miss it. This
     // is specifically the key=value/"key":"value" pattern, not the stripe-key
     // pattern the test above already covers via its sk_-prefixed secret.
-    for (const raw of ['{"amount":100,"password":"hunter2"}', "amount=100&password=hunter2"]) {
-      const exchange: Exchange = { request: { body: { raw, contentType: "text/plain" } } };
-      expect(redactExchange(exchange).bodyMayContainSecret).toBe(true);
-    }
+    // The JSON body is only flagged. The `k=v` text used to be flagged too; a
+    // clean `k=v&k=v` body with an empty or text/plain content type is now read
+    // as a form and *redacted* (QA6), so it is not flagged — it is fixed.
+    const json = { request: { body: { raw: '{"amount":100,"password":"hunter2"}', contentType: "text/plain" } } };
+    expect(redactExchange(json).bodyMayContainSecret).toBe(true);
+    const kv = redactExchange({ request: { body: { raw: "amount=100&password=hunter2", contentType: "text/plain" } } });
+    expect(kv.count).toBe(1);
+    expect(JSON.stringify(kv.exchange)).not.toContain("hunter2");
   });
 
   it("does not flag prose that merely contains a credential-ish word without a key/value shape", () => {

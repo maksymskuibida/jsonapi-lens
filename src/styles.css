@@ -4071,6 +4071,17 @@ body.has-modal {
   display: none;
 }
 
+/* A masked URL is shown redacted, as text, not as a run of dots. */
+.xmask__dots--text {
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+
+.xmask__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* ----------------------------------------------------------------- jwt --- */
 
 .xjwt {

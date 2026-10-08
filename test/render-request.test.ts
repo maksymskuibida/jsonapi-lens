@@ -22,7 +22,7 @@ import { groupsHtml } from "../src/render-document.js";
 import { buildJsonIndex } from "../src/json-index.js";
 import { buildAnnotations, renderJsonGroups } from "../src/render-json.js";
 import { headerSet } from "../src/headers.js";
-import type { Exchange } from "../src/exchange.js";
+import { decodeParams } from "../src/params.js";import type { Exchange } from "../src/exchange.js";
 import type { JsonObject } from "../src/types.js";
 
 const doc = (value: unknown): JsonObject => value as JsonObject;
@@ -696,6 +696,108 @@ describe("the band's redaction caveat says what redaction does, and no more (QA6
         const text = tt().request.band.redactionCaveat;
         for (const word of words[lang]) expect(text, word).toContain(word);
         expect(text).not.toMatch(/does not scan the body or the URL|Body und URL werden nicht|не перевіряються/);
+      } finally {
+        localStorage.setItem("jsonapi-lens:locale", "en");
+        vi.resetModules();
+      }
+    });
+  }
+});
+
+describe("URL and parameter credentials are masked on screen until revealed (QA6 gap A)", () => {
+  const PW = "qa-fake-urlpw-0004-not-real";
+  const KEY = "qa-fake-urlkey-0003-not-real";
+  const FORM = "qa-fake-formsecret-0005-not-real";
+  const exchange: Exchange = {
+    request: {
+      method: "POST",
+      url: `https://admin:${PW}@api.example.com/v2/x?api_key=${KEY}&page=2`,
+      query: decodeParams(`api_key=${KEY}&page=2`),
+      body: { raw: `a=1&client_secret=${FORM}`, contentType: "application/x-www-form-urlencoded" },
+    },
+  };
+  const mount = () => {
+    const band = renderExchangeBand({ exchange, mode: "request", currentDocument: null })!;
+    document.body.replaceChildren(band);
+    return band;
+  };
+  const everything = () =>
+    [
+      document.body.textContent,
+      new XMLSerializer().serializeToString(document.body),
+      ...Array.from(document.querySelectorAll("*")).flatMap((n) => Array.from(n.attributes).map((a) => a.value)),
+    ].join("\n");
+
+  it("keeps the password, the key and the form secret out of text, markup, hrefs and tooltips", () => {
+    mount();
+    const all = everything();
+    for (const secret of [PW, KEY, FORM]) expect(all, secret).not.toContain(secret);
+    // what *is* readable: the host, the ordinary parameter, the parameter names
+    expect(all).toContain("api.example.com");
+    expect(all).toContain("page");
+    expect(all).toContain("client_secret");
+    expect(document.querySelector(".xurl a")).toBeNull();
+    expect(document.querySelector(".xband__url")!.textContent).toContain("[REDACTED]@api.example.com");
+  });
+
+  it("reveals the URL as a real link with its full href, and hides it again", () => {
+    mount();
+    const urlToggle = document.querySelector<HTMLElement>('.xmask[data-x-secret="req.url"] .xmask__toggle')!;
+    toggleMaskedValue(urlToggle, exchange);
+    const link = document.querySelector<HTMLAnchorElement>(".xurl a");
+    expect(link?.getAttribute("href")).toContain(`${PW}@api.example.com`);
+    toggleMaskedValue(urlToggle, exchange);
+    expect(document.querySelector(".xurl a")).toBeNull();
+    expect(document.querySelector(".xurl")!.textContent).not.toContain(PW);
+  });
+
+  it("reveals one query parameter, and one form-body parameter, from the exchange", () => {
+    mount();
+    const toggle = (ref: string) =>
+      document.querySelector<HTMLElement>(`.xmask[data-x-secret="${ref}"] .xmask__toggle`)!;
+    toggleMaskedValue(toggle("req.query.0"), exchange);
+    expect(document.body.textContent).toContain(KEY);
+    expect(document.body.textContent).not.toContain(FORM);
+    toggleMaskedValue(toggle("req.body.1"), exchange);
+    expect(document.body.textContent).toContain(FORM);
+    toggleMaskedValue(toggle("req.query.0"), exchange);
+    expect(document.body.textContent).not.toContain(KEY);
+  });
+
+  it("a URL with nothing to hide is a plain link, with no reveal control", () => {
+    const band = renderExchangeBand({
+      exchange: { request: { url: "https://api.example.com/v2/x?page=2" } },
+      mode: "request",
+      currentDocument: null,
+    })!;
+    document.body.replaceChildren(band);
+    expect(document.querySelector<HTMLAnchorElement>(".xurl a")?.getAttribute("href")).toBe("https://api.example.com/v2/x?page=2");
+    expect(document.querySelector('[data-x-secret="req.url"]')).toBeNull();
+  });
+
+  it("shows a scheme-only URL as typed, never as `null` plus the rest, and never as a link", () => {
+    for (const url of ["host:notaport", "javascript:alert(1)"]) {
+      const band = renderExchangeBand({ exchange: { request: { url } }, mode: "request", currentDocument: null })!;
+      document.body.replaceChildren(band);
+      const line = document.querySelector(".xurl")!;
+      expect(line.textContent, url).toBe(url);
+      expect(line.querySelector("a"), url).toBeNull();
+    }
+  });
+});
+
+describe("the invalid-JSON body note always has a hint, with no engine text (QA6 finding 4)", () => {
+  for (const lang of ["en", "de", "uk"] as const) {
+    it(`${lang}: a body of {"a": } shows a translated headline and a translated hint`, async () => {
+      vi.resetModules();
+      localStorage.setItem("jsonapi-lens:locale", lang);
+      try {
+        const { renderBodyPart: render } = await import("../src/render-request.js");
+        const { t: tt } = await import("../src/i18n/index.js");
+        const el = render({ raw: '{"a": }', contentType: "application/json" });
+        const note = el!.querySelector(".xrow__note--conflict")!;
+        expect(note.querySelector(".xrow__note-hint")!.textContent).toBe(tt().request.review.invalidJsonBody);
+        expect(note.textContent).not.toMatch(/Expected|Unexpected|position \d/);
       } finally {
         localStorage.setItem("jsonapi-lens:locale", "en");
         vi.resetModules();

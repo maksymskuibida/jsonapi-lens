@@ -48,13 +48,17 @@ function fullExchange(): Exchange {
         { name: "Accept", value: "application/vnd.api+json" },
       ]),
       cookies: { entries: [{ name: "session", value: FAKES.cookie }] },
-      body: { raw: form, contentType: "application/x-www-form-urlencoded", form: decodeParams(form) },
+      // `{ raw, contentType }` only: the shape the request form stores. `form` is never
+      // populated by the app, and seeding it hid a real defect (see form-redaction.test.ts).
+      body: { raw: form, contentType: "application/x-www-form-urlencoded" },
     },
     response: {
       status: 200,
       headers: headerSet([{ name: "Authorization", value: FAKES.resAuth }]),
       cookies: { entries: [{ name: "sid", value: FAKES.setCookie }] },
     },
+    // The provenance placeholder: a model field the UI never fills (kept to pin
+    // that redaction covers it if an importer ever does).
     origin: { source: "curl", api_token: FAKES.origin },
   };
 }

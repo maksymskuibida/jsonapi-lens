@@ -100,4 +100,19 @@ describe("the document's Share dialog", () => {
     await vi.waitFor(() => expect(document.querySelector(".share__error-hint")).not.toBeNull());
     expect(document.querySelector(".share__error-hint")!.textContent).toBe(t().shareErrors.createFailed.network);
   });
+
+  it("the size shown counts the request that rides with the document (gap F)", () => {
+    const sizeOf = (exchange?: Exchange) => {
+      openShareModal("{}", "a.json", exchange);
+      const text = document.querySelector(".modal__subtitle, .modal__sub")?.textContent ?? document.body.textContent ?? "";
+      document.body.replaceChildren(...[]);
+      const root = document.createElement("div");
+      root.id = "modal-root";
+      document.body.append(root);
+      return text;
+    };
+    const plain = sizeOf();
+    const big = sizeOf({ request: { url: "https://api.example.com/" + "x".repeat(3000) } });
+    expect(big).not.toBe(plain);
+  });
 });

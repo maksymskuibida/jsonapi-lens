@@ -343,12 +343,31 @@ let bandSlot: HTMLElement | null = null;
 /** Rebuild the band from `current.exchange`/`exchangeMode` and swap it into `bandSlot`. A no-op before a document has rendered once. */
 function refreshExchangeBand(): void {
   if (!bandSlot || !current) return;
+  // Switching Request/Response/Both rebuilds the band; a user who had it open
+  // should not find it shut (QA6 gap D). Only carried over when there was a band.
+  const wasOpen = bandSlot.querySelector<HTMLDetailsElement>("details")?.open;
   const band = renderExchangeBand({
     exchange: current.exchange,
     mode: exchangeMode,
     currentDocument: { lens: current.lens, bytes: current.bytes },
   });
+  if (band instanceof HTMLDetailsElement && wasOpen !== undefined) band.open = wasOpen;
   bandSlot.replaceChildren(...(band ? [band] : []));
+  refreshEditRequestButton();
+}
+
+/**
+ * The overview's request button says what it does *now*: "Attach request" until
+ * there is one, "Edit request" after (QA6 gap E). It is built once with the
+ * overview, so an attach, an edit or a removal has to update it here.
+ */
+function refreshEditRequestButton(): void {
+  const button = document.getElementById("edit-request");
+  if (!button || !current) return;
+  const rm = t().request.band;
+  const attached = hasExchangeContent(current.exchange);
+  button.textContent = attached ? rm.edit : rm.attach;
+  button.setAttribute("title", attached ? rm.editTitle : rm.attachTitle);
 }
 
 /** Persist `current.exchange` the same way the document itself is persisted — a convenience over duplicating the `saveDocument` call at every edit site. */

@@ -682,6 +682,26 @@
       };
     },
 
+    /* 32 QA6 (gaps D and E): the overview's request button changes its label once
+       a request is attached, and switching Request/Response/Both leaves the
+       band open. Both are `main.ts` behaviour no unit test reaches. */
+    async s32(N) {
+      await N.fresh();
+      const before = document.getElementById('edit-request').textContent;
+      const band = await SCEN.attachMinimalExchange(N);
+      const after = document.getElementById('edit-request').textContent;
+      band.open = true;
+      await N.settle(150);
+      const modeButtons = [...document.querySelectorAll('[data-x-mode]')];
+      const other = modeButtons.find((b) => b.getAttribute('data-x-mode') === 'request');
+      if (!other) return { name: '32 request button label and band stays open', ok: false, driftPx: 0, detail: 'no mode buttons' };
+      other.click();
+      await N.settle(200);
+      const stillOpen = document.getElementById('exchange-band').open === true;
+      const ok = before !== after && stillOpen;
+      return { name: '32 request button label changes after attach; band stays open on mode switch', ok, driftPx: 0, detail: JSON.stringify({ before, after, stillOpen }) };
+    },
+
     s29: (N) => SCEN.bandScenario(N, '29 exchange attached, following a relationship, Back', true),
     s30: (N) => SCEN.bandScenario(N, '30 exchange attached, band collapsed, following a relationship, Back', false),
   };

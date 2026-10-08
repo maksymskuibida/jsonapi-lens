@@ -647,7 +647,12 @@ cookie value was still in the document as text, hidden only by `display:none`.
 
 **A share is redacted as far as the detector can recognise, not completely.** `redactExchange`
 rewrites header and cookie values, the URL's userinfo, query and fragment, the value of `Location`,
-`Referer` and `Content-Location` (through the same URL redaction), `query`, a form body and `origin`.
+`Referer`, `Content-Location` and `Origin` (through the same URL redaction), `query`, a form body and
+the provenance field `origin`. A form body is recognised **from what is stored** (`{ raw, contentType }`:
+`application/x-www-form-urlencoded`, or an empty/`text/plain` type with cleanly `k=v&k=v` text; never a
+JSON/XML-looking body), because `BodyPart.form` is never populated by the app — redacting only when it
+was is what shipped broken until the blind QA of 2026-10-09. **Redaction tests must use the shape the
+real UI produces** (`test/form-redaction.test.ts` drives the real request form).
 
 **The userinfo rule.** The *whole* `user[:password]@` prefix is masked as one counted value
 (`https://[REDACTED]@host/…`), never just the password and never conditionally on the user name
@@ -668,6 +673,12 @@ Nothing in this entry or the UI may claim more than that. Dropping every flagged
 detector is coarse (24 base64-alphabet characters anywhere), so it would drop most response bodies.
 The decoded-JWT claims panel under a masked `Authorization` header is unchanged and shows claims,
 never the token.
+
+### On-screen masking
+
+The same rule applies to the request URL's userinfo and credential-like query parameters and to
+credential-like query/form-body parameters: only a mask (or the URL shown redacted, with no `href`) is
+in the DOM until revealed. A JSON/text request body is shown as text.
 
 ### Rejected alternatives
 
