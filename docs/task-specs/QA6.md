@@ -268,3 +268,14 @@ decides whether to warn, only whether a clean form has leftovers.
 | `a=1;password=x`, `a=1` newline `password=abc`, `pass:word=x`, `password=my secret phrase`, `client_secret=abc def` | 0 | **warns**, not rewritten |
 | `{"amount":100}`, `hello there`, multipart | 0 | **warns** |
 | empty / whitespace | 0 | none |
+
+
+## Round 6 amendments (review round 7)
+
+Secret parameter names are matched per bracket/dot segment: substrings `authorization`, `credential`, `privatekey`,
+`clientassertion`, `codeverifier`, `passphrase`, `passcode` (added to `token secret signature sig apikey password passwd pwd`),
+and whole names `pass auth session sessionid sid bearer cookie otp`. Not masked by design: `passport bypass compass author
+authority sessionization code_style key pin`, and `code` unless the same set has OAuth context (`grant_type`, `redirect_uri`,
+`client_id`, `code_verifier`). Justification for `code`: OAuth's authorization code is a credential, but `code` is also common for
+non-secrets, so a name-only rule would mask `code=US`; D8 lists a bare `code=` under "not caught". A nested name (`user[pass]`) is
+masked as the whole `user` parameter (over-redaction of its siblings under the same root is accepted).

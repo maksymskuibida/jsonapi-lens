@@ -645,46 +645,55 @@ cookie value was still in the document as text, hidden only by `display:none`.
 
 ### What this does not buy
 
-**A share is redacted as far as the detector can recognise, not completely.** `redactExchange`
-rewrites header and cookie values, the URL's userinfo, query and fragment, the value of `Location`,
-`Referer`, `Content-Location` and `Origin` (through the same URL redaction), `query`, a form body and
-the provenance field `origin`. A form body is recognised **from what is stored** by **one** function, `classifyBody` (`secrets.ts`), which
-the screen, the redaction and the share dialog's warning all call: content type
-`application/x-www-form-urlencoded`, empty or `text/plain`; text not starting with `{ [ " <` **whatever the
-content type**; no whitespace; every parameter name, once percent-decoded, only letters, digits and
-`_ . - [ ]`. Anything else is **not a clean form**: never rewritten, never called safe, and flagged — always
-when it *claims* to be a form and is not (a JSON body under a form content type), otherwise when the
-detector fires. **Fail closed:** the body warning is suppressed only for a body that is a clean form (no `;`, no whitespace),
-was redacted, and has no credential-like name or value left; every other non-empty body warns, whatever its
-content type and whatever the sniffer says. Over-warning is safe; a silent share is not. This exists
-because `BodyPart.form` is never populated by the app — redacting only when it
-was is what shipped broken until the blind QA of 2026-10-09. **Redaction tests must use the shape the
-real UI produces** (`test/form-redaction.test.ts` drives the real request form).
+**A share is redacted as far as the detector can recognise, not completely.** `redactExchange` rewrites
+header and cookie values, the URL's userinfo, query and fragment, the value of `Location`, `Referer`,
+`Content-Location` and `Origin` (through the same URL redaction), `query`, a clean form body and the
+provenance field `origin`.
+
+**A form body is recognised from what is stored, by one function.** `classifyBody` (`secrets.ts`) is called
+by the screen, the redaction and the share dialog's warning: content type `application/x-www-form-urlencoded`,
+empty or `text/plain`; text not starting with `{ [ " <` **whatever the content type**; no whitespace and no `;`;
+every parameter name, once percent-decoded, only letters, digits and `_ . - [ ]`. This exists because
+`BodyPart.form` is never populated by the app, and redacting only when it was is what shipped broken until the
+blind QA of 2026-10-09. **Redaction tests must use the shape the real UI produces** (`test/form-redaction.test.ts`
+drives the real request form).
+
+**Fail closed.** The "this body may contain credentials" warning is suppressed only for a body that is a clean
+form, was redacted, and has no credential-like name or value left. **Every other non-empty body warns**, whatever
+its content type and whatever the sniffer says — JSON (benign included), text, multipart, an unclean form, a
+rewritten form with leftovers. Over-warning is safe; a silent share is not. A body that is not a clean form is
+never rewritten and never called safe. The count only counts values actually masked.
+
+**Secret parameter names** are matched in a query or a form body, per bracket/dot segment (`user[pass]`,
+`data.pwd`): the substrings `token secret signature sig apikey password passwd pwd authorization credential
+privatekey clientassertion codeverifier passphrase passcode`, and the **whole** names `pass auth session
+sessionid sid bearer cookie otp` (whole names only, so `passport`, `bypass`, `compass`, `author`, `authority`
+and `sessionization` stay readable). `key` and `pin` are deliberately not listed (a sort key, a map pin).
+**`code` is masked only when the same parameter set carries OAuth context** (`grant_type`, `redirect_uri`,
+`client_id`, `code_verifier`): OAuth's authorization code is a credential, but `code=US` and `code_style` are
+ordinary, and a name-only rule would mask both. A bare `code=4f2a9c` with no OAuth sibling is therefore not masked
+(listed below).
 
 **The userinfo rule.** The *whole* `user[:password]@` prefix is masked as one counted value
-(`https://[REDACTED]@host/…`), never just the password and never conditionally on the user name
-"looking like a credential". Stripe (`https://sk_live_…:@<api host>`) and GitHub
-(`https://<token>:x-oauth-basic@<git host>`) put the secret in the **user name**, and deciding by
-shape is the detector gap this rule exists to avoid. Cost: an ordinary user name is hidden too.
-(`sip:alice:secret@host` over-redacts to `sip:[REDACTED]@host`; harmless, not what this tool reviews.)
+(`https://[REDACTED]@host/…`), never just the password and never conditionally on the user name "looking like a
+credential". Stripe (`https://sk_live_…:@<api host>`) and GitHub (`https://<token>:x-oauth-basic@<git host>`) put
+the secret in the **user name**, and deciding by shape is the detector gap this rule exists to avoid. Cost: an
+ordinary user name is hidden too. (`sip:alice:secret@host` over-redacts to `sip:[REDACTED]@host`; harmless, not
+what this tool reviews.)
 
-It does **not** catch:
-- a custom-named header with a short value (`X-Session: s3cr3t` is neither a known credential name
-  nor credential-shaped);
-- any other header whose value is a URL with a credential in it (only `Location`, `Referer` and
-  `Content-Location` are scanned);
+**It does not catch** (and nothing in this entry or the UI may claim more than this):
+- a secret under a name the detector does not list, with a value of no recognisable shape — `X-Session: s3cr3t`
+  as a header, or `mykey=abc123` in a clean form or a query (the name is not on the list and the value is short and
+  shapeless). A clean form with such a pair is **not** warned about, because nothing credential-like is left in
+  it by any test this module has;
+- a bare `code=…` with no OAuth sibling;
+- any URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;
 - a token inside a URL **path** segment;
-- a credential inside a JSON/text body, or a multipart body (any `Content-Disposition: form-data` body is
-  **flagged**, never parsed or redacted);
-- a form body the strict name rule rejects (`;`-separated, multi-line, a name with `{ " : =`), which is
-  flagged but not rewritten;
-- a credential in a URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;
-- a credential inside a JSON/text body. That body is **detected, not rewritten**, and goes into a
-  share as it is — the share dialog says so before the link exists, but it does not remove it.
-Nothing in this entry or the UI may claim more than that. Dropping every flagged body was rejected: the
-detector is coarse (24 base64-alphabet characters anywhere), so it would drop most response bodies.
-The decoded-JWT claims panel under a masked `Authorization` header is unchanged and shows claims,
-never the token.
+- a credential inside a JSON, text or multipart body, or in a form body the strict rules reject (`;`-separated,
+  multi-line, a name with `{ " : =`, spaces in a value): these bodies are **flagged**, never parsed or rewritten, and
+  go into the share as they are.
+Dropping every flagged body was rejected: it would drop most response bodies. The decoded-JWT claims panel under a
+masked `Authorization` header is unchanged and shows claims, never the token.
 
 ### On-screen masking
 

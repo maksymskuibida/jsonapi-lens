@@ -249,3 +249,71 @@ describe("fail closed: the body warning is suppressed only for a clean, fully re
     expect(result.bodyMayContainSecret).toBe(false);
   });
 });
+
+describe("secret parameter names, both directions, through the real form (QA6 review S15)", () => {
+  const FORM = "application/x-www-form-urlencoded";
+  const masked = (body: string) => {
+    const exchange = typeIntoForm({ contentType: FORM, body });
+    const result = redactExchange(exchange);
+    return { count: result.count, warns: result.bodyMayContainSecret, raw: result.exchange.request?.body?.raw ?? "" };
+  };
+
+  // Each is a credential, in a clean form body: masked, counted, and no warning.
+  const secrets = [
+    "auth=Basic%20dXNlcjpwYXNz",
+    "authorization=xyz123",
+    "credentials=abc123",
+    "credential=abc123",
+    "private_key=abc123",
+    "privateKey=abc123",
+    "client_assertion=abc123",
+    "session=s3cr3tVALUE",
+    "sessionid=s3cr3tVALUE",
+    "sid=s3cr3tVALUE",
+    "bearer=abc123",
+    "cookie=abc123",
+    "otp=123456",
+    "passphrase=abc123",
+    "passcode=abc123",
+    "code_verifier=abc123",
+    "user[pass]=hunter2",
+    "user[password]=hunter2",
+    "data.pwd=hunter2",
+    "z[b][session]=x1y2",
+  ];
+  for (const body of secrets) {
+    it(`masks ${body.split("=")[0]}`, () => {
+      const result = masked(`a=1&${body}`);
+      expect(result.count, body).toBe(1);
+      expect(result.warns, body).toBe(false);
+      expect(result.raw, body).not.toContain(body.split("=")[1]!);
+    });
+  }
+
+  // Names that merely contain a credential word: never masked.
+  const innocent = ["passport=P123", "bypass=1", "compass=N", "passenger=2", "cwd=/tmp", "author=ann", "authority=local", "sessionization=on", "code_style=tabs", "user[name]=ann", "key=sort", "pin=map1", "code=US"];
+  for (const body of innocent) {
+    it(`leaves ${body.split("=")[0]} alone`, () => {
+      const result = masked(`a=1&${body}`);
+      expect(result.count, body).toBe(0);
+      expect(result.raw, body).toContain(body);
+    });
+  }
+
+  it("`code` is a credential only with OAuth context in the same set", () => {
+    for (const context of ["grant_type=authorization_code", "redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb", "client_id=abc", "code_verifier=zzz"]) {
+      const result = masked(`code=4f2a9c&${context}`);
+      expect(result.raw, context).not.toContain("4f2a9c");
+      expect(result.count >= 1, context).toBe(true);
+    }
+    expect(masked("code=4f2a9c&page=2").count).toBe(0);
+  });
+
+  it("in a URL query too: `?code=` with and without OAuth context, and a bracketed name", () => {
+    const withCtx = redactExchange(typeIntoForm({ url: "https://app.example.com/cb?code=4f2a9c&state=1&grant_type=authorization_code" }));
+    expect(JSON.stringify(withCtx.exchange)).not.toContain("4f2a9c");
+    const without = redactExchange(typeIntoForm({ url: "https://app.example.com/list?code=US&user[pass]=hunter2" }));
+    expect(JSON.stringify(without.exchange)).toContain("code=US");
+    expect(JSON.stringify(without.exchange)).not.toContain("hunter2");
+  });
+});

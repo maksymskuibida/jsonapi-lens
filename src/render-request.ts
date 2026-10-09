@@ -790,10 +790,10 @@ function paramBody(entry: ParamEntry): HTMLElement {
  * shows its name and a mask; the value, its alternatives and the raw wire text
  * are built only when revealed.
  */
-function paramRow(entry: ParamEntry, ref: string | null): HTMLElement {
+function paramRow(entry: ParamEntry, ref: string | null, siblings: readonly ParamEntry[]): HTMLElement {
   const row = el("div", { class: "xrow xrow--param", id: requestFieldDomId("reqParam", entry.name) });
   row.append(el("code", { class: "xrow__name", text: entry.name }));
-  row.append(ref !== null && isSecretParam(entry) ? el("div", { class: "xparam__body" }, maskedValue(ref)) : paramBody(entry));
+  row.append(ref !== null && isSecretParam(entry, siblings) ? el("div", { class: "xparam__body" }, maskedValue(ref)) : paramBody(entry));
   return row;
 }
 
@@ -804,7 +804,7 @@ function renderParamTable(params: ParamSet, base: string | null = null): HTMLEle
     list.append(el("p", { class: "xtable__empty", text: t().request.review.params.empty }));
     return list;
   }
-  params.entries.forEach((entry, index) => list.append(paramRow(entry, base === null ? null : `${base}.${index}`)));
+  params.entries.forEach((entry, index) => list.append(paramRow(entry, base === null ? null : `${base}.${index}`, params.entries)));
   return list;
 }
 

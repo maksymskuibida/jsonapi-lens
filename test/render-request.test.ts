@@ -833,6 +833,21 @@ describe("the screen masks what the share masks, for every shape the real form p
     });
   }
 
+  it("Rails-style and OAuth names are masked on screen with the same rule as the share", () => {
+    const exchange = typeIntoForm({
+      contentType: "application/x-www-form-urlencoded",
+      body: "profile[name]=ann&user[password]=qa-fake-rails-pw&session=qa-fake-sess&code=qa-fake-code&grant_type=authorization_code",
+    });
+    show(exchange);
+    expect(dom()).not.toContain("qa-fake-");
+    expect(dom()).toContain("ann");
+    expect(document.querySelectorAll(".xmask__toggle").length).toBe(3);
+    resetModalRoot();
+    const plain = typeIntoForm({ contentType: "application/x-www-form-urlencoded", body: "code=US&page=2" });
+    show(plain);
+    expect(dom()).toContain("US");
+  });
+
   it("a JSON body labelled as a form is not drawn as a parameter table, and is not called safe", () => {
     const exchange = typeIntoForm({ contentType: "application/x-www-form-urlencoded", body: '{"password":"qa-fake-j"}' });
     show(exchange);

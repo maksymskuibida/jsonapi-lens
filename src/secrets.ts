@@ -338,22 +338,69 @@ function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: RedactionT
  * makes: one unnecessary redaction costs a click to notice; one missed
  * credential is the failure this module exists to prevent.
  */
-const SECRET_PARAM_NAME_SUBSTRINGS = ["token", "secret", "signature", "sig", "apikey", "password", "passwd", "pwd"];
+const SECRET_PARAM_NAME_SUBSTRINGS = [
+  "token",
+  "secret",
+  "signature",
+  "sig",
+  "apikey",
+  "password",
+  "passwd",
+  "pwd",
+  // Added after QA6's review (S15). Each is a word that is, in practice, only
+  // ever a credential: `authorization` (an `authorization=` parameter is a
+  // header pasted into a form), `credential(s)`, `privatekey` (private_key,
+  // privateKey), `clientassertion` (OAuth client_assertion JWTs), `codeverifier`
+  // (the PKCE secret), `passphrase` and `passcode`.
+  "authorization",
+  "credential",
+  "privatekey",
+  "clientassertion",
+  "codeverifier",
+  "passphrase",
+  "passcode",
+];
 
 /**
- * Names that are credentials only as a *whole* name (after the normalisation
- * below): `pass` is the common short spelling of `password`, but as a substring
- * it would mask `passport`, `bypass` and `compass`.
+ * Names that are credentials only as a *whole* name (after normalisation, and
+ * judged **per bracket/dot segment**, so `user[pass]` and `data.pwd` count):
+ * as substrings they would mask `passport`, `bypass`, `compass`, `author`,
+ * `authority` and `sessionization`.
+ *   - `pass`, `auth`: the common short spellings of password / authorization;
+ *   - `session`, `sessionid`, `sid`: a session identifier is a bearer credential;
+ *   - `bearer`, `cookie`, `otp`: a pasted bearer token, cookie string, one-time code.
+ * Deliberately **not** here: `key` (a sort key, a map key), `pin` (a map pin),
+ * `code` (see `OAUTH_CONTEXT_NAMES`).
  */
-const SECRET_PARAM_WHOLE_NAMES = new Set(["pass"]);
+const SECRET_PARAM_WHOLE_NAMES = new Set(["pass", "auth", "session", "sessionid", "sid", "bearer", "cookie", "otp"]);
+
+/**
+ * `code` is an OAuth credential (the authorization code) and also a perfectly
+ * ordinary parameter (`code=US`, `code_style=…`, a promo code). It is masked
+ * only when the same parameter set carries OAuth context — a `grant_type`,
+ * `redirect_uri`, `client_id` or `code_verifier` — and otherwise left alone, so
+ * a plain `code=4f2a9c` is not masked (D8 lists it under "not caught").
+ */
+const OAUTH_CONTEXT_NAMES = new Set(["granttype", "redirecturi", "clientid", "codeverifier"]);
+
+export function hasOauthContext(entries: readonly ParamEntry[]): boolean {
+  return entries.some((entry) => OAUTH_CONTEXT_NAMES.has(normalizeParamName(entry.name)));
+}
 
 function normalizeParamName(name: string): string {
   return name.toLowerCase().replace(/[-_ ]/g, "");
 }
 
-export function isSecretParamName(name: string): boolean {
-  const normalized = normalizeParamName(name);
-  return SECRET_PARAM_WHOLE_NAMES.has(normalized) || SECRET_PARAM_NAME_SUBSTRINGS.some((needle) => normalized.includes(needle));
+export function isSecretParamName(name: string, oauthContext = false): boolean {
+  const whole = normalizeParamName(name);
+  if (SECRET_PARAM_NAME_SUBSTRINGS.some((needle) => whole.includes(needle))) return true;
+  // Rails-style `user[pass]` and dotted `data.pwd`: each segment is judged on its own.
+  const segments = name.split(/[\[\].]+/).filter((segment) => segment !== "").map(normalizeParamName);
+  for (const segment of segments.length > 0 ? segments : [whole]) {
+    if (SECRET_PARAM_WHOLE_NAMES.has(segment)) return true;
+    if (oauthContext && segment === "code") return true;
+  }
+  return false;
 }
 
 /**
@@ -373,16 +420,21 @@ function valueHasCredentialShape(value: ParamValue | undefined): boolean {
  * value looks like a credential? Exported as `isSecretParam`: the review masks
  * on screen with the same test redaction uses.
  */
-function shouldRedactParam(entry: ParamEntry): boolean {
-  if (isSecretParamName(entry.name)) return true;
+function shouldRedactParam(entry: ParamEntry, oauthContext = false): boolean {
+  if (isSecretParamName(entry.name, oauthContext)) return true;
+  // A bracketed or dotted name is decoded into a tree under its first segment
+  // (`user[pass]` becomes `user` -> `pass`), so the entry's own name is just `user`.
+  // The wire keys keep the whole path: judge those too.
+  if (entry.raw.some((pair) => isSecretParamName(pair.key, oauthContext))) return true;
   if (valueHasCredentialShape(entry.value)) return true;
   if (entry.alternatives.some((alt) => valueHasCredentialShape(alt.value))) return true;
   if (entry.conflict?.some((reading) => valueHasCredentialShape(reading.value))) return true;
   return false;
 }
 
-export function isSecretParam(entry: ParamEntry): boolean {
-  return shouldRedactParam(entry);
+/** `siblings`: the other parameters of the same set, for the OAuth-context rule on `code`. */
+export function isSecretParam(entry: ParamEntry, siblings: readonly ParamEntry[] = []): boolean {
+  return shouldRedactParam(entry, hasOauthContext(siblings));
 }
 
 /** Replace every leaf of a decoded value with the redaction marker, preserving array/object shape where cheap to. */
@@ -457,8 +509,9 @@ function isEmptyParamValue(value: ParamValue | undefined): boolean {
  */
 function redactEntries(entries: ParamEntry[], tally: RedactionTally): { entries: ParamEntry[]; changed: boolean } {
   let changed = false;
+  const oauth = hasOauthContext(entries);
   const result = entries.map((entry) => {
-    if (!shouldRedactParam(entry)) return entry;
+    if (!shouldRedactParam(entry, oauth)) return entry;
     changed = true;
     if (!isEmptyParamValue(entry.value) && !(tally.dedupeNames && tally.countedNames.has(entry.name))) {
       // A body has no twin to dedupe against, and `decodeParams` folds two
@@ -702,8 +755,9 @@ function formHasLeftovers(original: ParamEntry[]): boolean {
   // Only what redaction did not touch can be a leftover; a redacted entry is masked.
   // Judged on the **wire text** (`entry.raw`), not the decoded tree: a dotted bare
   // name such as a JWT is split into nested keys by the decoder, which loses it.
+  const oauth = hasOauthContext(original);
   return original
-    .filter((entry) => !shouldRedactParam(entry))
+    .filter((entry) => !shouldRedactParam(entry, oauth))
     .some((entry) =>
       entry.raw.some(
         (pair) =>
