@@ -16,62 +16,12 @@
  * matter.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { openRequestForm } from "../src/request-form.js";
-import type { RequestFormResult } from "../src/request-form.js";
-import { mergeExchange } from "../src/exchange.js";
+import { typeIntoForm, resetModalRoot } from "./helpers/type-into-form.js";
 import type { Exchange } from "../src/exchange.js";
 import { redactExchange } from "../src/secrets.js";
 import { inspectExchangeForShare } from "../src/share.js";
 
-beforeEach(() => {
-  const root = document.createElement("div");
-  root.id = "modal-root";
-  const toast = document.createElement("div");
-  toast.id = "toast";
-  document.body.replaceChildren(root, toast);
-});
-
-interface Typed {
-  url?: string;
-  headers?: Array<[string, string]>;
-  cookies?: Array<[string, string]>;
-  contentType?: string;
-  body?: string;
-}
-
-const set = (el: HTMLInputElement | HTMLTextAreaElement, value: string) => {
-  el.value = value;
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-};
-
-/** Type into the real form and Save; return the exchange `main.ts` would hold. */
-function typeIntoForm(typed: Typed): Exchange {
-  let saved: RequestFormResult | null = null;
-  openRequestForm({}, (result) => {
-    saved = result;
-  });
-  const lists = [...document.querySelectorAll<HTMLElement>(".xform-rowlist")];
-  const addRows = (list: HTMLElement, rows: Array<[string, string]> = []) => {
-    for (const [name, value] of rows) {
-      list.querySelector<HTMLButtonElement>(".btn--sm")!.click();
-      const all = list.querySelectorAll<HTMLElement>(".xform-row");
-      const row = all[all.length - 1]!;
-      set(row.querySelector<HTMLInputElement>(".xform__name")!, name);
-      set(row.querySelector<HTMLInputElement>(".xform__value")!, value);
-    }
-  };
-  if (typed.url !== undefined) set(document.querySelector<HTMLInputElement>(".xform__url-input")!, typed.url);
-  addRows(lists[1]!, typed.headers); // request headers (query is first)
-  addRows(lists[2]!, typed.cookies); // request cookies
-  const requestBody = document.querySelector<HTMLElement>(".xform-body")!;
-  if (typed.contentType !== undefined) set(requestBody.querySelector<HTMLInputElement>("input")!, typed.contentType);
-  if (typed.body !== undefined) set(requestBody.querySelector<HTMLTextAreaElement>("textarea")!, typed.body);
-  document.querySelector<HTMLButtonElement>(".modal .modal__actions .xform__save")!.click();
-  expect(saved, "the form saved").not.toBeNull();
-  const { request, response } = saved as unknown as RequestFormResult;
-  return mergeExchange({}, { request, response });
-}
+beforeEach(resetModalRoot);
 
 describe("the real form's body shape: { raw, contentType } and nothing else", () => {
   it("never populates BodyPart.form (which is why redaction cannot wait for it)", () => {
@@ -201,5 +151,40 @@ describe("the whole typed request, end to end through redaction", () => {
     expect(json).toContain("page=2");
     // userinfo, api_key (url + query once), Authorization, cookie, form field
     expect(count).toBe(5);
+  });
+});
+
+describe("a body that is not a clean form is never called safe (QA6 review B5, S12)", () => {
+  const FORM = "application/x-www-form-urlencoded";
+  const cases: Array<[string, string, string]> = [
+    ["JSON labelled as a form", FORM, '{"password":"hunter2secretX"}'],
+    ["a percent-encoded `=` inside one name", FORM, "password%3Dhunter2secretX"],
+    ["a `;`-separated body", FORM, "a=1;password=hunter2secretX"],
+    ["a multi-line body", FORM, "a=1\npassword=hunter2secretX"],
+    ["a name with a colon", FORM, "pass:word=hunter2secretX"],
+    ["an array-looking body with a form type", FORM, '["password=hunter2secretX"]'],
+    ["a multipart body", "multipart/form-data; boundary=b", '--b\r\nContent-Disposition: form-data; name="password"\r\n\r\nhunter2secretX\r\n--b--'],
+    ["a benign multipart body (cannot be parsed, so flagged)", "multipart/form-data; boundary=b", '--b\r\nContent-Disposition: form-data; name="title"\r\n\r\nhello\r\n--b--'],
+  ];
+  for (const [name, contentType, raw] of cases) {
+    it(`${name}: not rewritten, counts nothing, and the dialog warns`, () => {
+      const exchange = typeIntoForm({ contentType, body: raw });
+      const result = redactExchange(exchange);
+      expect(result.exchange.request?.body?.raw).toBe(exchange.request?.body?.raw); // untouched: nothing claimed as removed
+      expect(result.count).toBe(0);
+      expect(result.bodyMayContainSecret).toBe(true);
+      expect(inspectExchangeForShare([{ label: "a", text: "{}", exchange }])).toEqual({
+        redacting: 0,
+        bodyUnredacted: true,
+      });
+    });
+  }
+
+  it("the strict name rule: letters, digits and _ . - [ ] (also percent-encoded) are a clean form; anything else is not", () => {
+    for (const ok of ["user[name]=a&pass.word=b", "a%5Bb%5D=1", "x-y_z=1", "pass%77ord=hunter2secretX"]) {
+      const result = redactExchange(typeIntoForm({ contentType: FORM, body: ok }));
+      expect(result.bodyMayContainSecret, ok).toBe(false);
+    }
+    expect(redactExchange(typeIntoForm({ contentType: FORM, body: "pass%77ord=hunter2secretX" })).count).toBe(1);
   });
 });

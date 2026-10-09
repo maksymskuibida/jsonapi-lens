@@ -648,9 +648,14 @@ cookie value was still in the document as text, hidden only by `display:none`.
 **A share is redacted as far as the detector can recognise, not completely.** `redactExchange`
 rewrites header and cookie values, the URL's userinfo, query and fragment, the value of `Location`,
 `Referer`, `Content-Location` and `Origin` (through the same URL redaction), `query`, a form body and
-the provenance field `origin`. A form body is recognised **from what is stored** (`{ raw, contentType }`:
-`application/x-www-form-urlencoded`, or an empty/`text/plain` type with cleanly `k=v&k=v` text; never a
-JSON/XML-looking body), because `BodyPart.form` is never populated by the app — redacting only when it
+the provenance field `origin`. A form body is recognised **from what is stored** by **one** function, `classifyBody` (`secrets.ts`), which
+the screen, the redaction and the share dialog's warning all call: content type
+`application/x-www-form-urlencoded`, empty or `text/plain`; text not starting with `{ [ " <` **whatever the
+content type**; no whitespace; every parameter name, once percent-decoded, only letters, digits and
+`_ . - [ ]`. Anything else is **not a clean form**: never rewritten, never called safe, and flagged — always
+when it *claims* to be a form and is not (a JSON body under a form content type), otherwise when the
+detector fires. The body warning may be suppressed only for a body that parsed cleanly. This exists
+because `BodyPart.form` is never populated by the app — redacting only when it
 was is what shipped broken until the blind QA of 2026-10-09. **Redaction tests must use the shape the
 real UI produces** (`test/form-redaction.test.ts` drives the real request form).
 
@@ -667,6 +672,11 @@ It does **not** catch:
 - any other header whose value is a URL with a credential in it (only `Location`, `Referer` and
   `Content-Location` are scanned);
 - a token inside a URL **path** segment;
+- a credential inside a JSON/text body, or a multipart body (any `Content-Disposition: form-data` body is
+  **flagged**, never parsed or redacted);
+- a form body the strict name rule rejects (`;`-separated, multi-line, a name with `{ " : =`), which is
+  flagged but not rewritten;
+- a credential in a URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;
 - a credential inside a JSON/text body. That body is **detected, not rewritten**, and goes into a
   share as it is — the share dialog says so before the link exists, but it does not remove it.
 Nothing in this entry or the UI may claim more than that. Dropping every flagged body was rejected: the
@@ -676,9 +686,12 @@ never the token.
 
 ### On-screen masking
 
-The same rule applies to the request URL's userinfo and credential-like query parameters and to
-credential-like query/form-body parameters: only a mask (or the URL shown redacted, with no `href`) is
-in the DOM until revealed. A JSON/text request body is shown as text.
+The same rule applies to the request URL's userinfo and credential-like query parameters, to
+credential-like query/form-body parameters, and to the value of `Location`, `Referer`, `Content-Location`
+and `Origin`: only a mask (or the URL shown redacted, with no `href`) is in the DOM until revealed. The
+screen decides with the same functions the share uses (`classifyBody`, `maskUrlForDisplay`,
+`isSecretParam`), including for URL text that does not parse (`admin:pw@host/x`, `not a url?api_key=…`).
+A JSON/text/multipart request body is shown as text.
 
 ### Rejected alternatives
 

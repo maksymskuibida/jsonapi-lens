@@ -83,9 +83,16 @@ import { formatBytes } from "./format.js";
 import { getHeader } from "./headers.js";
 import type { HeaderSet } from "./headers.js";
 import type { CookieSet, SetCookie, SetCookieSet } from "./cookies.js";
-import { decodeParams } from "./params.js";
 import type { ParamEntry, ParamSet, ParamValue } from "./params.js";
-import { decodeJwt, detectCredentialShape, isSecretParam, maskUrlForDisplay, shouldMaskHeader } from "./secrets.js";
+import {
+  classifyBody,
+  decodeJwt,
+  detectCredentialShape,
+  isSecretParam,
+  isUrlValuedHeader,
+  maskUrlForDisplay,
+  shouldMaskHeader,
+} from "./secrets.js";
 import type { DecodedJwt } from "./secrets.js";
 import type { BodyPart, Exchange, RequestPart, ResponsePart } from "./exchange.js";
 import type { DocumentIndex, JsonIndex, JsonValue, Lens, Resource } from "./types.js";
@@ -379,7 +386,9 @@ export function resolveSecret(exchange: Exchange, ref: string): string | null {
 function paramSetFor(exchange: Exchange, base: string): ParamSet | null {
   if (base === "req.query") return exchange.request?.query ?? null;
   const body = base === "req.body" ? exchange.request?.body : exchange.response?.body;
-  return body ? decodeParams(body.raw) : null;
+  if (!body) return null;
+  const classified = classifyBody(body); // the same decision the table was drawn under
+  return classified.kind === "form" ? classified.params : null;
 }
 
 /**
@@ -391,8 +400,10 @@ function paramSetFor(exchange: Exchange, base: string): ParamSet | null {
 function revealedNode(exchange: Exchange, ref: string): HTMLElement | null {
   if (ref === "req.url") {
     const url = exchange.request?.url;
-    const parsed = url === undefined ? null : parseRequestUrl(url);
-    return parsed ? urlMain(parsed, true) : null;
+    if (url === undefined) return null;
+    const parsed = parseRequestUrl(url);
+    // Text that is not a URL with a host is shown as typed, so that is what is revealed.
+    return parsed && parsed.url.origin !== "null" ? urlMain(parsed, true) : el("code", { class: "xurl__raw", text: url.trim() });
   }
   const param = PARAM_REF.exec(ref);
   if (param) {
@@ -542,6 +553,21 @@ interface HeaderRowOptions {
   index: number;
 }
 
+/**
+ * A header's value cell: dots when the header is a credential; the value as is
+ * when it is ordinary; and for a header whose value is a URL (`Location`,
+ * `Referer`, `Content-Location`, `Origin`) the URL **redacted**, with a reveal,
+ * when it carries a credential — the same function the share uses (QA6 S10).
+ */
+function headerValueCell(name: string, value: string, masked: boolean, ref: string): HTMLElement {
+  if (masked) return maskedValue(ref);
+  if (isUrlValuedHeader(name)) {
+    const shown = maskUrlForDisplay(value);
+    if (shown !== value) return maskedValue(ref, shown);
+  }
+  return plainValue(value);
+}
+
 function headerRow(name: string, value: string, options: HeaderRowOptions): HTMLElement {
   const masked = shouldMaskHeader(name, value);
   const row = el("div", {
@@ -550,7 +576,7 @@ function headerRow(name: string, value: string, options: HeaderRowOptions): HTML
   });
   row.append(
     el("code", { class: "xrow__name", text: name }),
-    el("div", { class: "xrow__value" }, maskableValue(value, masked ? secretRef(options.side, "header", options.index) : null)),
+    el("div", { class: "xrow__value" }, headerValueCell(name, value, masked, secretRef(options.side, "header", options.index))),
   );
 
   const shape = detectCredentialShape(value);
@@ -784,7 +810,6 @@ function renderParamTable(params: ParamSet, base: string | null = null): HTMLEle
 
 /* ------------------------------------------------------------------ body --- */
 
-const FORM_URLENCODED_RE = /^\s*application\/x-www-form-urlencoded\s*(?:;|$)/i;
 const JSON_CONTENT_TYPE_RE = /json/i;
 
 /** `readAny`, but `null` instead of a thrown `DocumentError` — "anything else stays text." */
@@ -973,8 +998,11 @@ export function renderBodyPart(body: BodyPart | undefined, side: "req" | "res" |
     ),
   );
 
-  if (body.contentType && FORM_URLENCODED_RE.test(body.contentType)) {
-    wrap.append(renderParamTable(decodeParams(body.raw), side === null ? null : `${side}.body`));
+  // The same classifier redaction uses: a body is a form on screen exactly when
+  // it would be one in the share (QA6 review B4).
+  const classified = classifyBody(body);
+  if (classified.kind === "form") {
+    wrap.append(renderParamTable(classified.params, side === null ? null : `${side}.body`));
     return wrap;
   }
 
@@ -1063,19 +1091,14 @@ function renderUrlBlock(url: string | undefined): HTMLElement {
 
   const parsed = parseRequestUrl(url);
   if (!parsed) {
-    return el(
-      "div",
-      { class: "xurl" },
-      el("code", { class: "xurl__raw", text: url }),
-      el("p", { class: "xrow__note", text: m.urlUnparseable }),
-    );
+    return el("div", { class: "xurl" }, rawUrlText(url), el("p", { class: "xrow__note", text: m.urlUnparseable }));
   }
 
   // `host:notaport`, `javascript:alert(1)`: a scheme with no host. Its origin is
   // the string "null", which is not something the user typed — show the text as
   // typed, unlinked.
   if (parsed.url.origin === "null") {
-    return el("div", { class: "xurl" }, el("code", { class: "xurl__raw", text: url.trim() }));
+    return el("div", { class: "xurl" }, rawUrlText(url));
   }
 
   const wrap = el("div", { class: "xurl" });
@@ -1093,6 +1116,20 @@ function renderUrlBlock(url: string | undefined): HTMLElement {
     wrap.append(el("p", { class: "xrow__note", text: m.assumedScheme(parsed.url.protocol.replace(":", "")) }));
   }
   return wrap;
+}
+
+/**
+ * URL text that is not a URL with a host — shown as typed, **but masked by the
+ * same function the share uses**: `admin:pw@host/x`, `not a url?api_key=…` and
+ * `javascript:alert(1)//?token=…` all carry a credential the share redacts, and
+ * must not be in the DOM in clear (QA6 review B4). Reveal restores the text.
+ */
+function rawUrlText(url: string): HTMLElement {
+  const typed = url.trim();
+  const masked = maskUrlForDisplay(typed);
+  return masked === typed
+    ? el("code", { class: "xurl__raw", text: typed })
+    : el("span", { class: "xurl__raw-wrap" }, maskedValue("req.url", masked));
 }
 
 /** A URL carrying a credential: shown redacted (no secret in the text or in an `href`), with a reveal that builds the real link. */

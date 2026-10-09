@@ -343,7 +343,7 @@ describe("redactExchange", () => {
     const rawForm = `amount=100&api_key=${secret}`;
     const exchange: Exchange = {
       request: {
-        body: { raw: rawForm, contentType: "application/x-www-form-urlencoded", form: decodeParams(rawForm) },
+        body: { raw: rawForm, contentType: "application/x-www-form-urlencoded" },
       },
     };
     const { exchange: redacted, count, bodyMayContainSecret } = redactExchange(exchange);

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   effectiveMode,
   hasExchangeContent,
@@ -16,6 +16,7 @@ import {
   responseReferenceTime,
 } from "../src/render-request.js";
 import { t } from "../src/i18n/index.js";
+import { typeIntoForm, resetModalRoot } from "./helpers/type-into-form.js";
 import { requestResourceDomId, requestNodeDomId } from "../src/ident.js";
 import { buildIndex } from "../src/parse.js";
 import { groupsHtml } from "../src/render-document.js";
@@ -663,7 +664,6 @@ describe("an invalid-JSON request body reads as text, in every language (QA6)", 
 describe("the band's redaction caveat says what redaction does, and no more (QA6)", () => {
   it("redactExchange does everything the caveat claims, and does not rewrite a JSON body", async () => {
     const { redactExchange } = await import("../src/secrets.js");
-    const { decodeParams } = await import("../src/params.js");
     const form = "a=1&client_secret=qa-fake-form-not-real";
     const json = '{"password":"qa-fake-json-not-real"}';
     const { exchange } = redactExchange({
@@ -671,7 +671,7 @@ describe("the band's redaction caveat says what redaction does, and no more (QA6
         url: "https://user:qa-fake-pw-not-real@api.example.com/x?api_key=qa-fake-key-0123456789-not-real",
         headers: headerSet([{ name: "Authorization", value: "Bearer qa-fake-not-real" }]),
         cookies: { entries: [{ name: "s", value: "qa-fake-cookie-not-real" }] },
-        body: { raw: form, contentType: "application/x-www-form-urlencoded", form: decodeParams(form) },
+        body: { raw: form, contentType: "application/x-www-form-urlencoded" },
       },
       response: { body: { raw: json, contentType: "application/json" } },
     });
@@ -804,4 +804,75 @@ describe("the invalid-JSON body note always has a hint, with no engine text (QA6
       }
     });
   }
+});
+
+describe("the screen masks what the share masks, for every shape the real form produces (QA6 review B4, S10)", () => {
+  const dom = () => {
+    const attrs = Array.from(document.querySelectorAll("*")).flatMap((n) => Array.from(n.attributes).map((a) => a.value));
+    return [document.body.textContent, new XMLSerializer().serializeToString(document.body), ...attrs].join("\n");
+  };
+  beforeEach(resetModalRoot);
+  const show = (exchange: Exchange) => {
+    const band = renderExchangeBand({ exchange, mode: "request", currentDocument: null })!;
+    document.body.replaceChildren(band);
+    return band;
+  };
+  const press = (exchange: Exchange, selector = ".xmask__toggle") => {
+    for (const b of document.querySelectorAll<HTMLElement>(selector)) toggleMaskedValue(b, exchange);
+  };
+
+  for (const contentType of ["application/x-www-form-urlencoded", "", "text/plain"]) {
+    it(`a form body with content type ${JSON.stringify(contentType)}: the password is not on screen until revealed`, () => {
+      const exchange = typeIntoForm({ contentType, body: "username=alice&password=qa-fake-screen-pw-not-real" });
+      show(exchange);
+      expect(dom()).not.toContain("qa-fake-screen-pw");
+      expect(dom()).toContain("alice");
+      expect(document.querySelectorAll(".xrow--param").length).toBe(2);
+      press(exchange);
+      expect(document.body.textContent).toContain("qa-fake-screen-pw-not-real");
+    });
+  }
+
+  it("a JSON body labelled as a form is not drawn as a parameter table, and is not called safe", () => {
+    const exchange = typeIntoForm({ contentType: "application/x-www-form-urlencoded", body: '{"password":"qa-fake-j"}' });
+    show(exchange);
+    expect(document.querySelectorAll(".xrow--param").length).toBe(0);
+  });
+
+  const rawUrls: Array<[string, string]> = [
+    ["a scheme-less user:password@host", "admin:qa-fake-urlpw-s-not-real@api.example.com/x"],
+    ["an unparseable URL with a credential query", "not a url?api_key=qa-fake-urlkey-s-not-real"],
+    ["a scheme-only URL with a credential query", "javascript:alert(1)//?token=qa-fake-tok-s-0123456789-not-real"],
+  ];
+  for (const [name, url] of rawUrls) {
+    it(`${name}: masked in the line and the summary, revealable, no href`, () => {
+      const exchange = typeIntoForm({ url });
+      show(exchange);
+      expect(dom()).not.toContain("qa-fake-");
+      expect(document.querySelector(".xband__url")!.textContent).toMatch(/REDACTED/);
+      expect(document.querySelector('.xmask[data-x-secret="req.url"]')).not.toBeNull();
+      press(exchange);
+      expect(document.querySelector(".xurl")!.textContent).toContain(url);
+      expect(document.querySelector(".xurl a")).toBeNull(); // never linked
+    });
+  }
+
+  it("Location, Referer, Content-Location and Origin: shown redacted with a reveal when they carry a credential, plain when clean", () => {
+    const exchange = typeIntoForm({
+      headers: [
+        ["Origin", "https://u:qa-fake-o-pw-not-real@o.example.com"],
+        ["Referer", "https://r.example.com/p?access_token=qa-fake-r-tok-0123456789-not-real"],
+        ["Location", "https://l.example.com/cb?state=1"],
+        ["Content-Location", "/v2/x?token=qa-fake-cl-tok-0123456789-not-real"],
+      ],
+    });
+    show(exchange);
+    expect(dom()).not.toContain("qa-fake-");
+    expect(document.body.textContent).toContain("https://l.example.com/cb?state=1"); // clean: shown as is
+    expect(document.querySelectorAll(".xmask__toggle")).toHaveLength(3);
+    press(exchange);
+    expect(document.body.textContent).toContain("qa-fake-o-pw-not-real");
+    expect(document.body.textContent).toContain("qa-fake-r-tok");
+    expect(document.body.textContent).toContain("qa-fake-cl-tok");
+  });
 });

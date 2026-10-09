@@ -42,15 +42,15 @@
  *     where only one is scrubbed is worse than neither, because whichever one
  *     a later reader reaches for is a coin flip.
  *   - **A form-urlencoded body**: fully redacted, the same way, for the same
-    reason, **read from what is stored**: the request form keeps a body as
-    `{ raw, contentType }` only (`BodyPart.form` is never populated), so
-    `formParamsOf` decodes `raw` when the content type is
-    `application/x-www-form-urlencoded`, or is empty / `text/plain` and the text
-    is cleanly `k=v&k=v`. `raw` is **rewritten** from the redacted parameters.
-  - **Header values that are URLs** (`Location`, `Referer`, `Content-Location`,
-    `Origin`) and a URL's `user[:password]@` prefix: see `redactUrl`.
-  - **Any other body** (JSON, plain text, anything `form` was not decoded
- *     from): **detected, not redacted.** Rewriting arbitrary body text without
+ *     reason, **read from what is stored**: the request form keeps a body as
+ *     `{ raw, contentType }` only (`BodyPart.form` is never populated), so
+ *     `classifyBody` decides whether it is a clean form — the one function the
+ *     screen and the share both ask — and `raw` is **rewritten** from the
+ *     redacted parameters.
+ *   - **Header values that are URLs** (`Location`, `Referer`, `Content-Location`,
+ *     `Origin`) and a URL's `user[:password]@` prefix: see `redactUrl`.
+ *   - **Any other body** (JSON, plain text, multipart, anything that is not a
+ *     clean form): **detected, not redacted.** Rewriting arbitrary body text without
  *     corrupting it is a bigger job than this module attempts tonight, so
  *     `redactExchange` instead sets `bodyMayContainSecret: true` when a
  *     request or response body's raw text contains a credential-shaped
@@ -239,6 +239,11 @@ export interface RedactionResult {
  */
 const URL_VALUED_HEADERS = new Set(["location", "referer", "content-location", "origin"]);
 
+/** Is this a header whose value is a URL? The review masks these on screen the way the share does. */
+export function isUrlValuedHeader(name: string): boolean {
+  return URL_VALUED_HEADERS.has(name.toLowerCase());
+}
+
 function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally): HeaderSet | undefined {
   if (!headers) return headers;
   let changed = false;
@@ -358,18 +363,19 @@ function valueHasCredentialShape(value: ParamValue | undefined): boolean {
 
 /**
  * Should this parameter be redacted — by name, or because any reading of its
- * value looks like a credential?
+ * value looks like a credential? Exported as `isSecretParam`: the review masks
+ * on screen with the same test redaction uses.
  */
-export function isSecretParam(entry: ParamEntry): boolean {
-  return shouldRedactParam(entry);
-}
-
 function shouldRedactParam(entry: ParamEntry): boolean {
   if (isSecretParamName(entry.name)) return true;
   if (valueHasCredentialShape(entry.value)) return true;
   if (entry.alternatives.some((alt) => valueHasCredentialShape(alt.value))) return true;
   if (entry.conflict?.some((reading) => valueHasCredentialShape(reading.value))) return true;
   return false;
+}
+
+export function isSecretParam(entry: ParamEntry): boolean {
+  return shouldRedactParam(entry);
 }
 
 /** Replace every leaf of a decoded value with the redaction marker, preserving array/object shape where cheap to. */
@@ -604,6 +610,14 @@ const BASE64_ANYWHERE_RE = new RegExp(`[A-Za-z0-9+/_-]{${MIN_BASE64_LENGTH},}`);
  * structured data with a credential embedded in it, not a bare token.
  */
 function bodyMightContainCredential(raw: string): boolean {
+  if (MULTIPART_RE.test(raw)) return true; // cannot be parsed here: any multipart body is flagged
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    /* not percent-encoded text */
+  }
+  if (decoded !== raw && bodyMightContainCredential(decoded)) return true;
   return (
     JWT_ANYWHERE_RE.test(raw) ||
     STRIPE_KEY_ANYWHERE_RE.test(raw) ||
@@ -614,45 +628,69 @@ function bodyMightContainCredential(raw: string): boolean {
 }
 
 /**
- * A form-urlencoded body (`BodyPart.form` populated) is redacted exactly like
- * `query` — it is the same `ParamSet` shape — and `raw` is **rewritten** from
- * the redacted form for the same reason a URL's query string is: a redacted
- * `form` sitting beside an untouched `raw` would still leak the secret the
- * moment anything serialises `raw`. Any other body is left untouched and
- * merely sniffed via `bodyMightContainCredential`.
- */
-/**
- * The parameters of a body that is form-urlencoded, **read from what is stored**.
+ * Does this body parse **cleanly** as a form — and if so, what are its
+ * parameters? The one answer the screen (`renderBodyPart`), the redaction
+ * (`redactBodyPart`) and the share dialog's warning all use; two classifiers
+ * that disagree are how a value is masked in the share and shown in clear on
+ * screen, or the reverse (QA6 review B4, B5).
  *
  * The request form stores a body as `{ raw, contentType }` and nothing else —
- * `BodyPart.form` is never populated anywhere in the app — so redaction that
- * waited for `form` redacted nothing in the real product while every test that
- * seeded `form` by hand passed (QA6 local QA, finding 1). A body counts as a
- * form when its content type is `application/x-www-form-urlencoded` (any
- * parameters, any case), **or** when the content type is empty or `text/plain`
- * and the text is cleanly `k=v&k=v`: people leave the content type blank, and
- * over-redacting a body that happened to look like a form is safe where
- * under-redacting one is not. A JSON/XML-looking body never qualifies.
+ * `BodyPart.form` is never populated — so this reads what is stored. Clean means
+ * all of:
+ *   - the content type is `application/x-www-form-urlencoded` (any parameters,
+ *     any case), or empty, or `text/plain` (people leave it blank; over-redacting
+ *     a body that merely looked like a form is safe, under-redacting is not);
+ *   - the text does not start with `{ [ " <` **whatever the content type** — a
+ *     JSON body labelled as a form is not a form;
+ *   - it contains no whitespace (so a multi-line or `;`-separated body is not
+ *     read as one) and every `&`-separated piece is non-empty and decodes;
+ *   - every parameter **name**, once percent-decoded, is only letters, digits
+ *     and `_ . - [ ]`. A name containing `{ " : = =` or a space means the text
+ *     was not a form (`password%3Dsecret` decodes to one name with an `=` in it),
+ *     and treating it as one would hide the secret in a "parameter name";
+ *   - outside the declared-form type, each piece has an `=`.
+ * Anything else is `other`: never rewritten, and flagged when in doubt.
  */
+export type BodyKind = { kind: "form"; params: ParamSet } | { kind: "other" };
+
 const FORM_CONTENT_TYPE_RE = /^\s*application\/x-www-form-urlencoded\s*(?:;|$)/i;
 const PLAIN_OR_EMPTY_CONTENT_TYPE_RE = /^\s*(?:text\/plain\s*(?:;.*)?)?$/i;
-const CLEAN_FORM_TEXT_RE = /^[^{["<\s=&][^=&\s]*=[^&\s]*(?:&[^=&\s]+=[^&\s]*)*$/;
+const JSON_OR_MARKUP_START_RE = /^[{["<]/;
+const STRICT_PARAM_NAME_RE = /^[A-Za-z0-9_.\-[\]]+$/;
 
-function formParamsOf(body: BodyPart): ParamSet | null {
-  if (body.form) return body.form;
+export function classifyBody(body: BodyPart): BodyKind {
+  const text = body.raw.trim();
+  if (text === "" || JSON_OR_MARKUP_START_RE.test(text) || /\s/.test(text)) return { kind: "other" };
   const contentType = body.contentType ?? "";
-  if (FORM_CONTENT_TYPE_RE.test(contentType)) return decodeParams(body.raw);
-  if (PLAIN_OR_EMPTY_CONTENT_TYPE_RE.test(contentType) && CLEAN_FORM_TEXT_RE.test(body.raw.trim())) {
-    return decodeParams(body.raw.trim());
+  const declaredForm = FORM_CONTENT_TYPE_RE.test(contentType);
+  if (!declaredForm && !PLAIN_OR_EMPTY_CONTENT_TYPE_RE.test(contentType)) return { kind: "other" };
+
+  for (const piece of text.split("&")) {
+    if (piece === "") return { kind: "other" };
+    const eq = piece.indexOf("=");
+    if (eq < 0 && !declaredForm) return { kind: "other" };
+    const rawName = eq < 0 ? piece : piece.slice(0, eq);
+    let name: string;
+    try {
+      name = decodeURIComponent(rawName.replace(/\+/g, "%20"));
+    } catch {
+      return { kind: "other" };
+    }
+    if (!STRICT_PARAM_NAME_RE.test(name)) return { kind: "other" };
   }
-  return null;
+  return { kind: "form", params: decodeParams(text) };
 }
+
+/** Is this text a multipart body? Neither redacted nor parsed; always flagged. */
+const MULTIPART_RE = /content-disposition\s*:\s*form-data/i;
 
 /**
  * A form body is redacted exactly like `query` — the same `ParamSet` path — and
  * `raw` is **rewritten** from the redacted parameters, so nothing unredacted is
- * left beside them. Any other body is left untouched and merely sniffed via
- * `bodyMightContainCredential`.
+ * left beside them. A body that is not a clean form is left untouched and
+ * sniffed (`bodyMightContainCredential`); one that **claims** to be a form and
+ * is not (a JSON body under a form content type) is flagged unconditionally —
+ * fail closed.
  */
 function redactBodyPart(
   body: BodyPart | undefined,
@@ -660,16 +698,18 @@ function redactBodyPart(
 ): { body: BodyPart | undefined; mayContainSecret: boolean } {
   if (!body) return { body, mayContainSecret: false };
 
-  const form = formParamsOf(body);
-  if (form) {
-    const { entries, changed } = redactEntries(form.entries, tally);
+  const classified = classifyBody(body);
+  if (classified.kind === "form") {
+    const { entries, changed } = redactEntries(classified.params.entries, tally);
     if (changed) {
       const redactedForm: ParamSet = { entries };
       return { body: { ...body, raw: encodeParams(redactedForm), form: redactedForm }, mayContainSecret: false };
     }
+    return { body, mayContainSecret: bodyMightContainCredential(body.raw) };
   }
 
-  return { body, mayContainSecret: bodyMightContainCredential(body.raw) };
+  const claimsForm = FORM_CONTENT_TYPE_RE.test(body.contentType ?? "") && body.raw.trim() !== "";
+  return { body, mayContainSecret: claimsForm || bodyMightContainCredential(body.raw) };
 }
 
 /**

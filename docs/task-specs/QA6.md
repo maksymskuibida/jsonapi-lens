@@ -213,3 +213,32 @@ seeded `form` by hand.
 **Test rule added:** every redaction test uses the shape the real UI produces. `test/form-redaction.test.ts`
 types into the real request form (`openRequestForm`) and passes what `onSave` returns to redaction.
 Fixture audit: the hand-populated fields the form never fills were `BodyPart.form` and `Exchange.origin`.
+
+
+## Round 4 amendments (review round 5)
+
+**One classifier, one URL mask, used by screen and share.**
+- `classifyBody(body)` (`secrets.ts`) decides "clean form" for the screen (`renderBodyPart`, reveal), the
+  redaction (`redactBodyPart`) and the dialog warning. Clean = content type form/empty/`text/plain`; not starting
+  `{ [ " <` whatever the content type; no whitespace; each `&` piece non-empty; each parameter name, percent-decoded,
+  only letters, digits and `_ . - [ ]`; a `=` in every piece unless the type is the declared form type.
+- Not clean -> never rewritten, counted as nothing, **flagged** (the "may contain credentials" note shows): always when it
+  claims `application/x-www-form-urlencoded` and is not clean; otherwise when the detector fires. Multipart bodies
+  (`Content-Disposition: form-data`) are always flagged and never parsed or redacted (listed in D8 "not caught").
+  The sniffer also decodes percent-encoding before looking.
+- `maskUrlForDisplay` masks a URL on screen, including text that does not parse (scheme-less `user:pw@host/x`,
+  `not a url?api_key=…`, `javascript:alert(1)//?token=…`): masked line, summary and a reveal that restores the typed text.
+- `Location`, `Referer`, `Content-Location`, `Origin` header values are shown redacted with a reveal when they carry a
+  credential (no `href` involved), plain when clean.
+- Test rule: no redaction or masking test seeds a field the UI never fills; `test/helpers/type-into-form.ts` drives the
+  real form and is used by both the redaction and the on-screen tests.
+
+| Case | Expected |
+|---|---|
+| Form body, empty content type, `username=alice&password=…` | password masked on screen (name visible, reveal); counted; dialog count, no body note |
+| `{"password":"hunter2secretX"}` under the form content type | not a table; not rewritten; count 0; body note shown |
+| `password%3Dhunter2secretX` under the form content type | same: flagged, not claimed as removed |
+| `a=1;password=x`, multi-line, `pass:word=x` | not clean: flagged, not rewritten |
+| Multipart body | flagged, not rewritten |
+| `admin:pw@api.example.com/x`, `not a url?api_key=…`, `javascript:alert(1)//?token=…` | masked line + summary, reveal restores the typed text, never linked |
+| `Origin` / `Referer` / `Location` / `Content-Location` with a credential | redacted in the share and masked on screen with a reveal |
