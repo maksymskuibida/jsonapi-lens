@@ -107,3 +107,43 @@ describe("parseGlobalHeaderBlock — N3 regression guards, on synthetic input", 
     expect(parsed.get("x-content-type-options")).toBe("nosniff");
   });
 });
+
+/**
+ * QA7 P1. A stylesheet's own subresources (the self-hosted `.woff2` faces) take their
+ * Referrer-Policy from the *stylesheet's* response, not from the page that linked it. A share
+ * page answers `no-referrer`, but its CSS used to come back with the site-wide
+ * `strict-origin-when-cross-origin`, so every font request carried `Referer: <stylesheet URL>`.
+ * The `/assets/*` rule has to detach the site-wide value and set `no-referrer` — exactly one
+ * value, in that order, or the header is joined (`a, b`) the way Cloudflare merges two rules.
+ * This reads the shipped file; the response itself is checked on `wrangler dev` (REGRESSION §8).
+ */
+describe("public/_headers: /assets/* sends no Referer for its own subresources", () => {
+  const block = (() => {
+    const lines = headersFile.split("\n");
+    const start = lines.findIndex((l) => l.trim() === "/assets/*");
+    if (start === -1) return [];
+    const out: string[] = [];
+    for (const line of lines.slice(start + 1)) {
+      if (line.trim() === "" || line.trim().startsWith("#")) continue;
+      if (!/^\s/.test(line)) break;
+      out.push(line.trim());
+    }
+    return out;
+  })();
+
+  it("detaches the inherited Referrer-Policy and then sets no-referrer", () => {
+    const detach = block.indexOf("! Referrer-Policy");
+    const set = block.indexOf("Referrer-Policy: no-referrer");
+    expect(detach, "no `! Referrer-Policy` in the /assets/* block").toBeGreaterThanOrEqual(0);
+    expect(set, "no `Referrer-Policy: no-referrer` in the /assets/* block").toBeGreaterThan(detach);
+    expect(block.filter((l) => /^referrer-policy:/i.test(l))).toHaveLength(1);
+  });
+
+  it("keeps the immutable cache rule it already had", () => {
+    expect(block).toContain("Cache-Control: public, max-age=31536000, immutable");
+  });
+
+  it("leaves the all-paths block alone: the pages keep the site-wide policy", () => {
+    expect(parseGlobalHeaderBlock(headersFile).get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+  });
+});

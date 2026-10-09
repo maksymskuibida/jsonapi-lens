@@ -71,6 +71,35 @@ guarded by tests in `test/ident.test.ts` that must exist:
 - `parseDomId` recovers the scope and every segment, and returns `null` for a well-formed id in a
   scope it was not asked about, rather than mis-parsing it as its own.
 
+### Amendment (QA7 S20, 2026-10-09) · inside `q_`, the `kind` segment is a closed set, one kind per table
+
+The proof above is about *tuples*: two ids are equal only if their segment tuples are equal. For `q_` the tuple is
+`(kind, name)`, so the proof holds exactly as long as **no two different tables the page can show at once share a
+`kind`**, and the proof is silent about that, because `kind` was a free string. It was not discharged: a query parameter
+and a form-body parameter of the same name (`?page=1` with a body `page=2`) both minted `q_reqParam__page` — two
+elements, one id, every link to the second landing on the first, and nothing reporting it. (It predates QA6, where
+request bodies became more visible.)
+
+The closed set is now `REQUEST_FIELD_KINDS` in `src/ident.ts`, and `requestFieldDomId` takes the derived
+`RequestFieldKind` type, so an unlisted kind is a type error rather than a typo that works:
+
+| `kind` | The table it anchors |
+|---|---|
+| `reqHeader`, `resHeader` | request / response headers |
+| `reqCookie`, `resCookie` | request `Cookie` / response `Set-Cookie` |
+| `reqParam` | the request URL's **query** parameters (spelling kept: `#q_reqParam__…` links already exist) |
+| `reqBodyParam` | parameters of a form-urlencoded **request body** |
+| `resBodyParam` | parameters of a form-shaped **response body** |
+
+Obligation 2 for `q_` is therefore two statements. *Across tables*: distinct kinds, and `encodeSegment` is injective, so
+the encoded kinds differ and (the `__` joiner cannot occur inside a segment) the ids differ whatever the names are, even a
+name chosen to look like another kind's id (`reqBodyParam__page` as a *name* under `reqParam` is
+`q_reqParam__reqBodyParam_005f_005fpage`, not `q_reqBodyParam__page`). *Within a table*: a repeated name anchors only its
+first row (`renderParamTable`, `renderHeaderTable` and the two cookie tables do this; a secret-named row anchors nothing).
+A new table needs a new kind, not a reused one. `test/ident.test.ts` asserts the kinds are distinct and mint distinct ids
+over the hostile corpus; `test/render-request.test.ts` renders the colliding case (`?page=1` and `page=2`, and a response
+body as well) and asserts the ids are unique.
+
 ### Rejected alternative
 
 Folding the scope into the body as a leading segment — `r_` + `encodeSegment(scope) + "__" + …` —
@@ -581,6 +610,40 @@ the override is applied on top of it, outside that mirror. Side effect: that doc
 doubly closed) and on external links clicked from it. Channel 3's former uncertainty about whether
 subresources reach the Worker is moot: either way they now carry no key.
 
+**Channel 3, the stylesheet's own subresources — closed (QA7 P1, 2026-10-09).** The paragraph above says "every
+request the document makes". It is not quite true of a font: a stylesheet's `url()` requests take their referrer policy
+from the **stylesheet's response**, not from the page that linked it, and `/assets/index-….css` came back with the
+site-wide `strict-origin-when-cross-origin`. Production QA of QA6 therefore saw the four `.woff2` requests send
+`Referer: <the stylesheet's URL>` from a share page. That URL carries no share id and no key (it is a hashed asset path,
+the same for every visitor), so nothing leaked and nothing in D7's promise was false, but "a share page's subresources
+send no Referer" was. A header on `/assets/*` was cheap, so the row stays true instead of being reworded:
+`public/_headers` detaches the inherited value and sets `Referrer-Policy: no-referrer` there (`! Referrer-Policy`, then
+the new value, so exactly one header leaves — Cloudflare would otherwise join the two rules' values). Every file under
+`/assets/*` is a script, a stylesheet or a font, none of which is ever navigated to, so nothing depends on their
+referrer. `test/security-headers.test.ts` pins the rule; the response itself was checked on `wrangler dev` (the header
+is not served by `vite`).
+
+#### What "indistinguishable" covers: the UI, not the API (QA7 P3, 2026-10-09)
+
+`REGRESSION.md` §7 said an expired link and a never-existed id "are indistinguishable to the client". Production QA of
+QA6 observed that `GET /api/shares/<id>` answers `410 {"error":"expired"}` for an expired share that nothing has swept
+yet, and `404 {"error":"not_found"}` both for a swept one and for an id that never existed (`readShare`, `worker.ts`:
+it deletes the row and blob when it finds an expired one, and so answers 410 exactly once). **Decision: accepted as it
+is, no behaviour change.** What can be told apart, and what cannot:
+
+- *Swept, expired and then asked for, never existed*: one `404`, one UI message ("no longer exists… never created or
+  already deleted"). Indistinguishable, by design: after the lazy delete or the sweep, nothing remains to tell them apart.
+- *Expired but not yet swept*: `410`, and the UI says "has expired" — a **different** message from the `404` one. The
+  previous wording of the REGRESSION row ("the same message") was wrong about the UI as well as the API.
+
+The 410 discloses that an id was once issued and has now expired. It does not disclose content, a key, the expiry
+instant, or who made it. Ids are small sequential integers and are **not secret** (the secret is the fragment key, D7);
+`200` against `404` already tells anyone who counts upwards which ids exist, so 410 adds a second "exists" reading, not a
+new fact. Making all three look alike would mean dropping the expired message (a visitor with a day-old link would be told
+"never created", which is wrong and worse) or keeping tombstones for swept shares (storage that exists only to change a
+status code). Neither is worth it for an oracle that returns nothing an enumeration does not. **What would change this:**
+an id that is not enumerable, or an expiry that is itself sensitive. Then the answer must be one status and one message.
+
 #### Why the legacy `:`/`.` in-path forms never get `keyExposed` (review round 1, N1)
 
 Only the new `%23` branch sets `keyExposed: true`. `SHARE_PATTERN` (the `:`/`.` legacy match) runs
@@ -658,7 +721,7 @@ headers and cookies as name/value, each body as `{contentType, raw}`, the respon
 `entries[].raw` or decoded trees. The reader re-derives them on load (`queryOf`, `render-request.ts`), as for a request
 typed into the form. **The envelope is unchanged** (`exchange` is an opaque optional field of the version-2 payload;
 old links still carrying `query`/`form` open as before; `export-compat-seal.test.ts`). The sweep then masks, in
-request and response header names and values, **request** cookie names, the method, the response status text, the request URL and a clean form's `raw`, every discrete
+request and response header names and values, **request and `Set-Cookie`** cookie names, the method, the response status text, **both bodies' `contentType`**, the request URL, a clean form's `raw` and **every string leaf of the provenance field `origin`** (QA7 S19: a token embedded in a longer string, which the older per-leaf pass cannot see), every discrete
 token of unmistakable shape — a JWT (`eyJ…`), a Stripe key, an AWS key id, `Bearer`/`Basic`/`Token` followed by
 anything, a URL's `user:pw@` — and counts it. It deliberately does not use the generic hex/base64 length rule (etags,
 slugs). **A credential-shaped parameter name is masked** (`[REDACTED]=[REDACTED]`, one per wire pair), and so is a
@@ -678,9 +741,12 @@ drives the real request form).
 warns. **The count is the number of masked values**, wire pair by wire pair: `a[]=1&a[]=x&a[pass]=2` is three.
 
 **Fail closed.** The "this body may contain credentials" warning is suppressed only for a body that is a clean
-form, was redacted, and has no credential-like name or value left. **Every other non-empty body warns**, whatever
-its content type and whatever the sniffer says — JSON (benign included), text, multipart, an unclean form, a
-rewritten form with leftovers. Over-warning is safe; a silent share is not. A body that is not a clean form is
+form and has no credential-like name or value left — whether or not redaction rewrote anything: a clean form
+that nothing in it looked like a credential (`a=1&b=2`) shows neither a count nor a note, because there is nothing
+to warn about (QA7 P2 aligned this entry to what shipped; the earlier wording, "unless it was redacted", implied a
+clean form with nothing masked would warn, and QA6's notes §7 and production both say it does not). **Every other
+non-empty body warns**, whatever its content type and whatever the sniffer says — JSON (benign included), text,
+multipart, an unclean form, a rewritten form with leftovers. Over-warning is safe; a silent share is not. A body that is not a clean form is
 never rewritten and never called safe. The count only counts values actually masked.
 
 **Secret parameter names** are matched in a query or a form body, **percent-decoded first** (as far as they decode: a
@@ -709,8 +775,10 @@ what this tool reviews.)
   shapeless). A clean form with such a pair is **not** warned about, because nothing credential-like is left in
   it by any test this module has;
 - a bare `code=…` with no OAuth sibling;
-- **not yet swept** (deferred to QA7): **Set-Cookie** names, `body.contentType`, and string leaves inside the
-  provenance field `origin` (which only gets the older per-leaf redaction);
+- **in those three fields (Set-Cookie names, `body.contentType`, `origin` strings) only the discrete token shapes
+  above**: QA7 S19 extended the final sweep to them, so an embedded JWT, Stripe key, AWS key id, `Bearer`/`Basic`/`Token`
+  value or `user:pw@` is masked and counted, but a secret of no recognisable shape in them is not (an `origin` key is also
+  not rewritten, only its string values, and only values under a credential-named key get the older whole-leaf mask);
 - a credential of no recognisable shape in a **name**: only credential-shaped names and path names on secret-named
   entries are masked;
 - any URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;

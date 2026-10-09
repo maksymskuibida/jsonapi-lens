@@ -210,18 +210,46 @@ export function nodeHref(pointer: string): string {
 }
 
 /**
- * The DOM id for one request field — a query parameter, a header, a cookie, a
- * URL part — under the `q_` scope from DECISIONS.md D1. `kind` names which
- * group the field belongs to (`"param"`, `"header"`, `"cookie"`, `"url"`, ...)
- * so that a header and a query parameter that happen to share a name never
- * collide, and `name` is the field's own name.
+ * Every `kind` the `q_` scope may be minted with — a closed set, because the `kind` segment is
+ * the only thing keeping two *tables* that happen to share a field name from minting the same
+ * id (D1, "Within the `q_` scope"). One kind per table the page can show at once:
+ *
+ *   - `reqHeader` / `resHeader` / `reqCookie` / `resCookie` — the four header and cookie tables;
+ *   - `reqParam` — the request URL's **query** parameters (the name predates the body kinds and
+ *     is kept so existing `#q_reqParam__…` links keep working);
+ *   - `reqBodyParam` — parameters of a **form-urlencoded request body**;
+ *   - `resBodyParam` — parameters of a form-shaped **response body**.
+ *
+ * A query parameter and a body parameter called `page` used to both mint `q_reqParam__page`
+ * (QA7 S20). Adding a table means adding a kind here, not reusing one.
  */
-export function requestFieldDomId(kind: string, name: string): string {
+export const REQUEST_FIELD_KINDS = [
+  "reqHeader",
+  "resHeader",
+  "reqCookie",
+  "resCookie",
+  "reqParam",
+  "reqBodyParam",
+  "resBodyParam",
+] as const;
+
+export type RequestFieldKind = (typeof REQUEST_FIELD_KINDS)[number];
+
+/**
+ * The DOM id for one request field — a query parameter, a header, a cookie, a
+ * body parameter — under the `q_` scope from DECISIONS.md D1. `kind` names which
+ * table the field belongs to (`REQUEST_FIELD_KINDS`) so that a header and a
+ * query parameter, or a query parameter and a body parameter, that happen to
+ * share a name never collide, and `name` is the field's own name. A table that
+ * can repeat a name (a header sent twice, `a=1&a=2`) must anchor only the first
+ * row; that is the caller's half of the guarantee.
+ */
+export function requestFieldDomId(kind: RequestFieldKind, name: string): string {
   return mintAnchorId("requestField", [kind, name]);
 }
 
 /** `href` value pointing at a request field. */
-export function requestFieldHref(kind: string, name: string): string {
+export function requestFieldHref(kind: RequestFieldKind, name: string): string {
   return "#" + requestFieldDomId(kind, name);
 }
 

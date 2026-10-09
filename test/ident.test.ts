@@ -15,6 +15,7 @@ import {
   parseAnchorId,
   parseDomId,
   parseRequestResourceId,
+  REQUEST_FIELD_KINDS,
   requestFieldDomId,
   requestFieldHref,
   requestNodeDomId,
@@ -384,12 +385,25 @@ describe("D1 — the anchor scope table", () => {
   /** T2b's own wrapper functions — the `q_`/`b_`/`d_` sibling of the block above. */
   describe("requestFieldDomId / requestResourceDomId / requestNodeDomId and their hrefs", () => {
     it("requestFieldDomId matches the q_ scope directly, keyed by kind and name", () => {
-      for (const kind of ["reqHeader", "resHeader", "reqCookie", "resCookie", "reqParam"]) {
+      for (const kind of REQUEST_FIELD_KINDS) {
         for (const name of HOSTILE) {
           expect(requestFieldDomId(kind, name)).toBe(mintAnchorId("requestField", [kind, name]));
           expect(requestFieldHref(kind, name)).toBe("#" + requestFieldDomId(kind, name));
         }
       }
+    });
+
+    it("QA7 S20: no two q_ kinds mint the same id for the same name, over the hostile corpus", () => {
+      expect(new Set(REQUEST_FIELD_KINDS).size).toBe(REQUEST_FIELD_KINDS.length);
+      // a kind is itself a segment: kinds that are not equal must stay unequal after encoding
+      expect(new Set(REQUEST_FIELD_KINDS.map(encodeSegment)).size).toBe(REQUEST_FIELD_KINDS.length);
+      for (const name of [...HOSTILE, "page", "reqBodyParam__page", "reqParam"]) {
+        const ids = REQUEST_FIELD_KINDS.map((kind) => requestFieldDomId(kind, name));
+        expect(new Set(ids).size, name).toBe(ids.length);
+      }
+      // the query kind kept its spelling, so an existing #q_reqParam__… link still resolves
+      expect(requestFieldDomId("reqParam", "page")).toBe("q_reqParam__page");
+      expect(requestFieldDomId("reqBodyParam", "page")).not.toBe(requestFieldDomId("reqParam", "page"));
     });
 
     it("requestResourceDomId matches the b_ scope directly, and parses back", () => {

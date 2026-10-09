@@ -1137,6 +1137,49 @@ function sweepHeaders(headers: HeaderSet | undefined, tally: RedactionTally): He
   };
 }
 
+/**
+ * `sweepText` over every string leaf of `origin`, the provenance field. The older
+ * per-leaf pass (`redactUnknown`) masks a leaf that *is* a credential or sits
+ * under a credential-ish key; this one finds a token *embedded in* a longer
+ * string (`curl -H 'Authorization: Bearer …' https://…`, an importer's kept
+ * source text). Keys are not rewritten here (`redactUnknown` already drops the
+ * prototype-pollution keys and masks values under secret-named keys). Returns
+ * the same reference when nothing changed.
+ */
+function sweepUnknown(value: unknown, tally: RedactionTally): unknown {
+  if (typeof value === "string") return sweepText(value, tally);
+  if (Array.isArray(value)) {
+    let changed = false;
+    const mapped = value.map((item) => {
+      const next = sweepUnknown(item, tally);
+      if (next !== item) changed = true;
+      return next;
+    });
+    return changed ? mapped : value;
+  }
+  if (value !== null && typeof value === "object") {
+    let changed = false;
+    const out = safeObject<unknown>();
+    for (const [key, item] of Object.entries(value)) {
+      if (isUnsafeObjectKey(key)) {
+        changed = true;
+        continue;
+      }
+      const next = sweepUnknown(item, tally);
+      if (next !== item) changed = true;
+      out[key] = next;
+    }
+    return changed ? out : value;
+  }
+  return value;
+}
+
+/** A body's `contentType` is header-shaped text the user typed; its `raw` is handled by the caller. */
+function sweepBodyContentType(body: BodyPart | undefined, tally: RedactionTally): BodyPart | undefined {
+  if (!body || body.contentType === undefined) return body;
+  return { ...body, contentType: sweepText(body.contentType, tally) };
+}
+
 /** What Copy, Download and the share send, and how many values were masked to make it. */
 export function redactForExport(exchange: Exchange): RedactionResult {
   const base = redactExchange(exchange);
@@ -1149,13 +1192,18 @@ export function redactForExport(exchange: Exchange): RedactionResult {
     if (r.url !== undefined) r.url = sweepText(r.url, sweep);
     r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
     if (r.cookies) r.cookies = { entries: r.cookies.entries.map((c) => ({ name: sweepText(c.name, sweep), value: c.value })) };
+    r.body = sweepBodyContentType(r.body, sweep);
     if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
   }
   if (canonical.response) {
     const r = canonical.response;
     if (r.statusText !== undefined) r.statusText = sweepText(r.statusText, sweep);
     r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
+    // Set-Cookie *names*: values and unsafe attributes were masked by `redactSetCookieSet`.
+    if (r.cookies) r.cookies = { entries: r.cookies.entries.map((c) => ({ ...c, name: sweepText(c.name, sweep) })) };
+    r.body = sweepBodyContentType(r.body, sweep);
     if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
   }
+  if (canonical.origin !== undefined) canonical.origin = sweepUnknown(canonical.origin, sweep) as OriginMeta;
   return { exchange: canonical, count: base.count + sweep.count, bodyMayContainSecret: base.bodyMayContainSecret };
 }

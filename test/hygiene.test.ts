@@ -15,6 +15,7 @@
  * `test/fixtures/README.md`.
  */
 
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 /*
@@ -65,10 +66,46 @@ const FILES: Record<string, string> = {
  */
 const EXEMPT = new Set(["/test/hygiene.test.ts"]);
 
-function scannedFiles(): { path: string; text: string }[] {
-  return Object.entries(FILES)
+/**
+ * Which of `paths` git itself says are ignored — `git check-ignore`, not a copy of
+ * `.gitignore`'s patterns in this file, because a second list is the part that drifts (the
+ * delivery-loop docs were un-tracked three times before `gitignore.test.ts` existed). A tracked
+ * file is never reported ignored, so a process doc that was committed by mistake is still scanned.
+ *
+ * Why the scan skips them at all (QA7 S21): the process docs (`docs/qa-reports`, `docs/qa-notes`,
+ * `docs/evidence`, `docs/STATUS.md`, …) are not published — they are gitignored precisely so they
+ * are not in the repository — and they quote real production hosts and reproduction payloads
+ * because that is what a QA report is. Scanning them made this gate rewrite evidence to pass.
+ * Nobody should edit a QA report to satisfy it.
+ *
+ * If git is unavailable the answer is "none ignored" and everything is scanned, which is the safe
+ * direction. `git check-ignore` exits 1 when nothing matches; that is not an error either.
+ */
+function gitIgnored(paths: readonly string[]): Set<string> {
+  if (paths.length === 0) return new Set();
+  try {
+    const out = execFileSync("git", ["check-ignore", "--stdin", "-z"], {
+      input: paths.join("\0"),
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    return new Set(out.split("\0").filter((p) => p !== ""));
+  } catch {
+    return new Set();
+  }
+}
+
+/** The files to scan: everything the glob reached, minus the exempt file and anything git ignores. */
+function selectScanned(files: Record<string, string>, ignored: (paths: string[]) => Set<string>) {
+  const entries = Object.entries(files)
     .filter(([path]) => !EXEMPT.has(path))
     .map(([path, text]) => ({ path: path.replace(/^\//, ""), text }));
+  const skip = ignored(entries.map((e) => e.path));
+  return entries.filter((e) => !skip.has(e.path));
+}
+
+function scannedFiles(): { path: string; text: string }[] {
+  return selectScanned(FILES, gitIgnored);
 }
 
 /* ------------------------------------------------------------------ rules --- */
@@ -171,6 +208,38 @@ describe("test data hygiene", () => {
    * *that* one — a case that only checked "some violation was found" would pass
    * while the other rule did the work.
    */
+  describe("gitignored process docs are not scanned (QA7 S21)", () => {
+    // The offending text is assembled at runtime so this file is not itself a violation.
+    const BAD = ["see ", "ops", "@", "corp-mail", ".", "net", " and ", ["10", "79", "20", "9"].join(".")].join("");
+    const fixture = {
+      "/docs/qa-reports/zz-hygiene-fixture.md": BAD, // ignored by .gitignore's docs/qa-reports/
+      "/docs/qa-notes/zz-hygiene-fixture.md": BAD,
+      "/docs/evidence/zz-hygiene-fixture.md": BAD,
+      "/docs/STATUS.md": BAD,
+      "/docs/DECISIONS.md": BAD, // tracked, so still scanned
+      "/test/zz-hygiene-fixture.md": BAD, // not ignored, so still scanned
+    };
+
+    it("derives the skip list from git, so the fixture paths really are ignored and the tracked ones are not", () => {
+      const ignored = gitIgnored(Object.keys(fixture).map((p) => p.slice(1)));
+      expect([...ignored].sort()).toEqual(
+        ["docs/STATUS.md", "docs/evidence/zz-hygiene-fixture.md", "docs/qa-notes/zz-hygiene-fixture.md", "docs/qa-reports/zz-hygiene-fixture.md"].sort(),
+      );
+    });
+
+    it("skips an ignored file that would violate, and still flags the same text anywhere else", () => {
+      const scanned = selectScanned(fixture, gitIgnored).map((f) => f.path).sort();
+      expect(scanned).toEqual(["docs/DECISIONS.md", "test/zz-hygiene-fixture.md"]);
+      // and those two do violate, so the skip is what keeps the ignored ones out, not a clean fixture
+      for (const f of selectScanned(fixture, gitIgnored)) expect(violations(f.text).length, f.path).toBe(2);
+      for (const text of Object.values(fixture)) expect(violations(text).length).toBe(2);
+    });
+
+    it("scans everything when git can say nothing (fail towards scanning)", () => {
+      expect(selectScanned(fixture, () => new Set()).length).toBe(Object.keys(fixture).length);
+    });
+  });
+
   describe("the rules can actually fail", () => {
     it("catches a real-looking address, and does not confuse it with a version string", () => {
       const planted = ["contact ", "someone", "@", "corp-mail", ".", "net"].join("");
