@@ -409,6 +409,58 @@ describe("D1 — a request-body document and the response share every identity w
   });
 });
 
+describe("QA7 S20 — a query parameter and a body parameter of one name get distinct ids", () => {
+  beforeEach(resetModalRoot);
+  const FORM = "application/x-www-form-urlencoded";
+  const ids = (host: HTMLElement) => [...host.querySelectorAll("[id]")].map((n) => n.id);
+
+  it("`?page=1` and a form body `page=2` both render, with different, unique ids", () => {
+    const band = renderExchangeBand({
+      exchange: typeIntoForm({ url: "https://api.example.com/x?page=1", contentType: FORM, body: "page=2&other=3" }),
+      mode: "both",
+      currentDocument: null,
+    })!;
+    document.body.append(band);
+    const all = ids(band);
+    expect(new Set(all).size, all.join(", ")).toBe(all.length);
+    expect(band.querySelector("#q_reqParam__page")).not.toBeNull();
+    expect(band.querySelector("#q_reqBodyParam__page")).not.toBeNull();
+    band.remove();
+  });
+
+  it("review S1: a stored query that already carries two entries of one name (an old share, a saved exchange) still mints one id", () => {
+    const stored = decodeParams("page=1&other=2");
+    const dup: Exchange = { request: { url: "https://api.example.com/x", query: { ...stored, entries: [...stored.entries, stored.entries[0]!] } } };
+    expect(dup.request!.query!.entries.filter((e) => e.name === "page")).toHaveLength(2);
+    const band = renderExchangeBand({ exchange: dup, mode: "both", currentDocument: null })!;
+    document.body.append(band);
+    const all = ids(band);
+    expect(new Set(all).size, all.join(", ")).toBe(all.length);
+    expect(band.querySelectorAll("#q_reqParam__page").length).toBe(1);
+    expect(band.querySelectorAll(".xrow--param").length).toBe(3); // every row is still drawn
+    band.remove();
+  });
+
+  it("a request body, a response body and the query all carrying `page` stay unique, one anchor each", () => {
+    const exchange: Exchange = {
+      request: { url: "https://api.example.com/x?page=1&page=2", body: { raw: "page=2&page=3", contentType: FORM } },
+    };
+    const band = renderExchangeBand({ exchange, mode: "both", currentDocument: null })!;
+    // the band itself draws no response body (that is the main document); `renderBodyPart(…, "res")` is the exported way to
+    // draw a form-shaped one, so it must not collide either
+    band.append(renderBodyPart({ raw: "page=9", contentType: FORM }, "res")!);
+    document.body.append(band);
+    const all = ids(band);
+    expect(new Set(all).size, all.join(", ")).toBe(all.length);
+    for (const id of ["q_reqParam__page", "q_reqBodyParam__page", "q_resBodyParam__page"]) {
+      expect(band.querySelectorAll(`#${id}`).length, id).toBe(1);
+    }
+    // a repeated name is one row with several values (`decodeParams`), so each table has one `page` row
+    expect(band.querySelectorAll(".xrow--param").length).toBe(3);
+    band.remove();
+  });
+});
+
 // The redaction/seal/open round trip moved out to its own file, pinned to
 // the Node test environment — jsdom's `Blob` has no `.stream()` at all, which
 // `crypto.ts#gzip` needs. See `test/exchange-redaction.test.ts`.

@@ -55,8 +55,18 @@
 # Vite's own naming), so a given URL's bytes never change — a new build means a
 # new URL. `immutable` is what that earns: the browser stops revalidating on
 # every load, which it was doing under the site-wide `max-age=0`.
+
+# A stylesheet's own subresources (the four .woff2 faces) take their Referrer-Policy from the
+# STYLESHEET'S response, not from the page that linked it. A share page is `no-referrer` (QA4),
+# but the CSS it loads was served with the site-wide `strict-origin-when-cross-origin`, so each
+# font request went out with `Referer: <https://…/assets/index-….css>` (QA7 P1). That URL carries
+# no share id or key, so nothing leaked, but REGRESSION §8 says "no Referer" and a rule that is
+# true except for fonts is the kind nobody re-checks. Detach, then set, so exactly one value
+# leaves (a joined `a, b` value would still resolve to the last token, but one is cleaner).
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+  ! Referrer-Policy
+  Referrer-Policy: no-referrer
 
 /sitemap.xml
   Cache-Control: public, max-age=3600

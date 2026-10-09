@@ -172,10 +172,11 @@ describe("a credential in a URL's user[:password]@ prefix (QA6 review B2, B3)", 
     }
   });
 
-  it("is idempotent: redacting twice neither double-counts nor changes the text", () => {
+  it("is idempotent: redacting twice changes nothing and reports the same count (a masked value still counts: D8, QA7)", () => {
     const once = redactExchange({ request: { url: "https://admin:hunter2pass@api.example.com/" } });
     const twice = redactExchange(once.exchange);
-    expect(twice.count).toBe(0);
+    expect(once.count).toBe(1);
+    expect(twice.count).toBe(1);
     expect(twice.exchange.request?.url).toBe(once.exchange.request?.url);
   });
 

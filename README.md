@@ -264,21 +264,25 @@ visitor.
   one. The decoded claims of any such header are visible before you reveal anything (deliberately:
   they are what the panel is for); the signature, and so the token, is not.
 - **Copy**, **Download** and **Share** all pass through one redaction ([D8](docs/DECISIONS.md)) and say
-  how many values it removed — a count of what was found, never a claim that nothing else remains;
+  how many values it removed — a count of what was found, never a claim that nothing else remains, and the same figure for whoever opens the shared link and copies the exchange (a value that already reads `[REDACTED]` counts);
   for Share the count and the warnings are shown *before* the link is created. It replaces with
   `[REDACTED]`: the value of a header that is a credential by name or by shape, every cookie value,
   the userinfo of the request URL and credential-named parameters in its query and fragment (and the
   same parts of a URL in `Location`, `Referer`, `Content-Location` and `Origin`, whose other parts
   are left as they are), credential-named parameters in a form body in the strict `a=1&b=2` shape,
-  and credential-shaped values in the `origin` field. What the recipient sees in those places is
+  and credential-shaped values in the `origin` field. A last pass over what leaves also masks a token of
+  unmistakable shape (a JWT, a Stripe key, an AWS key id, `Bearer`/`Basic`/`Token` followed by a value,
+  a URL's `user:pw@`) wherever it sits in a header name or value, a cookie name (request and
+  `Set-Cookie`, and a `Set-Cookie` attribute the parser could not place, and the `Path`/`Domain`/`Expires`/`SameSite` values), the method, a body's content type, the URL, a clean form body, or any string inside
+  `origin`. What the recipient sees in those places is
   `[REDACTED]`, not a value they can reveal (inside a URL's query or fragment it is written
   percent-encoded, `%5BREDACTED%5D`).
   **It is not complete.** A JSON, text or multipart body, and a form body that is not in that strict
   shape (separated by `;`, spread over several lines, or with spaces in a value), is flagged, never
   rewritten, and goes out as it is — the dialog says so before the link is created. A secret under an
-  unlisted name with a shapeless value, a token in a URL path, and a few fields (Set-Cookie names, the
-  body's content type, a token embedded inside a longer `origin` string) are not caught; D8 keeps the
-  exact list.
+  unlisted name with a shapeless value, a token in a URL path, and a secret of no recognisable shape
+  anywhere (including in a cookie name, a content type or inside an `origin` string or a `Set-Cookie` `Path`/`Domain`/`Expires`/`SameSite` value — only the shapes
+  above are found there) are not caught; D8 keeps the exact list.
 - **Share carries the attached request and response into the encrypted link**, redacted as above —
   whether you share the open document or tick it in **Saved documents → Share**. The link opens
   with the exchange band in place. On screen a masked header, cookie, URL or form value is not in
@@ -366,8 +370,9 @@ key already left in the open and that this specific link should be treated as co
 
 The same goes for the page's own requests. For a share link (`/d/*`) the server sends
 `Referrer-Policy: no-referrer`, so the script, stylesheet and icons the page loads before any of this
-app's JavaScript has run do not carry a path-borne key in `Referer`; every other page keeps the
-site-wide `strict-origin-when-cross-origin`. And the Worker runs with Workers Logs' per-request
+app's JavaScript has run do not carry a path-borne key in `Referer`; the files under `/assets/*`
+(the stylesheet, so the fonts it loads) are served `no-referrer` as well, so those carry no `Referer`
+at all; every other page keeps the site-wide `strict-origin-when-cross-origin`. And the Worker runs with Workers Logs' per-request
 *invocation logs* switched off (`observability.logs.invocation_logs: false` in
 [`wrangler.jsonc`](wrangler.jsonc)), so opening a legacy or `%23` link does not write its key into a
 log the operator can read. The cost is that the per-request "GET /path 200" lines are gone for every

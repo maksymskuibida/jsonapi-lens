@@ -69,6 +69,7 @@ import { decodeParams } from "./params.js";
 import { t } from "./i18n/index.js";
 import {
   requestFieldDomId,
+  type RequestFieldKind,
   requestNodeDomId,
   requestNodeHref,
   requestResourceDomId,
@@ -559,7 +560,7 @@ function renderJwtPanel(decoded: DecodedJwt, referenceTime: number | null): HTML
  * `kind` is what keeps a request `Accept` header and a response `Accept`
  * header from minting the same id.
  */
-type FieldKind = "reqHeader" | "resHeader" | "reqCookie" | "resCookie" | "reqParam";
+type FieldKind = Extract<RequestFieldKind, "reqHeader" | "resHeader" | "reqCookie" | "resCookie">;
 
 interface HeaderRowOptions {
   fieldKind: FieldKind;
@@ -808,24 +809,41 @@ function paramBody(entry: ParamEntry): HTMLElement {
  * shows its name and a mask; the value, its alternatives and the raw wire text
  * are built only when revealed.
  */
-function paramRow(entry: ParamEntry, ref: string | null, siblings: readonly ParamEntry[]): HTMLElement {
+function paramRow(
+  entry: ParamEntry,
+  ref: string | null,
+  siblings: readonly ParamEntry[],
+  fieldKind: RequestFieldKind,
+  anchored: boolean,
+): HTMLElement {
   // A name that carries a credential is masked too — in the text and in the
   // anchor id, which would otherwise spell it out.
   const nameIsSecret = paramNameCarriesCredential(entry);
-  const row = el("div", { class: "xrow xrow--param", id: nameIsSecret ? undefined : requestFieldDomId("reqParam", entry.name) });
+  const row = el("div", { class: "xrow xrow--param", id: nameIsSecret || !anchored ? undefined : requestFieldDomId(fieldKind, entry.name) });
   row.append(el("code", { class: "xrow__name", text: nameIsSecret ? REDACTED_VALUE : entry.name }));
   row.append(ref !== null && isSecretParam(entry, siblings) ? el("div", { class: "xparam__body" }, maskedValue(ref)) : paramBody(entry));
   return row;
 }
 
-/** `base` is the locator prefix (`req.query`, `req.body`, `res.body`); without it nothing is masked (a caller with no exchange to resolve against). */
-function renderParamTable(params: ParamSet, base: string | null = null): HTMLElement {
+/**
+ * `base` is the locator prefix (`req.query`, `req.body`, `res.body`); without it nothing is masked (a caller with no exchange to resolve against).
+ * `fieldKind` is this table's own `q_` kind (D1): a query and a body table must not share one. Only the first row
+ * of a repeated name carries the anchor, as the header and cookie tables do. `decodeParams` folds `a=1&a=2` into one
+ * entry, but `queryOf` returns a stored `request.query` as it is, so an old share or a saved exchange can carry two entries of one
+ * name; without this guard each would mint the same id (`test/render-request.test.ts`, review S1).
+ */
+function renderParamTable(params: ParamSet, base: string | null, fieldKind: RequestFieldKind): HTMLElement {
   const list = el("div", { class: "xtable xtable--params" });
   if (params.entries.length === 0) {
     list.append(el("p", { class: "xtable__empty", text: t().request.review.params.empty }));
     return list;
   }
-  params.entries.forEach((entry, index) => list.append(paramRow(entry, base === null ? null : `${base}.${index}`, params.entries)));
+  const anchoredNames = new Set<string>();
+  params.entries.forEach((entry, index) => {
+    const anchored = !anchoredNames.has(entry.name);
+    anchoredNames.add(entry.name);
+    list.append(paramRow(entry, base === null ? null : `${base}.${index}`, params.entries, fieldKind, anchored));
+  });
   return list;
 }
 
@@ -1027,7 +1045,7 @@ export function renderBodyPart(body: BodyPart | undefined, side: "req" | "res" |
   // it would be one in the share (QA6 review B4).
   const classified = classifyBody(body);
   if (classified.kind === "form") {
-    wrap.append(renderParamTable(classified.params, side === null ? null : `${side}.body`));
+    wrap.append(renderParamTable(classified.params, side === null ? null : `${side}.body`, side === "res" ? "resBodyParam" : "reqBodyParam"));
     return wrap;
   }
 
@@ -1193,7 +1211,7 @@ function renderRequestReview(request: RequestPart): HTMLElement {
   );
 
   const query = queryOf(request);
-  if (query) section.append(reviewSection(m.queryTitle, renderParamTable(query, "req.query"), query.entries.length));
+  if (query) section.append(reviewSection(m.queryTitle, renderParamTable(query, "req.query", "reqParam"), query.entries.length));
   if (request.headers) {
     section.append(
       reviewSection(m.headersTitle, renderHeaderTable(request.headers, "reqHeader", null), request.headers.entries.length),

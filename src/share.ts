@@ -163,6 +163,8 @@ function expiryNote(expiresAt: number | null): string {
  * anyone to re-open the library and re-tick anything.
  */
 function runShareModal(options: {
+  /** Defaults to `share.title` (the one-document title). */
+  title?: string;
   subtitle: string;
   originalBytes: number;
   /**
@@ -241,7 +243,7 @@ function runShareModal(options: {
   const footer = el("div", { class: "share__actions" }, create);
 
   openModal({
-    title: t().share.title,
+    title: options.title ?? t().share.title,
     subtitle: options.subtitle,
     body,
     footer,
@@ -392,6 +394,7 @@ export function openBundleShareModal(documents: BundleEntry[]): void {
 
   const originalBytes = documents.reduce((sum, doc) => sum + sealedJsonBytes(doc), 0);
   runShareModal({
+    title: t().bundleUi.shareTitle(documents.length),
     subtitle: t().bundleUi.shareSubtitle(documents.length, formatBytes(originalBytes)),
     originalBytes,
     ...inspectExchangeForShare(documents),

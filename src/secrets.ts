@@ -67,7 +67,7 @@
 
 import type { Exchange, BodyPart, OriginMeta, RequestPart, ResponsePart } from "./exchange.js";
 import type { HeaderSet } from "./headers.js";
-import type { CookieSet, SetCookieSet } from "./cookies.js";
+import type { CookieSet, SetCookie, SetCookieSet } from "./cookies.js";
 import type { JsonObject } from "./types.js";
 import { base64UrlToBytes, decodeParams, encodeParams, isUnsafeObjectKey, safeObject } from "./params.js";
 import type { ParamEntry, ParamSet, ParamValue } from "./params.js";
@@ -257,7 +257,13 @@ function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally):
   if (!headers) return headers;
   let changed = false;
   const entries = headers.entries.map((entry) => {
+    // a name the sweep masked (`[REDACTED]: x`) counts on the second pass as it did on the first
+    if (entry.name === REDACTED_VALUE) tally.count++;
     if (!shouldMaskHeader(entry.name, entry.value)) {
+      if (entry.value === REDACTED_VALUE) {
+        tally.count++; // masked by an earlier pass (the sender's): counted, text unchanged
+        return entry;
+      }
       if (!URL_VALUED_HEADERS.has(entry.name.toLowerCase())) return entry;
       // A fresh tally per header value: `countedNames` exists so that a request's
       // `url` and `query` (two views of one table) count a parameter once. Two
@@ -265,8 +271,9 @@ function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally):
       // `Content-Location` carrying the same parameter name count as one (N5).
       const own = freshTally();
       const value = redactUrl(entry.value, own);
-      if (value === undefined || value === entry.value) return entry;
+      // counted even when nothing changed: an already-masked value in a URL header is still a masked value (D8)
       tally.count += own.count;
+      if (value === undefined || value === entry.value) return entry;
       changed = true;
       return { name: entry.name, value };
     }
@@ -313,20 +320,34 @@ function attributeLooksUnsafe(value: string | undefined): boolean {
  */
 function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: RedactionTally): SetCookieSet | undefined {
   if (!cookies || cookies.entries.length === 0) return cookies;
-  tally.count += cookies.entries.length;
+  // The count is the number of values masked (QA7 S4): the cookie value, each of domain/path/expires/sameSite that was
+  // masked, and each unrecognised attribute that had a value. A bare unrecognised flag has no value and counts nothing.
+  const attribute = (value: string | undefined): string | undefined => {
+    if (value === REDACTED_VALUE) {
+      tally.count++; // masked by an earlier pass (the sender's): counted, unchanged (D8, the recount rule)
+      return value;
+    }
+    if (!attributeLooksUnsafe(value)) return value;
+    tally.count++;
+    return REDACTED_VALUE;
+  };
   return {
-    entries: cookies.entries.map((cookie) => ({
-      ...cookie,
-      value: REDACTED_VALUE,
-      domain: attributeLooksUnsafe(cookie.domain) ? REDACTED_VALUE : cookie.domain,
-      path: attributeLooksUnsafe(cookie.path) ? REDACTED_VALUE : cookie.path,
-      expires: attributeLooksUnsafe(cookie.expires) ? REDACTED_VALUE : cookie.expires,
-      sameSite: attributeLooksUnsafe(cookie.sameSite) ? REDACTED_VALUE : cookie.sameSite,
-      unrecognized: cookie.unrecognized?.map((attribute) => ({
-        name: attribute.name,
-        value: attribute.value !== undefined ? REDACTED_VALUE : undefined,
-      })),
-    })),
+    entries: cookies.entries.map((cookie) => {
+      tally.count++;
+      return {
+        ...cookie,
+        value: REDACTED_VALUE,
+        domain: attribute(cookie.domain),
+        path: attribute(cookie.path),
+        expires: attribute(cookie.expires),
+        sameSite: attribute(cookie.sameSite),
+        unrecognized: cookie.unrecognized?.map((a) => {
+          // a value is always masked and counted; a bare flag whose name already reads `[REDACTED]` was masked by the sweep
+          if (a.value !== undefined || a.name === REDACTED_VALUE) tally.count++;
+          return { name: a.name, value: a.value !== undefined ? REDACTED_VALUE : undefined };
+        }),
+      };
+    }),
   };
 }
 
@@ -594,6 +615,11 @@ function freshTally(dedupeNames = true): RedactionTally {
   return { count: 0, countedNames: new Set(), dedupeNames };
 }
 
+/** Is this wire text exactly the mask: `[REDACTED]`, or its percent-encoded form (`%5BREDACTED%5D`, any hex case)? */
+function isMaskMarker(wire: string): boolean {
+  return wire === REDACTED_VALUE || /^%5BREDACTED%5D$/i.test(wire);
+}
+
 /** Is this decoded value actually *something* — not the absence of a value, and not an empty string? Redacting either removes nothing, so it must not be counted as a drop. */
 function isEmptyParamValue(value: ParamValue | undefined): boolean {
   return value === undefined || value === null || value === "";
@@ -612,7 +638,16 @@ function redactEntries(entries: ParamEntry[], tally: RedactionTally): { entries:
   let changed = false;
   const oauth = hasOauthContext(entries);
   const result = entries.map((entry) => {
-    if (!shouldRedactParam(entry, oauth)) return entry;
+    if (!shouldRedactParam(entry, oauth)) {
+      // A value that already reads `[REDACTED]` (the text a share carries) is a masked value and is counted, unchanged, so
+      // the recipient's count equals the sender's (QA7, prod QA5 finding 1; D8 "the count is of masked values").
+      const already = entry.raw.filter((pair) => pair.value !== null && isMaskMarker(pair.value)).length;
+      if (already > 0 && !(tally.dedupeNames && tally.countedNames.has(entry.name))) {
+        tally.count += already;
+        tally.countedNames.add(entry.name);
+      }
+      return entry;
+    }
     changed = true;
     // Every masked wire pair is a value that was removed: `a[]=1&a[]=x&a[pass]=2`
     // is one decoded entry but three values. A name that also appears in the twin
@@ -698,7 +733,12 @@ function redactUserinfo(prefix: string, tally: RedactionTally): string {
   const authority = prefix.slice(start, authorityEnd);
   const at = authority.lastIndexOf("@");
   if (at <= 0) return prefix; // no userinfo, or an empty one (`https://@host`): nothing to hide
-  if (authority.slice(0, at) === REDACTED_VALUE) return prefix; // already redacted: idempotent, not counted twice
+  if (authority.slice(0, at) === REDACTED_VALUE) {
+    // already masked (a share carries `https://[REDACTED]@host`): the text is unchanged, the value still counts, so a
+    // second pass reports what the first did (D8). Not double-counted within one pass: the final sweep skips it.
+    tally.count++;
+    return prefix;
+  }
   tally.count++;
   return `${prefix.slice(0, start)}${REDACTED_VALUE}${authority.slice(at)}${prefix.slice(authorityEnd)}`;
 }
@@ -927,6 +967,10 @@ function redactUnknown(
   tally: RedactionTally,
 ): { value: unknown; changed: boolean } {
   if (typeof value === "string") {
+    if (value === REDACTED_VALUE) {
+      tally.count++; // masked by an earlier pass: counted, unchanged
+      return { value, changed: false };
+    }
     if (keyLooksSecret || detectCredentialShape(value) !== null) {
       tally.count++;
       return { value: REDACTED_VALUE, changed: true };
@@ -1065,6 +1109,24 @@ function canonicalHeaders(headers: HeaderSet | undefined): HeaderSet | undefined
   return headers ? { entries: headers.entries.map((e) => ({ name: e.name, value: e.value })) } : undefined;
 }
 
+/**
+ * One Set-Cookie reading, restricted to the fields of `SetCookie` (an allowlist). A stored exchange or a share link is
+ * attacker-shaped JSON; a key outside the type would otherwise ride through every pass below unswept (QA7 review nit).
+ */
+function canonicalSetCookie(c: SetCookie): SetCookie {
+  const out: SetCookie = { name: c.name, value: c.value };
+  if (c.domain !== undefined) out.domain = c.domain;
+  if (c.path !== undefined) out.path = c.path;
+  if (c.expires !== undefined) out.expires = c.expires;
+  if (c.expiresAt !== undefined) out.expiresAt = c.expiresAt;
+  if (c.maxAge !== undefined) out.maxAge = c.maxAge;
+  if (c.secure !== undefined) out.secure = c.secure;
+  if (c.httpOnly !== undefined) out.httpOnly = c.httpOnly;
+  if (c.sameSite !== undefined) out.sameSite = c.sameSite;
+  if (c.unrecognized) out.unrecognized = c.unrecognized.map((a) => (a.value !== undefined ? { name: a.name, value: a.value } : { name: a.name }));
+  return out;
+}
+
 export function canonicalExchange(exchange: Exchange): Exchange {
   const out: Exchange = {};
   if (exchange.request) {
@@ -1087,7 +1149,7 @@ export function canonicalExchange(exchange: Exchange): Exchange {
     if (r.elapsedMs !== undefined) response.elapsedMs = r.elapsedMs;
     const headers = canonicalHeaders(r.headers);
     if (headers) response.headers = headers;
-    if (r.cookies) response.cookies = r.cookies; // parsed Set-Cookie readings: the only copy
+    if (r.cookies) response.cookies = { entries: r.cookies.entries.map(canonicalSetCookie) }; // parsed Set-Cookie readings: the only copy
     const body = canonicalBody(r.body);
     if (body) response.body = body;
     out.response = response;
@@ -1137,6 +1199,49 @@ function sweepHeaders(headers: HeaderSet | undefined, tally: RedactionTally): He
   };
 }
 
+/**
+ * `sweepText` over every string leaf of `origin`, the provenance field. The older
+ * per-leaf pass (`redactUnknown`) masks a leaf that *is* a credential or sits
+ * under a credential-ish key; this one finds a token *embedded in* a longer
+ * string (`curl -H 'Authorization: Bearer …' https://…`, an importer's kept
+ * source text). Keys are not rewritten here (`redactUnknown` already drops the
+ * prototype-pollution keys and masks values under secret-named keys). Returns
+ * the same reference when nothing changed.
+ */
+function sweepUnknown(value: unknown, tally: RedactionTally): unknown {
+  if (typeof value === "string") return sweepText(value, tally);
+  if (Array.isArray(value)) {
+    let changed = false;
+    const mapped = value.map((item) => {
+      const next = sweepUnknown(item, tally);
+      if (next !== item) changed = true;
+      return next;
+    });
+    return changed ? mapped : value;
+  }
+  if (value !== null && typeof value === "object") {
+    let changed = false;
+    const out = safeObject<unknown>();
+    for (const [key, item] of Object.entries(value)) {
+      if (isUnsafeObjectKey(key)) {
+        changed = true;
+        continue;
+      }
+      const next = sweepUnknown(item, tally);
+      if (next !== item) changed = true;
+      out[key] = next;
+    }
+    return changed ? out : value;
+  }
+  return value;
+}
+
+/** A body's `contentType` is header-shaped text the user typed; its `raw` is handled by the caller. */
+function sweepBodyContentType(body: BodyPart | undefined, tally: RedactionTally): BodyPart | undefined {
+  if (!body || body.contentType === undefined) return body;
+  return { ...body, contentType: sweepText(body.contentType, tally) };
+}
+
 /** What Copy, Download and the share send, and how many values were masked to make it. */
 export function redactForExport(exchange: Exchange): RedactionResult {
   const base = redactExchange(exchange);
@@ -1148,14 +1253,39 @@ export function redactForExport(exchange: Exchange): RedactionResult {
     if (r.method !== undefined) r.method = sweepText(r.method, sweep);
     if (r.url !== undefined) r.url = sweepText(r.url, sweep);
     r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
-    if (r.cookies) r.cookies = { entries: r.cookies.entries.map((c) => ({ name: sweepText(c.name, sweep), value: c.value })) };
+    // a cookie is one pair whose value is always masked, so a swept name adds no count of its own (see the response side)
+    if (r.cookies) r.cookies = { entries: r.cookies.entries.map((c) => ({ name: sweepText(c.name, freshTally(false)), value: c.value })) };
+    r.body = sweepBodyContentType(r.body, sweep);
     if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
   }
   if (canonical.response) {
     const r = canonical.response;
     if (r.statusText !== undefined) r.statusText = sweepText(r.statusText, sweep);
     r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
+    // Set-Cookie *names* and unrecognised attribute names: values and unsafe attributes were masked by `redactSetCookieSet`.
+    if (r.cookies) {
+      // A swept name is not counted again: a cookie is one `name=value` pair whose value is always masked, so the pair is
+      // one count (D8: a masked-name pair is one count for two tokens). Attribute text is counted when a token is found.
+      const quiet = freshTally(false);
+      const text = (v: string | undefined): string | undefined => (v === undefined ? v : sweepText(v, sweep));
+      r.cookies = {
+        entries: r.cookies.entries.map((c) => {
+          const swept: SetCookie = { ...c, name: sweepText(c.name, quiet) };
+          if (c.domain !== undefined) swept.domain = text(c.domain);
+          if (c.path !== undefined) swept.path = text(c.path);
+          if (c.expires !== undefined) swept.expires = text(c.expires);
+          if (c.sameSite !== undefined) swept.sameSite = text(c.sameSite);
+          // an attribute the parser could not place is kept verbatim, name included (`sid=1; <jwt>=1`); with a value it is a pair
+          if (c.unrecognized) {
+            swept.unrecognized = c.unrecognized.map((a) => ({ ...a, name: sweepText(a.name, a.value !== undefined ? quiet : sweep) }));
+          }
+          return swept;
+        }),
+      };
+    }
+    r.body = sweepBodyContentType(r.body, sweep);
     if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
   }
+  if (canonical.origin !== undefined) canonical.origin = sweepUnknown(canonical.origin, sweep) as OriginMeta;
   return { exchange: canonical, count: base.count + sweep.count, bodyMayContainSecret: base.bodyMayContainSecret };
 }
