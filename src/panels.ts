@@ -3,7 +3,7 @@ import { el } from "./dom.js";
 import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
 import { resolveSelection } from "./bundle.js";
-import { browserNavKeys, IS_APPLE, MOD_KEY } from "./platform.js";
+import { browserNavKeys, CLICK_WORD, IS_APPLE, MOD_KEY } from "./platform.js";
 import type { KeyHint } from "./platform.js";
 import { openBundleShareModal, openShareModal } from "./share.js";
 import { deleteFromLibrary, listLibrary, renameInLibrary } from "./store.js";
@@ -501,7 +501,10 @@ function browserShortcuts(): KeyHint[] {
     forward: m.browserForward,
     newTab: m.browserNewTab,
   };
-  return browserNavKeys().map(({ id, combos }) => ({ combos, description: described[id] ?? id }));
+  return browserNavKeys().map(({ id, combos }) => ({
+    combos: combos.map((combo) => combo.replace(CLICK_WORD, m.clickWord)),
+    description: described[id] ?? id,
+  }));
 }
 
 /** One `dl` of key/description rows. */

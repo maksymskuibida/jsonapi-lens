@@ -258,6 +258,10 @@ function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally):
   let changed = false;
   const entries = headers.entries.map((entry) => {
     if (!shouldMaskHeader(entry.name, entry.value)) {
+      if (entry.value === REDACTED_VALUE) {
+        tally.count++; // masked by an earlier pass (the sender's): counted, text unchanged
+        return entry;
+      }
       if (!URL_VALUED_HEADERS.has(entry.name.toLowerCase())) return entry;
       // A fresh tally per header value: `countedNames` exists so that a request's
       // `url` and `query` (two views of one table) count a parameter once. Two
@@ -265,8 +269,9 @@ function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally):
       // `Content-Location` carrying the same parameter name count as one (N5).
       const own = freshTally();
       const value = redactUrl(entry.value, own);
-      if (value === undefined || value === entry.value) return entry;
+      // counted even when nothing changed: an already-masked value in a URL header is still a masked value (D8)
       tally.count += own.count;
+      if (value === undefined || value === entry.value) return entry;
       changed = true;
       return { name: entry.name, value };
     }
@@ -603,6 +608,11 @@ function freshTally(dedupeNames = true): RedactionTally {
   return { count: 0, countedNames: new Set(), dedupeNames };
 }
 
+/** Is this wire text exactly the mask: `[REDACTED]`, or its percent-encoded form (`%5BREDACTED%5D`, any hex case)? */
+function isMaskMarker(wire: string): boolean {
+  return wire === REDACTED_VALUE || /^%5BREDACTED%5D$/i.test(wire);
+}
+
 /** Is this decoded value actually *something* — not the absence of a value, and not an empty string? Redacting either removes nothing, so it must not be counted as a drop. */
 function isEmptyParamValue(value: ParamValue | undefined): boolean {
   return value === undefined || value === null || value === "";
@@ -621,7 +631,16 @@ function redactEntries(entries: ParamEntry[], tally: RedactionTally): { entries:
   let changed = false;
   const oauth = hasOauthContext(entries);
   const result = entries.map((entry) => {
-    if (!shouldRedactParam(entry, oauth)) return entry;
+    if (!shouldRedactParam(entry, oauth)) {
+      // A value that already reads `[REDACTED]` (the text a share carries) is a masked value and is counted, unchanged, so
+      // the recipient's count equals the sender's (QA7, prod QA5 finding 1; D8 "the count is of masked values").
+      const already = entry.raw.filter((pair) => pair.value !== null && isMaskMarker(pair.value)).length;
+      if (already > 0 && !(tally.dedupeNames && tally.countedNames.has(entry.name))) {
+        tally.count += already;
+        tally.countedNames.add(entry.name);
+      }
+      return entry;
+    }
     changed = true;
     // Every masked wire pair is a value that was removed: `a[]=1&a[]=x&a[pass]=2`
     // is one decoded entry but three values. A name that also appears in the twin
@@ -707,7 +726,12 @@ function redactUserinfo(prefix: string, tally: RedactionTally): string {
   const authority = prefix.slice(start, authorityEnd);
   const at = authority.lastIndexOf("@");
   if (at <= 0) return prefix; // no userinfo, or an empty one (`https://@host`): nothing to hide
-  if (authority.slice(0, at) === REDACTED_VALUE) return prefix; // already redacted: idempotent, not counted twice
+  if (authority.slice(0, at) === REDACTED_VALUE) {
+    // already masked (a share carries `https://[REDACTED]@host`): the text is unchanged, the value still counts, so a
+    // second pass reports what the first did (D8). Not double-counted within one pass: the final sweep skips it.
+    tally.count++;
+    return prefix;
+  }
   tally.count++;
   return `${prefix.slice(0, start)}${REDACTED_VALUE}${authority.slice(at)}${prefix.slice(authorityEnd)}`;
 }
@@ -936,6 +960,10 @@ function redactUnknown(
   tally: RedactionTally,
 ): { value: unknown; changed: boolean } {
   if (typeof value === "string") {
+    if (value === REDACTED_VALUE) {
+      tally.count++; // masked by an earlier pass: counted, unchanged
+      return { value, changed: false };
+    }
     if (keyLooksSecret || detectCredentialShape(value) !== null) {
       tally.count++;
       return { value: REDACTED_VALUE, changed: true };

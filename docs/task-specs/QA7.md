@@ -3,7 +3,7 @@
 > The contract the implementer builds to, the reviewer checks against, and QA verifies from.
 > Source: the QA7 row in `docs/STATUS.md`, which collects what QA6's review rounds and the
 > production QA of QA6 (`docs/qa-reports/prod-qa6.md`) deferred. **This spec was written by the
-> implementer** (none existed). Six items, each independent of the others.
+> implementer** (none existed). Six items, each independent of the others, plus three low findings from the production QA of QA5 (`docs/qa-reports/prod-qa5.md`) folded in at review round 3.
 
 ## Outcome
 
@@ -58,11 +58,15 @@ documents (`D8`, `D7`/REGRESSION §7) now say what the code does.
 
 - **Set-Cookie count (round 2, S4)**: `count` = values masked: the cookie value, each masked `Domain`/`Path`/`Expires`/`SameSite`, each unrecognised attribute with a value. A masked name in a pair with a masked value adds nothing (D8's pair rule), for request and response cookies. `canonicalExchange` allowlists a Set-Cookie entry's fields.
 
+- **Recipient count (QA5 finding 1)**: a value that already reads `[REDACTED]` (the text a share carries) counts as a masked value, unchanged, so a second pass over an export reports the same count and the same bytes. The count is **the number of masked values in the export**, a property of the text, so the sender's toast, the share dialog and the recipient's toast agree. Recognised: a header value exactly `[REDACTED]`, a URL's `[REDACTED]@` userinfo, a query/fragment/form value `[REDACTED]` or `%5BREDACTED%5D`, an `origin` string exactly `[REDACTED]`, and cookie values. Not recognised: a token masked *inside* a longer string (`id [REDACTED]`, `Path=/x [REDACTED]`), which cannot be told from author text; a recipient's count can be lower for those only.
+- **`click` in the shortcuts dialog (finding 2)**: the word is `shortcuts.clickWord` in the catalogues (en `click`, de `Klick`, uk `клік`); `platform.ts` carries a `{click}` placeholder only. Key names stay.
+- **Multi-document share title (finding 3)**: `bundleUi.shareTitle(n)` for N > 1 (en "Share N documents", de "N Dokumente teilen", uk "Поділитися N документами/документом"); one document keeps `share.title`.
+
 ## Error and edge cases
 
 | Case | Expected |
 |---|---|
-| Response cookie named with a JWT | name becomes `[REDACTED]`, cookie row kept, count includes it |
+| Response cookie named with a JWT | name masked, cookie row kept; the pair is one count (its value) |
 | `body.contentType` = `application/json; token=Bearer abc` | `application/json; token=[REDACTED]`, `raw` of a JSON body untouched |
 | Body with no `contentType` | no `contentType` key appears in the export |
 | `origin` with `{ "text": "curl -H 'Authorization: Bearer abc' …", "n": 3, "ok": true, "x": null }` | only the string is rewritten; `3`, `true`, `null` stay |
@@ -98,7 +102,8 @@ documents (`D8`, `D7`/REGRESSION §7) now say what the code does.
       `wrangler dev` the CSS and a font answer exactly one `Referrer-Policy: no-referrer`.
 - [ ] D8's fail-closed paragraph agrees with `test/form-redaction.test.ts` (clean `a=1&b=2`: no note).
 - [ ] D7 and REGRESSION §7 say what "indistinguishable" covers and why the 410 is accepted.
-- [ ] No new user-facing string; `en`/`de`/`uk` untouched.
+- [ ] Two new catalogue strings in `en`, `de`, `uk` (`shortcuts.clickWord`, `bundleUi.shareTitle`); no literal English.
+- [ ] `redactForExport(opened.exchange)` after export -> seal -> open reports the sender's count and identical bytes (`test/share-recount.test.ts`).
 
 ## Tests that must exist
 

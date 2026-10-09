@@ -264,7 +264,7 @@ visitor.
   one. The decoded claims of any such header are visible before you reveal anything (deliberately:
   they are what the panel is for); the signature, and so the token, is not.
 - **Copy**, **Download** and **Share** all pass through one redaction ([D8](docs/DECISIONS.md)) and say
-  how many values it removed — a count of what was found, never a claim that nothing else remains;
+  how many values it removed — a count of what was found, never a claim that nothing else remains, and the same figure for whoever opens the shared link and copies the exchange (a value that already reads `[REDACTED]` counts);
   for Share the count and the warnings are shown *before* the link is created. It replaces with
   `[REDACTED]`: the value of a header that is a credential by name or by shape, every cookie value,
   the userinfo of the request URL and credential-named parameters in its query and fragment (and the

@@ -41,6 +41,12 @@ export interface KeyHint {
   description: string;
 }
 
+/**
+ * Placeholder for the word "click" inside a combo. It is a word, so it comes from the catalogue
+ * (`shortcuts.clickWord`); `panels.ts` swaps it in at render time. Key names (⌘, Ctrl, Alt) are not words.
+ */
+export const CLICK_WORD = "{click}";
+
 /** Which browser navigation key a row describes, so a catalogue can name it. */
 export type BrowserNavKey = "back" | "forward" | "newTab";
 
@@ -63,12 +69,12 @@ export function browserNavKeys(
     return [
       { id: "back", combos: ["⌘ + [", "⌘ + ←"] },
       { id: "forward", combos: ["⌘ + ]", "⌘ + →"] },
-      { id: "newTab", combos: ["⌘ + click"] },
+      { id: "newTab", combos: [`⌘ + ${CLICK_WORD}`] },
     ];
   }
   return [
     { id: "back", combos: ["Alt + ←"] },
     { id: "forward", combos: ["Alt + →"] },
-    { id: "newTab", combos: ["Ctrl + click"] },
+    { id: "newTab", combos: [`Ctrl + ${CLICK_WORD}`] },
   ];
 }

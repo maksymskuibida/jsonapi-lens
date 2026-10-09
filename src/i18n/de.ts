@@ -495,6 +495,7 @@ export const de: Messages = {
     browserBack: "Zurück — zu der Ressource, aus der Sie kamen",
     browserForward: "Vorwärts — die Kette wieder hinunter, die Sie zurückgegangen sind",
     browserNewTab: "Eine Beziehung in einem neuen Tab öffnen",
+    clickWord: "Klick",
     historyNote:
       "Diese Anwendung legt für jede Beziehung, der Sie folgen, einen echten Historieneintrag an. Zurück und Vorwärts bewegen Sie damit durch das Dokument selbst und bringen Sie genau zu der Ressource und der Scrollposition zurück, die Sie verlassen haben. Es sind die Tasten Ihres Browsers, nicht die dieser Anwendung.",
     pointerNote: (apple) =>
@@ -982,6 +983,7 @@ export const de: Messages = {
     tickToShare: "Wählen Sie mindestens ein Dokument aus, um einen Link zu erstellen.",
     selectRow: (label) => `${label} auswählen`,
     selectionMissing: (labels) => `Nicht mehr gespeichert, daher nicht enthalten: ${labels}`,
+    shareTitle: (n) => `${f.n(n)} ${f.plural(n, { one: "Dokument", other: "Dokumente" })} teilen`,
     shareSubtitle: (n, size) =>
       `${f.n(n)} ${f.plural(n, { one: "Dokument", other: "Dokumente" })} · ${size}`,
 

@@ -583,6 +583,8 @@ export const en = {
     browserBack: "Back — to the resource you came from",
     browserForward: "Forward — back down the chain you retraced",
     browserNewTab: "Open a relationship in a new tab",
+    /** The word in a chord such as `⌘ + click`; key names (⌘, Ctrl, Alt, Shift) stay as they are. */
+    clickWord: "click",
     historyNote:
       "This app pushes a real history entry for every relationship you follow, so Back and Forward move through the document itself — returning you to the exact resource and scroll position you left. They are your browser's keys, not this app's.",
     pointerNote: (apple: boolean): string =>
@@ -1161,6 +1163,8 @@ export const en = {
     tickToShare: "Tick at least one document to create a link.",
     selectRow: (label: string) => `Select ${label}`,
     selectionMissing: (labels: string) => `No longer saved, so not included: ${labels}`,
+    /** The dialog title for a bundle of N (> 1) documents; the one-document dialog keeps `share.title`. */
+    shareTitle: (n: number) => `Share ${f.n(n)} ${f.plural(n, { one: "document", other: "documents" })}`,
     shareSubtitle: (n: number, size: string) =>
       `${f.n(n)} ${f.plural(n, { one: "document", other: "documents" })} · ${size}`,
 
