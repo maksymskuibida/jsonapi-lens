@@ -67,7 +67,7 @@
 
 import type { Exchange, BodyPart, OriginMeta, RequestPart, ResponsePart } from "./exchange.js";
 import type { HeaderSet } from "./headers.js";
-import type { CookieSet, SetCookieSet } from "./cookies.js";
+import type { CookieSet, SetCookie, SetCookieSet } from "./cookies.js";
 import type { JsonObject } from "./types.js";
 import { base64UrlToBytes, decodeParams, encodeParams, isUnsafeObjectKey, safeObject } from "./params.js";
 import type { ParamEntry, ParamSet, ParamValue } from "./params.js";
@@ -313,20 +313,29 @@ function attributeLooksUnsafe(value: string | undefined): boolean {
  */
 function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: RedactionTally): SetCookieSet | undefined {
   if (!cookies || cookies.entries.length === 0) return cookies;
-  tally.count += cookies.entries.length;
+  // The count is the number of values masked (QA7 S4): the cookie value, each of domain/path/expires/sameSite that was
+  // masked, and each unrecognised attribute that had a value. A bare unrecognised flag has no value and counts nothing.
+  const attribute = (value: string | undefined): string | undefined => {
+    if (!attributeLooksUnsafe(value)) return value;
+    tally.count++;
+    return REDACTED_VALUE;
+  };
   return {
-    entries: cookies.entries.map((cookie) => ({
-      ...cookie,
-      value: REDACTED_VALUE,
-      domain: attributeLooksUnsafe(cookie.domain) ? REDACTED_VALUE : cookie.domain,
-      path: attributeLooksUnsafe(cookie.path) ? REDACTED_VALUE : cookie.path,
-      expires: attributeLooksUnsafe(cookie.expires) ? REDACTED_VALUE : cookie.expires,
-      sameSite: attributeLooksUnsafe(cookie.sameSite) ? REDACTED_VALUE : cookie.sameSite,
-      unrecognized: cookie.unrecognized?.map((attribute) => ({
-        name: attribute.name,
-        value: attribute.value !== undefined ? REDACTED_VALUE : undefined,
-      })),
-    })),
+    entries: cookies.entries.map((cookie) => {
+      tally.count++;
+      return {
+        ...cookie,
+        value: REDACTED_VALUE,
+        domain: attribute(cookie.domain),
+        path: attribute(cookie.path),
+        expires: attribute(cookie.expires),
+        sameSite: attribute(cookie.sameSite),
+        unrecognized: cookie.unrecognized?.map((a) => {
+          if (a.value !== undefined) tally.count++;
+          return { name: a.name, value: a.value !== undefined ? REDACTED_VALUE : undefined };
+        }),
+      };
+    }),
   };
 }
 
@@ -1065,6 +1074,24 @@ function canonicalHeaders(headers: HeaderSet | undefined): HeaderSet | undefined
   return headers ? { entries: headers.entries.map((e) => ({ name: e.name, value: e.value })) } : undefined;
 }
 
+/**
+ * One Set-Cookie reading, restricted to the fields of `SetCookie` (an allowlist). A stored exchange or a share link is
+ * attacker-shaped JSON; a key outside the type would otherwise ride through every pass below unswept (QA7 review nit).
+ */
+function canonicalSetCookie(c: SetCookie): SetCookie {
+  const out: SetCookie = { name: c.name, value: c.value };
+  if (c.domain !== undefined) out.domain = c.domain;
+  if (c.path !== undefined) out.path = c.path;
+  if (c.expires !== undefined) out.expires = c.expires;
+  if (c.expiresAt !== undefined) out.expiresAt = c.expiresAt;
+  if (c.maxAge !== undefined) out.maxAge = c.maxAge;
+  if (c.secure !== undefined) out.secure = c.secure;
+  if (c.httpOnly !== undefined) out.httpOnly = c.httpOnly;
+  if (c.sameSite !== undefined) out.sameSite = c.sameSite;
+  if (c.unrecognized) out.unrecognized = c.unrecognized.map((a) => (a.value !== undefined ? { name: a.name, value: a.value } : { name: a.name }));
+  return out;
+}
+
 export function canonicalExchange(exchange: Exchange): Exchange {
   const out: Exchange = {};
   if (exchange.request) {
@@ -1087,7 +1114,7 @@ export function canonicalExchange(exchange: Exchange): Exchange {
     if (r.elapsedMs !== undefined) response.elapsedMs = r.elapsedMs;
     const headers = canonicalHeaders(r.headers);
     if (headers) response.headers = headers;
-    if (r.cookies) response.cookies = r.cookies; // parsed Set-Cookie readings: the only copy
+    if (r.cookies) response.cookies = { entries: r.cookies.entries.map(canonicalSetCookie) }; // parsed Set-Cookie readings: the only copy
     const body = canonicalBody(r.body);
     if (body) response.body = body;
     out.response = response;
@@ -1191,7 +1218,8 @@ export function redactForExport(exchange: Exchange): RedactionResult {
     if (r.method !== undefined) r.method = sweepText(r.method, sweep);
     if (r.url !== undefined) r.url = sweepText(r.url, sweep);
     r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
-    if (r.cookies) r.cookies = { entries: r.cookies.entries.map((c) => ({ name: sweepText(c.name, sweep), value: c.value })) };
+    // a cookie is one pair whose value is always masked, so a swept name adds no count of its own (see the response side)
+    if (r.cookies) r.cookies = { entries: r.cookies.entries.map((c) => ({ name: sweepText(c.name, freshTally(false)), value: c.value })) };
     r.body = sweepBodyContentType(r.body, sweep);
     if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
   }
@@ -1200,14 +1228,26 @@ export function redactForExport(exchange: Exchange): RedactionResult {
     if (r.statusText !== undefined) r.statusText = sweepText(r.statusText, sweep);
     r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
     // Set-Cookie *names* and unrecognised attribute names: values and unsafe attributes were masked by `redactSetCookieSet`.
-    if (r.cookies) r.cookies = {
+    if (r.cookies) {
+      // A swept name is not counted again: a cookie is one `name=value` pair whose value is always masked, so the pair is
+      // one count (D8: a masked-name pair is one count for two tokens). Attribute text is counted when a token is found.
+      const quiet = freshTally(false);
+      const text = (v: string | undefined): string | undefined => (v === undefined ? v : sweepText(v, sweep));
+      r.cookies = {
         entries: r.cookies.entries.map((c) => {
-          const swept = { ...c, name: sweepText(c.name, sweep) };
-          // an attribute the parser could not place is kept verbatim, name included (`sid=1; <jwt>=1`)
-          if (c.unrecognized) swept.unrecognized = c.unrecognized.map((a) => ({ ...a, name: sweepText(a.name, sweep) }));
+          const swept: SetCookie = { ...c, name: sweepText(c.name, quiet) };
+          if (c.domain !== undefined) swept.domain = text(c.domain);
+          if (c.path !== undefined) swept.path = text(c.path);
+          if (c.expires !== undefined) swept.expires = text(c.expires);
+          if (c.sameSite !== undefined) swept.sameSite = text(c.sameSite);
+          // an attribute the parser could not place is kept verbatim, name included (`sid=1; <jwt>=1`); with a value it is a pair
+          if (c.unrecognized) {
+            swept.unrecognized = c.unrecognized.map((a) => ({ ...a, name: sweepText(a.name, a.value !== undefined ? quiet : sweep) }));
+          }
           return swept;
         }),
       };
+    }
     r.body = sweepBodyContentType(r.body, sweep);
     if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
   }

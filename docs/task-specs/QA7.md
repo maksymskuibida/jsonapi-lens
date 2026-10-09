@@ -16,7 +16,7 @@ documents (`D8`, `D7`/REGRESSION §7) now say what the code does.
 ## Interface
 
 - **S19** `secrets.ts#redactForExport` (the one function Copy, Download and Share call) additionally
-  runs `sweepText` over: each response cookie's `name` and each `unrecognized` attribute `name` (review B1); `body.contentType` of the request and of the
+  runs `sweepText` over: each response cookie's `name` and each `unrecognized` attribute `name` (review B1), and each Set-Cookie `Domain`/`Path`/`Expires`/`SameSite` value (round 2, S3); `body.contentType` of the request and of the
   response (any body kind; `raw` is still swept only for a clean form); every string **value** in
   `origin`, at any depth, including inside arrays. Each hit is replaced by `[REDACTED]` and counted
   in `count`. No new export; the result shape is unchanged.
@@ -56,6 +56,8 @@ documents (`D8`, `D7`/REGRESSION §7) now say what the code does.
   never-existed are one answer; an unswept expired share is answered `410` and the UI says "has
   expired". **No behaviour change**: the 410 discloses existence only, and ids are not secret.
 
+- **Set-Cookie count (round 2, S4)**: `count` = values masked: the cookie value, each masked `Domain`/`Path`/`Expires`/`SameSite`, each unrecognised attribute with a value. A masked name in a pair with a masked value adds nothing (D8's pair rule), for request and response cookies. `canonicalExchange` allowlists a Set-Cookie entry's fields.
+
 ## Error and edge cases
 
 | Case | Expected |
@@ -79,7 +81,7 @@ documents (`D8`, `D7`/REGRESSION §7) now say what the code does.
 
 - A secret of no recognisable shape in any field; a token inside a URL path; JSON/text/multipart
   bodies (flagged, never parsed). All stay listed in D8's "does not catch".
-- Sweeping `origin` **keys**, a Set-Cookie `Domain`/`Path`/`Expires`/`SameSite` value (gated by `attributeLooksUnsafe`, listed in D8), or `elapsedMs`/numbers.
+- Sweeping `origin` **keys** or `elapsedMs`/numbers.
 - Renaming `reqParam`. Changing the 410/404 behaviour. Changing the clean-form warning behaviour.
 - The font `Referer` on any production host other than what `_headers` governs.
 

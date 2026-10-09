@@ -747,7 +747,7 @@ to warn about (QA7 P2 aligned this entry to what shipped; the earlier wording, "
 clean form with nothing masked would warn, and QA6's notes §7 and production both say it does not). **Every other
 non-empty body warns**, whatever its content type and whatever the sniffer says — JSON (benign included), text,
 multipart, an unclean form, a rewritten form with leftovers. Over-warning is safe; a silent share is not. A body that is not a clean form is
-never rewritten and never called safe. The count only counts values actually masked.
+never rewritten and never called safe. The count only counts values actually masked. **Set-Cookie** (round 2, S4): a cookie's value, each of its `Domain`/`Path`/`Expires`/`SameSite` values that was masked, and each unrecognised attribute that had a value, are one count each, so `sid=1; Domain=Bearer x` is 2 and the export has two `[REDACTED]`. A bare unrecognised flag has no value and counts nothing. **The pair rule applies**: a cookie (or an unrecognised attribute with a value) whose *name* is also masked is still one pair and one count, as `[REDACTED]=[REDACTED]` is for a parameter; the same for request cookies. A swept name with no value attached (a bare flag) counts on its own. `canonicalExchange` also restricts a Set-Cookie entry to the fields of `SetCookie` (and of an unrecognised attribute), so a key outside the type in a stored exchange or a share link is dropped before any pass can miss it.
 
 **Secret parameter names** are matched in a query or a form body, **percent-decoded first** (as far as they decode: a
 browser submits `user[pass]` as `user%5Bpass%5D`; `%5b` and a double-encoded `%255B` too), per bracket/dot segment (`user[pass]`,
@@ -776,16 +776,13 @@ what this tool reviews.)
   it by any test this module has;
 - a bare `code=…` with no OAuth sibling;
 - **in those fields only the discrete token shapes above**: QA7 S19 extended the final sweep to Set-Cookie names
-  **and unrecognised Set-Cookie attribute names** (`sid=1; <jwt>=1` parses the second part as an attribute name, kept
-  verbatim), `body.contentType` and `origin` string values, so an embedded JWT, Stripe key, AWS key id,
+  **unrecognised Set-Cookie attribute names** (`sid=1; <jwt>=1` parses the second part as an attribute name, kept
+  verbatim), the Set-Cookie `Domain`/`Path`/`Expires`/`SameSite` values (round 2, S3: a value was masked only when it contained `=` or was
+  credential-shaped as a whole, so `Path=/x Bearer abc` and `Path=/<jwt>` went out unchanged), `body.contentType` and `origin` string values, so an embedded JWT, Stripe key, AWS key id,
   `Bearer`/`Basic`/`Token` value or `user:pw@` is masked and counted there, but a secret of no recognisable shape is not.
   In `origin` the older per-leaf pass also masks a whole leaf that is credential-shaped (`detectCredentialShape`)
   whatever its key, and any value under a credential-named key; an `origin` **key** is never rewritten (only
   `__proto__`/`constructor`/`prototype` are dropped);
-- a Set-Cookie `Domain`, `Path`, `Expires` or `SameSite` value: masked only when it contains `=` or is credential-shaped
-  (`attributeLooksUnsafe`), and the final sweep does not look at it, so `Path=/x Bearer abc` style text without `=` is
-  exported as it is (the field audit of the canonical export, QA7 review B1: every other field is a number, a boolean, a
-  swept string or a masked value);
 - a credential of no recognisable shape in a **name**: only credential-shaped names and path names on secret-named
   entries are masked;
 - any URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;

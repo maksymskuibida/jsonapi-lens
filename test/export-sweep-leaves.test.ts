@@ -24,8 +24,8 @@ describe("S19: Set-Cookie names", () => {
     expect(whole).not.toContain("qafakesig");
     expect(whole).toContain("theme");
     expect(out.exchange.response?.cookies?.entries).toHaveLength(2);
-    // 2 values masked by redactSetCookieSet + 1 name swept
-    expect(out.count).toBe(3);
+    // two cookies, two values masked; the swept name belongs to a pair whose value is masked, so it adds nothing (D8)
+    expect(out.count).toBe(2);
   });
 });
 
@@ -38,7 +38,7 @@ describe("S19 (review B1): unrecognised Set-Cookie attribute names", () => {
     const out = redactForExport(ex);
     expect(JSON.stringify(out.exchange)).not.toContain("qafakesig");
     expect(out.exchange.response?.cookies?.entries[0]?.unrecognized?.[0]?.name).toContain("[REDACTED]");
-    expect(out.count).toBeGreaterThanOrEqual(2); // the value, and the attribute name
+    expect(out.count).toBe(2); // the cookie value and the attribute pair `<jwt>=1` (one count for name+value)
   });
 });
 
@@ -92,5 +92,58 @@ describe("S19: string leaves inside origin", () => {
     const out = redactForExport({ origin });
     expect(JSON.stringify(out.exchange)).not.toContain("qa-fake-pp");
     expect(({} as Record<string, unknown>).x).toBeUndefined();
+  });
+});
+
+describe("QA7 review S3/S4/nit: Set-Cookie attributes are swept, counted, and allowlisted", () => {
+  const JWTX = ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxIn0", "qafakesigAAAA1111"].join(".");
+  const tokens = (ex: Exchange) => (JSON.stringify(ex).match(/\[REDACTED\]/g) ?? []).length;
+
+  it("S3: a token embedded in a longer Path, Domain, Expires or SameSite value is masked", async () => {
+    const { parseSetCookies } = await import("../src/cookies.js");
+    for (const line of [`sid=1; Path=/${JWTX}`, `sid=1; Path=/x Bearer qafakeAAA`, `sid=1; Domain=h.example.com/${JWTX}`, `sid=1; Expires=soon ${JWTX}`, `sid=1; SameSite=Lax ${JWTX}`]) {
+      const ex: Exchange = { response: { cookies: parseSetCookies([line]) } };
+      const out = redactForExport(ex);
+      const whole = JSON.stringify(out.exchange);
+      expect(whole, line).not.toContain("qafake");
+      expect(whole, line).not.toContain("eyJhbG");
+    }
+    // an ordinary one is untouched
+    const ok = redactForExport({ response: { cookies: parseSetCookies(["sid=1; Path=/x; Domain=example.com; SameSite=Lax"]) } });
+    expect(ok.exchange.response?.cookies?.entries[0]).toMatchObject({ path: "/x", domain: "example.com", sameSite: "Lax" });
+  });
+
+  it("S4: the count equals the number of [REDACTED] value tokens, attributes and unrecognised values included", async () => {
+    const { parseSetCookies } = await import("../src/cookies.js");
+    for (const [line, expected] of [
+      [`sid=1; Domain=Bearer x`, 2],
+      [`sid=1; Path=/x Bearer qafakeAAA`, 2],
+      [`sid=1; Path=/${JWTX}; HttpOnly`, 2],
+      [`sid=1; flag=secretvalue`, 2], // an unrecognised attribute with a value
+      [`sid=1; flagonly`, 1], // a bare flag has no value
+      [`sid=1; Path=/x`, 1],
+    ] as const) {
+      const out = redactForExport({ response: { cookies: parseSetCookies([line]) } });
+      expect(tokens(out.exchange), line).toBe(expected);
+      expect(out.count, line).toBe(expected);
+    }
+  });
+
+  it("S4: a masked name and its masked value are one count (the documented pair rule), for cookies and attributes", async () => {
+    const { parseSetCookies } = await import("../src/cookies.js");
+    const out = redactForExport({ response: { cookies: parseSetCookies([`${JWTX}=v`]) } });
+    expect(out.exchange.response?.cookies?.entries[0]?.name).toBe("[REDACTED]");
+    expect(out.count).toBe(1);
+    const req = redactForExport({ request: { cookies: { entries: [{ name: JWTX, value: "v" }] } } });
+    expect(JSON.stringify(req.exchange)).not.toContain("qafakesig");
+    expect(req.count).toBe(1);
+  });
+
+  it("nit: a key outside the SetCookie type does not ride through the export", () => {
+    const ex = { response: { cookies: { entries: [{ name: "sid", value: "1", extra: `Bearer qafakeEXTRA`, unrecognized: [{ name: "a", value: "b", more: "qafakeMORE" }] }] } } } as unknown as Exchange;
+    const whole = JSON.stringify(redactForExport(ex).exchange);
+    expect(whole).not.toContain("qafakeEXTRA");
+    expect(whole).not.toContain("qafakeMORE");
+    expect(whole).not.toContain('"extra"');
   });
 });
