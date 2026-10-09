@@ -338,7 +338,14 @@ function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: RedactionT
  * makes: one unnecessary redaction costs a click to notice; one missed
  * credential is the failure this module exists to prevent.
  */
-const SECRET_PARAM_NAME_SUBSTRINGS = ["token", "secret", "signature", "sig", "apikey", "password"];
+const SECRET_PARAM_NAME_SUBSTRINGS = ["token", "secret", "signature", "sig", "apikey", "password", "passwd", "pwd"];
+
+/**
+ * Names that are credentials only as a *whole* name (after the normalisation
+ * below): `pass` is the common short spelling of `password`, but as a substring
+ * it would mask `passport`, `bypass` and `compass`.
+ */
+const SECRET_PARAM_WHOLE_NAMES = new Set(["pass"]);
 
 function normalizeParamName(name: string): string {
   return name.toLowerCase().replace(/[-_ ]/g, "");
@@ -346,7 +353,7 @@ function normalizeParamName(name: string): string {
 
 export function isSecretParamName(name: string): boolean {
   const normalized = normalizeParamName(name);
-  return SECRET_PARAM_NAME_SUBSTRINGS.some((needle) => normalized.includes(needle));
+  return SECRET_PARAM_WHOLE_NAMES.has(normalized) || SECRET_PARAM_NAME_SUBSTRINGS.some((needle) => normalized.includes(needle));
 }
 
 /**
@@ -642,8 +649,8 @@ function bodyMightContainCredential(raw: string): boolean {
  *     a body that merely looked like a form is safe, under-redacting is not);
  *   - the text does not start with `{ [ " <` **whatever the content type** — a
  *     JSON body labelled as a form is not a form;
- *   - it contains no whitespace (so a multi-line or `;`-separated body is not
- *     read as one) and every `&`-separated piece is non-empty and decodes;
+ *   - it contains no whitespace and no `;` (so a multi-line or `;`-separated body
+ *     is not read as one) and every `&`-separated piece is non-empty and decodes;
  *   - every parameter **name**, once percent-decoded, is only letters, digits
  *     and `_ . - [ ]`. A name containing `{ " : = =` or a space means the text
  *     was not a form (`password%3Dsecret` decodes to one name with an `=` in it),
@@ -660,7 +667,7 @@ const STRICT_PARAM_NAME_RE = /^[A-Za-z0-9_.\-[\]]+$/;
 
 export function classifyBody(body: BodyPart): BodyKind {
   const text = body.raw.trim();
-  if (text === "" || JSON_OR_MARKUP_START_RE.test(text) || /\s/.test(text)) return { kind: "other" };
+  if (text === "" || JSON_OR_MARKUP_START_RE.test(text) || /[\s;]/.test(text)) return { kind: "other" };
   const contentType = body.contentType ?? "";
   const declaredForm = FORM_CONTENT_TYPE_RE.test(contentType);
   if (!declaredForm && !PLAIN_OR_EMPTY_CONTENT_TYPE_RE.test(contentType)) return { kind: "other" };
@@ -681,35 +688,62 @@ export function classifyBody(body: BodyPart): BodyKind {
   return { kind: "form", params: decodeParams(text) };
 }
 
-/** Is this text a multipart body? Neither redacted nor parsed; always flagged. */
+/** Is this text a multipart body? Neither redacted nor parsed. */
 const MULTIPART_RE = /content-disposition\s*:\s*form-data/i;
 
 /**
- * A form body is redacted exactly like `query` — the same `ParamSet` path — and
- * `raw` is **rewritten** from the redacted parameters, so nothing unredacted is
- * left beside them. A body that is not a clean form is left untouched and
- * sniffed (`bodyMightContainCredential`); one that **claims** to be a form and
- * is not (a JSON body under a form content type) is flagged unconditionally —
- * fail closed.
+ * Is anything credential-like still in a form's parameters *after* redaction?
+ * A name that is itself shaped like a credential (`sk_live_…` as a bare name),
+ * a secret-looking name that somehow survived, or a remaining pair the coarse
+ * body sniffer fires on. Redaction masks the pairs it recognises; this is the
+ * check on what it left, so that "rewritten" never means "safe".
+ */
+function formHasLeftovers(original: ParamEntry[]): boolean {
+  // Only what redaction did not touch can be a leftover; a redacted entry is masked.
+  // Judged on the **wire text** (`entry.raw`), not the decoded tree: a dotted bare
+  // name such as a JWT is split into nested keys by the decoder, which loses it.
+  return original
+    .filter((entry) => !shouldRedactParam(entry))
+    .some((entry) =>
+      entry.raw.some(
+        (pair) =>
+          detectCredentialShape(pair.key) !== null ||
+          isSecretParamName(pair.key) ||
+          bodyMightContainCredential(pair.value === null ? pair.key : `${pair.key}=${pair.value}`),
+      ),
+    );
+}
+
+/**
+ * **Fail closed.** The "this body may contain credentials" warning is
+ * suppressed in exactly one case: the body is a **clean form**
+ * (`classifyBody`: no `;`, no whitespace, strict parameter names, form-like
+ * content type), it went through redaction, and **nothing credential-like is
+ * left** in its names or values (`formHasLeftovers`). Every other non-empty
+ * body — JSON, text, multipart, an unclean or ambiguous form, a rewritten form
+ * with leftovers — warns, whatever its content type and whatever the coarse
+ * sniffer says. Over-warning costs a line of text; a silent share is the
+ * failure this module exists to prevent (QA6 review B6, S13).
+ *
+ * A clean form is redacted exactly like `query` — the same `ParamSet` path —
+ * and `raw` is **rewritten** from the redacted parameters, so nothing
+ * unredacted is left beside them. Anything else is left untouched.
  */
 function redactBodyPart(
   body: BodyPart | undefined,
   tally: RedactionTally,
 ): { body: BodyPart | undefined; mayContainSecret: boolean } {
   if (!body) return { body, mayContainSecret: false };
+  if (body.raw.trim() === "") return { body, mayContainSecret: false };
 
   const classified = classifyBody(body);
-  if (classified.kind === "form") {
-    const { entries, changed } = redactEntries(classified.params.entries, tally);
-    if (changed) {
-      const redactedForm: ParamSet = { entries };
-      return { body: { ...body, raw: encodeParams(redactedForm), form: redactedForm }, mayContainSecret: false };
-    }
-    return { body, mayContainSecret: bodyMightContainCredential(body.raw) };
-  }
+  if (classified.kind !== "form") return { body, mayContainSecret: true };
 
-  const claimsForm = FORM_CONTENT_TYPE_RE.test(body.contentType ?? "") && body.raw.trim() !== "";
-  return { body, mayContainSecret: claimsForm || bodyMightContainCredential(body.raw) };
+  const { entries, changed } = redactEntries(classified.params.entries, tally);
+  const leftovers = formHasLeftovers(classified.params.entries);
+  if (!changed) return { body, mayContainSecret: leftovers };
+  const redactedForm: ParamSet = { entries };
+  return { body: { ...body, raw: encodeParams(redactedForm), form: redactedForm }, mayContainSecret: leftovers };
 }
 
 /**

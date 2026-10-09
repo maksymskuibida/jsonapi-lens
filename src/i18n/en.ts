@@ -611,7 +611,7 @@ export const en = {
         other: `${f.n(n)} values in the attached request look like credentials and will be removed before this link is created.`,
       }),
     bodyNotRedacted:
-      "The attached request or response has a body that may contain credentials. Bodies are not redacted — it will be included in this link as it is.",
+      "An attached body may still contain credentials: only plain form data is redacted, and nothing else in a body is checked. Review it before creating this link — whatever is left in it is included as it is.",
     create: "Create link",
     deriving: "Deriving the key and encrypting…",
     uploading: (size: string) => `Uploading ${size}…`,

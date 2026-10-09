@@ -242,3 +242,29 @@ Fixture audit: the hand-populated fields the form never fills were `BodyPart.for
 | Multipart body | flagged, not rewritten |
 | `admin:pw@api.example.com/x`, `not a url?api_key=…`, `javascript:alert(1)//?token=…` | masked line + summary, reveal restores the typed text, never linked |
 | `Origin` / `Referer` / `Location` / `Content-Location` with a credential | redacted in the share and masked on screen with a reveal |
+
+
+## Round 5 amendments (review round 6): fail closed
+
+**The rule.** The "this body may contain credentials" warning is **suppressed only when all of these hold**:
+(1) the body is non-empty and `classifyBody` says clean form — form-like content type, no `{ [ " <` start, **no whitespace
+and no `;`**, strict parameter names; (2) it went through redaction (a clean form with nothing to mask counts); (3) after
+redaction **no remaining name or value** is credential-like (`detectCredentialShape`, the secret-name list, the body sniffer
+on what is left). **Every other non-empty body warns**, whatever its content type and whatever the sniffer says: JSON (benign
+included), text, multipart, an unclean or ambiguous form, a rewritten form with leftovers. An empty or blank body never warns.
+The count only counts values actually masked. One sentence covers both "not scanned" and "leftovers":
+`share.bodyNotRedacted`. Over-warning is accepted; a silent share is not. The on-screen masking is unchanged.
+
+`pass` (as a whole name), `pwd` and `passwd` (substring) are secret parameter names; `passport`, `bypass`, `compass` are not.
+
+This replaces the earlier table rows that said some bodies were "flagged when the detector fires": the detector no longer
+decides whether to warn, only whether a clean form has leftovers.
+
+| Body typed into the form | Count | Warning |
+|---|---|---|
+| `a=1&password=x` (any of form / empty / `text/plain` type) | 1 | none |
+| `a=1&password=x&note=<stripe-shaped key>` | 2 | none (both masked) |
+| `password=x&<bare stripe-shaped key>` or `password=x&<jwt>` | 1 | **warns** (leftover) |
+| `a=1;password=x`, `a=1` newline `password=abc`, `pass:word=x`, `password=my secret phrase`, `client_secret=abc def` | 0 | **warns**, not rewritten |
+| `{"amount":100}`, `hello there`, multipart | 0 | **warns** |
+| empty / whitespace | 0 | none |

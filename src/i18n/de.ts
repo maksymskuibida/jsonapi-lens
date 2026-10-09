@@ -523,7 +523,7 @@ export const de: Messages = {
         other: `${f.n(n)} Werte in der angehängten Anfrage sehen nach Zugangsdaten aus und werden entfernt, bevor dieser Link erstellt wird.`,
       }),
     bodyNotRedacted:
-      "Die angehängte Anfrage oder Antwort hat einen Body, der Zugangsdaten enthalten könnte. Bodys werden nicht geschwärzt — er wird unverändert in diesen Link aufgenommen.",
+      "Ein angehängter Body kann noch Zugangsdaten enthalten: nur einfache Formulardaten werden geschwärzt, alles andere in einem Body wird nicht geprüft. Prüfen Sie ihn, bevor Sie den Link erstellen — was darin übrig bleibt, wird unverändert aufgenommen.",
     create: "Link erstellen",
     deriving: "Schlüssel wird abgeleitet und verschlüsselt …",
     uploading: (size) => `${size} werden hochgeladen …`,

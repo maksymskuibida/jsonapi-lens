@@ -188,3 +188,64 @@ describe("a body that is not a clean form is never called safe (QA6 review B5, S
     expect(redactExchange(typeIntoForm({ contentType: FORM, body: "pass%77ord=hunter2secretX" })).count).toBe(1);
   });
 });
+
+describe("fail closed: the body warning is suppressed only for a clean, fully redacted form (QA6 review B6, S13)", () => {
+  const FORM = "application/x-www-form-urlencoded";
+  const warns = (contentType: string, body: string) => {
+    const exchange = typeIntoForm({ contentType, body });
+    return inspectExchangeForShare([{ label: "a", text: "{}", exchange }]);
+  };
+
+  // Every row of the reviewer's B6 table, with the form type and with none.
+  const b6 = ["a=1;password=x", "a=1\npassword=abc", "pass:word=x", "password=my secret phrase", "client_secret=abc def"];
+  for (const body of b6) {
+    for (const contentType of [FORM, ""]) {
+      it(`warns: ${JSON.stringify(body)} with content type ${JSON.stringify(contentType)}`, () => {
+        const result = warns(contentType, body);
+        expect(result.bodyUnredacted).toBe(true);
+        // and nothing is claimed as removed that was not (the count is only masked values)
+        const exchange = typeIntoForm({ contentType, body });
+        const redacted = redactExchange(exchange);
+        expect(redacted.exchange.request?.body?.raw).toBe(exchange.request?.body?.raw);
+        expect(redacted.count).toBe(0);
+      });
+    }
+  }
+
+  it("S13: a redacted form with a credential-shaped leftover still warns (count counts only what was masked)", () => {
+    const stripe = ["sk", "live", "FAKE0notREAL0stripe0key00"].join("_");
+    const jwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.c2lnbmF0dXJlLWZha2U";
+    for (const body of [`password=x&${stripe}`, `password=x&${jwt}`]) {
+      const result = warns(FORM, body);
+      expect(result.bodyUnredacted, body).toBe(true);
+      expect(result.redacting, body).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("a credential-shaped *value* is masked and counted, so nothing is left and it does not warn", () => {
+    const stripe = ["sk", "live", "FAKE0notREAL0stripe0key00"].join("_");
+    expect(warns(FORM, `password=x&note=${stripe}`)).toEqual({ redacting: 2, bodyUnredacted: false });
+  });
+
+  it("a genuinely clean form is redacted, counted, and does not warn", () => {
+    for (const contentType of [FORM, "", "text/plain"]) {
+      const result = warns(contentType, "a=1&password=x");
+      expect(result).toEqual({ redacting: 1, bodyUnredacted: false });
+    }
+  });
+
+  it("an empty or blank body never warns; a JSON body always does", () => {
+    expect(warns(FORM, "").bodyUnredacted).toBe(false);
+    expect(warns("application/json", '{"amount":100}').bodyUnredacted).toBe(true);
+    expect(warns("application/json", '{"a":{"b":[1,2,3]}}').bodyUnredacted).toBe(true);
+    expect(warns("text/plain", "hello there").bodyUnredacted).toBe(true);
+  });
+
+  it("`pass`, `pwd` and `passwd` parameters are masked; `passport` and `bypass` are left alone", () => {
+    const result = redactExchange(typeIntoForm({ contentType: FORM, body: "pass=a1&pwd=b2&passwd=c3&passport=P123&bypass=1" }));
+    expect(result.count).toBe(3);
+    expect(result.exchange.request?.body?.raw).toContain("passport=P123");
+    expect(result.exchange.request?.body?.raw).toContain("bypass=1");
+    expect(result.bodyMayContainSecret).toBe(false);
+  });
+});

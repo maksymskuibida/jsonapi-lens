@@ -74,8 +74,13 @@ describe("the document's Share dialog", () => {
     expect(document.querySelector(".share__note--body")?.textContent).toBe(t().share.bodyNotRedacted);
   });
 
-  it("does not warn about a body when there is none to worry about", () => {
+  it("warns about any non-empty body that is not a clean form, benign JSON included (fail closed)", () => {
     openShareModal("{}", "a.json", { request: { body: { raw: '{"amount":100}', contentType: "application/json" } } });
+    expect(document.querySelector(".share__note--body")).not.toBeNull();
+  });
+
+  it("does not warn when the body is empty or a clean form", () => {
+    openShareModal("{}", "a.json", { request: { body: { raw: "", contentType: "application/json" } } });
     expect(document.querySelector(".share__note--body")).toBeNull();
   });
 

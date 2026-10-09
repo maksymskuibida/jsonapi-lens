@@ -654,7 +654,9 @@ the screen, the redaction and the share dialog's warning all call: content type
 content type**; no whitespace; every parameter name, once percent-decoded, only letters, digits and
 `_ . - [ ]`. Anything else is **not a clean form**: never rewritten, never called safe, and flagged — always
 when it *claims* to be a form and is not (a JSON body under a form content type), otherwise when the
-detector fires. The body warning may be suppressed only for a body that parsed cleanly. This exists
+detector fires. **Fail closed:** the body warning is suppressed only for a body that is a clean form (no `;`, no whitespace),
+was redacted, and has no credential-like name or value left; every other non-empty body warns, whatever its
+content type and whatever the sniffer says. Over-warning is safe; a silent share is not. This exists
 because `BodyPart.form` is never populated by the app — redacting only when it
 was is what shipped broken until the blind QA of 2026-10-09. **Redaction tests must use the shape the
 real UI produces** (`test/form-redaction.test.ts` drives the real request form).
