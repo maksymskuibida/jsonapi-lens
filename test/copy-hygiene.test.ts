@@ -46,6 +46,11 @@ const EXEMPT: { file: string; literal: string; reason: string }[] = [
     reason: "the JSON keyword `null`, shown as written in the payload; it is data syntax, not language",
   },
   {
+    file: "src/render-request.ts",
+    literal: "[REDACTED]",
+    reason: "the redaction marker is a data token written into the exchange itself (D8) and is identical in every language; the mask cell shows what the share sends",
+  },
+  {
     file: "src/seo.ts",
     literal: " — jsonapi-lens",
     reason: "the product's own name as a document-title suffix; a proper noun",
@@ -58,6 +63,7 @@ const EXEMPT: { file: string; literal: string; reason: string }[] = [
  * decision someone has to make here rather than a literal nobody looks at.
  */
 const HELPER_COPY_ARGS: Record<string, { file?: string; args: number[] }[]> = {
+  refreshEditRequestButton: [{ file: "src/main.ts", args: [] }], // syncs a button's label; takes no copy
   actionButton: [{ args: [0, 1] }], // (label, title, onClick, extraClass)
   button: [
     { file: "src/render-resource.ts", args: [1, 2] }, // (action, label, title, extra)

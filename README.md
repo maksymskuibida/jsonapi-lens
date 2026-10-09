@@ -259,14 +259,21 @@ visitor.
   `sk_`/`pk_`-prefixed key) are masked on arrival; click to reveal, one at a time. A `Bearer` JWT is
   decoded locally — header and payload, never the signature, never a network call — with `exp` shown
   relative to the response's own `Date` header when there is one.
-- **Copy** and **Download** redact by default and say how many values they found and hid — a count of
-  what was found, never a claim that nothing else remains. The pass covers header and cookie values
-  shaped like credentials, credential-shaped URL query parameters and form-urlencoded body values, and
-  the origin. A JSON or text body is **not** scanned, and the page says so next to the buttons.
-- **Share carries the attached request and response into the encrypted link**, redacted the same
-  way, and says how many values it removed *before* the link is created — whether you share the
-  open document or tick it in **Saved documents → Share**. The link opens with the exchange band in
-  place and every credential still masked.
+- **Copy**, **Download** and **Share** all pass through one redaction ([D8](docs/DECISIONS.md)) and say
+  how many values it removed — a count of what was found, never a claim that nothing else remains;
+  for Share the count and the warnings are shown *before* the link is created. It replaces with
+  `[REDACTED]` header and cookie values shaped like credentials, the userinfo, credential-shaped
+  query parameters and fragment of the URL, the value of `Location`, `Referer`, `Content-Location`
+  and `Origin`, credential-shaped parameters in a form-urlencoded body, and the `origin` field. What
+  the recipient sees in those places is `[REDACTED]`, not a value they can reveal.
+  **It is not complete.** A JSON, text or multipart body is flagged, never rewritten, and goes out as
+  it is — the dialog says so before the link is created. A secret under an unlisted name with a
+  shapeless value, a token in a URL path, and a few fields (Set-Cookie names, the body's content
+  type, the string leaves of `origin`) are not caught; D8 keeps the exact list.
+- **Share carries the attached request and response into the encrypted link**, redacted as above —
+  whether you share the open document or tick it in **Saved documents → Share**. The link opens
+  with the exchange band in place. On screen a credential-shaped value is not in the page at all
+  until you click to reveal it.
 
 Importing from a bundle link ends with a toast saying how many documents were saved (and, if
 storage refused some, how many were not).

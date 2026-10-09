@@ -15,6 +15,7 @@ import {
   requestBodyRoot,
   responseReferenceTime,
 } from "../src/render-request.js";
+import { richToText } from "../src/dom.js";
 import { t } from "../src/i18n/index.js";
 import { typeIntoForm, resetModalRoot } from "./helpers/type-into-form.js";
 import { requestResourceDomId, requestNodeDomId } from "../src/ident.js";
@@ -796,7 +797,11 @@ describe("the invalid-JSON body note always has a hint, with no engine text (QA6
         const { t: tt } = await import("../src/i18n/index.js");
         const el = render({ raw: '{"a": }', contentType: "application/json" });
         const note = el!.querySelector(".xrow__note--conflict")!;
-        expect(note.querySelector(".xrow__note-hint")!.textContent).toBe(tt().request.review.invalidJsonBody);
+        // The same located sentence the paste view shows, then the position, then what became of the body.
+        const hint = richToText(tt().parseErrors.invalidJson.hint({ kind: "unexpected-char", char: "}" }));
+        expect(note.querySelector(".xrow__note-hint")!.textContent).toBe(hint);
+        expect(note.textContent).toContain(tt().paste.errorWhereColumn(1, 7));
+        expect(note.textContent).toContain(tt().request.review.invalidJsonBody);
         expect(note.textContent).not.toMatch(/Expected|Unexpected|position \d/);
       } finally {
         localStorage.setItem("jsonapi-lens:locale", "en");
