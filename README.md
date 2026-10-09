@@ -262,18 +262,23 @@ visitor.
 - **Copy**, **Download** and **Share** all pass through one redaction ([D8](docs/DECISIONS.md)) and say
   how many values it removed — a count of what was found, never a claim that nothing else remains;
   for Share the count and the warnings are shown *before* the link is created. It replaces with
-  `[REDACTED]` header and cookie values shaped like credentials, the userinfo, credential-shaped
-  query parameters and fragment of the URL, the value of `Location`, `Referer`, `Content-Location`
-  and `Origin`, credential-shaped parameters in a form-urlencoded body, and the `origin` field. What
-  the recipient sees in those places is `[REDACTED]`, not a value they can reveal.
-  **It is not complete.** A JSON, text or multipart body is flagged, never rewritten, and goes out as
-  it is — the dialog says so before the link is created. A secret under an unlisted name with a
-  shapeless value, a token in a URL path, and a few fields (Set-Cookie names, the body's content
-  type, the string leaves of `origin`) are not caught; D8 keeps the exact list.
+  `[REDACTED]`: the value of a header that is a credential by name or by shape, every cookie value,
+  the userinfo of the request URL and credential-named parameters in its query and fragment (and the
+  same parts of a URL in `Location`, `Referer`, `Content-Location` and `Origin`, whose other parts
+  are left as they are), credential-named parameters in a form body in the strict `a=1&b=2` shape,
+  and credential-shaped values in the `origin` field. What the recipient sees in those places is
+  `[REDACTED]`, not a value they can reveal.
+  **It is not complete.** A JSON, text or multipart body, and a form body that is not in that strict
+  shape (separated by `;`, spread over several lines, or with spaces in a value), is flagged, never
+  rewritten, and goes out as it is — the dialog says so before the link is created. A secret under an
+  unlisted name with a shapeless value, a token in a URL path, and a few fields (Set-Cookie names, the
+  body's content type, a token embedded inside a longer `origin` string) are not caught; D8 keeps the
+  exact list.
 - **Share carries the attached request and response into the encrypted link**, redacted as above —
   whether you share the open document or tick it in **Saved documents → Share**. The link opens
-  with the exchange band in place. On screen a credential-shaped value is not in the page at all
-  until you click to reveal it.
+  with the exchange band in place. On screen a masked header, cookie, URL or form value is not in
+  the page at all until you click to reveal it; a JSON, text or multipart request body is shown as
+  text, as it is.
 
 Importing from a bundle link ends with a toast saying how many documents were saved (and, if
 storage refused some, how many were not).

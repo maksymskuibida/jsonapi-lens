@@ -108,7 +108,7 @@ removed. No other README link points at a gitignored path (checked: the only oth
 limit would read "12.58 MB" and every dialog would disagree with the number a user is told. The
 label is what was wrong. Applies to every `formatBytes` call (raw view, library rows, share dialogs,
 bundle import rows, request body line, over-limit messages) and to the Worker's 413 message. Unit
-symbols are not translated, so the three catalogues need no row. Documented in the README and D8.
+symbols are not translated, so the three catalogues need no row. Documented in the README and D9.
 
 ## Error and edge cases
 
@@ -159,7 +159,7 @@ symbols are not translated, so the three catalogues need no row. Documented in t
 ## Acceptance criteria
 
 - [ ] No `aria-label`, `title`, `text:` etc. in `src/` (outside the catalogues and legal pages) is a
-      letter-bearing literal, apart from the two documented exemptions; `test/copy-hygiene.test.ts`
+      letter-bearing literal, apart from the two documented exemptions (`null`, the product name); `test/copy-hygiene.test.ts`
       passes and is shown to fail when a literal is reintroduced.
 - [ ] In `de` and `uk`, every button the report named has a translated accessible name equal to its
       tooltip.

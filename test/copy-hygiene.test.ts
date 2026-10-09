@@ -46,11 +46,6 @@ const EXEMPT: { file: string; literal: string; reason: string }[] = [
     reason: "the JSON keyword `null`, shown as written in the payload; it is data syntax, not language",
   },
   {
-    file: "src/render-request.ts",
-    literal: "[REDACTED]",
-    reason: "the redaction marker is a data token written into the exchange itself (D8) and is identical in every language; the mask cell shows what the share sends",
-  },
-  {
     file: "src/seo.ts",
     literal: " — jsonapi-lens",
     reason: "the product's own name as a document-title suffix; a proper noun",
@@ -342,6 +337,10 @@ describe("findHardcodedCopy — the scan itself can fail", () => {
     expect(flagged(`el("p", { class: "a b" }, a, "·", b)`)).toEqual([]);
     expect(flagged("const h = `<span class=\"x\">${escapeHtml(t().a)}</span>`")).toEqual([]);
     expect(flagged(`({ title: t().a.b("x") })`)).toEqual([]);
+  });
+
+  it("the redaction marker is not exempt: a literal \"[REDACTED]\" must come from REDACTED_VALUE", () => {
+    expect(flagged(`el("code", { text: masked ? "[REDACTED]" : name })`, "src/render-request.ts")).toEqual(["text: <literal>"]);
   });
 
   it("an exemption matches the exact word only, not anything containing it", () => {

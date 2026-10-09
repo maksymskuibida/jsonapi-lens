@@ -88,6 +88,7 @@ import type { ParamEntry, ParamSet, ParamValue } from "./params.js";
 import {
   classifyBody,
   decodeJwt,
+  REDACTED_VALUE,
   detectCredentialShape,
   isSecretParam,
   paramNameCarriesCredential,
@@ -812,7 +813,7 @@ function paramRow(entry: ParamEntry, ref: string | null, siblings: readonly Para
   // anchor id, which would otherwise spell it out.
   const nameIsSecret = paramNameCarriesCredential(entry);
   const row = el("div", { class: "xrow xrow--param", id: nameIsSecret ? undefined : requestFieldDomId("reqParam", entry.name) });
-  row.append(el("code", { class: "xrow__name", text: nameIsSecret ? "[REDACTED]" : entry.name }));
+  row.append(el("code", { class: "xrow__name", text: nameIsSecret ? REDACTED_VALUE : entry.name }));
   row.append(ref !== null && isSecretParam(entry, siblings) ? el("div", { class: "xparam__body" }, maskedValue(ref)) : paramBody(entry));
   return row;
 }
