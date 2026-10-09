@@ -257,10 +257,12 @@ visitor.
   under its own scope so it never collides with the response even when both share a `type`/`id`.
 - `Authorization`, cookies, and anything shaped like a credential (a JWT, a long hex/base64 run, a
   `sk_`/`pk_`-prefixed key) are masked on arrival; each has its own toggle that reveals (and hides) just that value, and a
-  value you revealed stays revealed until you hide it again. A `Bearer` JWT is decoded locally —
-  header and payload, never the signature, never a network call — with `exp` shown relative to the
-  response's own `Date` header when there is one. The decoded claims are visible before you reveal
-  anything (deliberately: they are what the panel is for); the signature, and so the token, is not.
+  value you revealed stays revealed until you hide it again or the panel is re-rendered (after an
+  edit, or a reload), which masks it again. A header whose value is a JWT — under any header name, a
+  `Bearer` one or an `X-Id-Token` — is decoded locally: header and payload, never the signature,
+  never a network call, with `exp` shown relative to the response's own `Date` header when there is
+  one. The decoded claims of any such header are visible before you reveal anything (deliberately:
+  they are what the panel is for); the signature, and so the token, is not.
 - **Copy**, **Download** and **Share** all pass through one redaction ([D8](docs/DECISIONS.md)) and say
   how many values it removed — a count of what was found, never a claim that nothing else remains;
   for Share the count and the warnings are shown *before* the link is created. It replaces with
@@ -280,7 +282,7 @@ visitor.
 - **Share carries the attached request and response into the encrypted link**, redacted as above —
   whether you share the open document or tick it in **Saved documents → Share**. The link opens
   with the exchange band in place. On screen a masked header, cookie, URL or form value is not in
-  the page at all until you click to reveal it (the decoded JWT claims under an `Authorization` header
+  the page at all until you click to reveal it (the decoded claims of any header whose value is a JWT
   excepted, as above); a JSON, text or multipart request body is shown as
   text, as it is.
 

@@ -718,8 +718,8 @@ what this tool reviews.)
 - a credential inside a JSON, text or multipart body, or in a form body the strict rules reject (`;`-separated,
   multi-line, a name with `{ " : =`, spaces in a value): these bodies are **flagged**, never parsed or rewritten, and
   go into the share as they are.
-Dropping every flagged body was rejected: it would drop most response bodies. The decoded-JWT claims panel under a
-masked `Authorization` header is unchanged and shows claims, never the token.
+Dropping every flagged body was rejected: it would drop most response bodies. The decoded-JWT claims panel under any
+request or response header whose value is JWT-shaped (`Authorization`, `X-Id-Token`, …) is unchanged and shows claims, never the token.
 
 ### On-screen masking
 
