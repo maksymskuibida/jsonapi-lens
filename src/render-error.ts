@@ -30,7 +30,10 @@ export function renderErrorCard(
   setRichText(hintEl, error.hint);
 
   if (error.line !== undefined) {
-    whereEl.textContent = t().paste.errorWhere(error.line);
+    whereEl.textContent =
+      error.column !== undefined
+        ? t().paste.errorWhereColumn(error.line, error.column)
+        : t().paste.errorWhere(error.line);
     whereEl.hidden = false;
   } else {
     whereEl.hidden = true;

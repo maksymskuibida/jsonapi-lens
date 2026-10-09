@@ -88,6 +88,7 @@ import type { ParamEntry, ParamSet, ParamValue } from "./params.js";
 import {
   classifyBody,
   decodeJwt,
+  REDACTED_VALUE,
   detectCredentialShape,
   isSecretParam,
   paramNameCarriesCredential,
@@ -812,7 +813,7 @@ function paramRow(entry: ParamEntry, ref: string | null, siblings: readonly Para
   // anchor id, which would otherwise spell it out.
   const nameIsSecret = paramNameCarriesCredential(entry);
   const row = el("div", { class: "xrow xrow--param", id: nameIsSecret ? undefined : requestFieldDomId("reqParam", entry.name) });
-  row.append(el("code", { class: "xrow__name", text: nameIsSecret ? "[REDACTED]" : entry.name }));
+  row.append(el("code", { class: "xrow__name", text: nameIsSecret ? REDACTED_VALUE : entry.name }));
   row.append(ref !== null && isSecretParam(entry, siblings) ? el("div", { class: "xparam__body" }, maskedValue(ref)) : paramBody(entry));
   return row;
 }
@@ -973,16 +974,19 @@ function renderTextBody(raw: string, contentType: string | undefined): HTMLEleme
       if (error instanceof DocumentError) {
         // `hint` is `string | RichPart[]`; interpolating it printed
         // `[object Object]`. It goes through `setRichText` like the document-level
-        // error does — text nodes and `code` spans, never markup.
-        //
-        // Except for "not valid JSON": its hint carries the JS engine's own
-        // English `SyntaxError` text, which a German or Ukrainian reader would
-        // see in the middle of a translated sentence. That one is shown as the
-        // translated headline and the position only (QA6 review S9); the parse
-        // error copy is QA5's, which will align both paths.
+        // error does — text nodes and `code` spans, never markup. Since QA5 the
+        // "not valid JSON" hint is the app's own located sentence
+        // (`json-syntax.ts`), so this path shows exactly what the paste view
+        // shows, with the position, and then says what happened to the body.
         const hint = el("span", { class: "xrow__note-hint" });
-        if (error.headline !== t().parseErrors.invalidJson.headline) setRichText(hint, error.hint);
-        else hint.textContent = t().request.review.invalidJsonBody;
+        setRichText(hint, error.hint);
+        const invalid = error.headline === t().parseErrors.invalidJson.headline;
+        const where =
+          error.line === undefined
+            ? ""
+            : error.column !== undefined
+              ? t().paste.errorWhereColumn(error.line, error.column)
+              : t().paste.errorWhere(error.line);
         wrap.append(
           el(
             "p",
@@ -990,7 +994,8 @@ function renderTextBody(raw: string, contentType: string | undefined): HTMLEleme
             error.headline,
             " ",
             hint,
-            error.line !== undefined ? ` (${t().paste.errorWhere(error.line)})` : "",
+            where ? ` (${where})` : "",
+            invalid ? ` ${t().request.review.invalidJsonBody}` : "",
           ),
         );
       }

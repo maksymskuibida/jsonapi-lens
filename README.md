@@ -180,6 +180,24 @@ Two conventions do most of the work:
 Numbers and dates are formatted in the chosen language rather than the browser's, which is what
 `toLocaleString()` with no argument had been doing.
 
+**Accessible names are copy too.** A button's `aria-label`, a `title`, a `placeholder` and a toast
+all come from the catalogue — a screen reader announced "Copy this value" in a German interface
+because one of them had been left as a literal. [`test/copy-hygiene.test.ts`](test/copy-hygiene.test.ts)
+scans `src/` for exactly that and fails on a string literal in any of those positions.
+
+**JSON syntax errors are worded by the app, not the browser.** When pasted text is not JSON, the
+error card names the kind of mistake (an unexpected character, a truncated document, a trailing
+comma, a raw line break in a string, an invalid escape, text after the end) and the exact line and
+column, in the chosen language. The browser's own `SyntaxError` message is never shown: it is
+English, it differs between engines, and it quotes the input. The one character at the position is
+quoted back; nothing else of what you pasted is.
+
+**Sizes are binary and say so.** The raw view, the saved-documents list, the share dialog and a
+request body line show `B`, `KiB` and `MiB` — divided by 1024, which is what the limits are made of
+(a share is capped at 12 MiB). They used to print `kB`/`MB`, which are the decimal units, so every
+size read about 2.4% small against anything that measures in SI. The unit symbols are not
+translated.
+
 The copy in `index.html` — the shell and the paste view, which paint before the module graph loads —
 is bound to the catalogue by a typed table in [`src/i18n/static-dom.ts`](src/i18n/static-dom.ts).
 The English text left in the markup is a genuine pre-JavaScript fallback rather than a second source
@@ -238,15 +256,42 @@ visitor.
   itself a JSON:API document gets the same full resource treatment a pasted document does, anchored
   under its own scope so it never collides with the response even when both share a `type`/`id`.
 - `Authorization`, cookies, and anything shaped like a credential (a JWT, a long hex/base64 run, a
-  `sk_`/`pk_`-prefixed key) are masked on arrival; click to reveal, one at a time. A `Bearer` JWT is
-  decoded locally — header and payload, never the signature, never a network call — with `exp` shown
-  relative to the response's own `Date` header when there is one.
-- **Copy** and **Download** redact by default and say how many values they found and hid — a count of
-  what was found, never a claim that nothing else remains. The pass covers header and cookie values
-  shaped like credentials; it does not scan the body or the URL, and says so next to the buttons.
-  **Share does not yet carry the request/response into the encrypted link** — sharing a document
-  behaves exactly as it always has, and simply does not include the attached exchange either; see
-  [STATUS.md](docs/STATUS.md) for the small follow-up that closes this.
+  `sk_`/`pk_`-prefixed key) are masked on arrival; each has its own toggle that reveals (and hides) just that value, and a
+  value you revealed stays revealed until you hide it again or the panel is re-rendered (after an
+  edit, or a reload), which masks it again. A header whose value is a JWT — under any header name, a
+  `Bearer` one or an `X-Id-Token` — is decoded locally: header and payload, never the signature,
+  never a network call, with `exp` shown relative to the response's own `Date` header when there is
+  one. The decoded claims of any such header are visible before you reveal anything (deliberately:
+  they are what the panel is for); the signature, and so the token, is not.
+- **Copy**, **Download** and **Share** all pass through one redaction ([D8](docs/DECISIONS.md)) and say
+  how many values it removed — a count of what was found, never a claim that nothing else remains;
+  for Share the count and the warnings are shown *before* the link is created. It replaces with
+  `[REDACTED]`: the value of a header that is a credential by name or by shape, every cookie value,
+  the userinfo of the request URL and credential-named parameters in its query and fragment (and the
+  same parts of a URL in `Location`, `Referer`, `Content-Location` and `Origin`, whose other parts
+  are left as they are), credential-named parameters in a form body in the strict `a=1&b=2` shape,
+  and credential-shaped values in the `origin` field. What the recipient sees in those places is
+  `[REDACTED]`, not a value they can reveal (inside a URL's query or fragment it is written
+  percent-encoded, `%5BREDACTED%5D`).
+  **It is not complete.** A JSON, text or multipart body, and a form body that is not in that strict
+  shape (separated by `;`, spread over several lines, or with spaces in a value), is flagged, never
+  rewritten, and goes out as it is — the dialog says so before the link is created. A secret under an
+  unlisted name with a shapeless value, a token in a URL path, and a few fields (Set-Cookie names, the
+  body's content type, a token embedded inside a longer `origin` string) are not caught; D8 keeps the
+  exact list.
+- **Share carries the attached request and response into the encrypted link**, redacted as above —
+  whether you share the open document or tick it in **Saved documents → Share**. The link opens
+  with the exchange band in place. On screen a masked header, cookie, URL or form value is not in
+  the page at all until you click to reveal it (the decoded claims of any header whose value is a JWT
+  excepted, as above); a JSON, text or multipart request body is shown as
+  text, as it is.
+
+Importing from a bundle link ends with a toast saying how many documents were saved (and, if
+storage refused some, how many were not).
+
+**Focus** returns to the control that opened a dialog when it closes — Escape, ✕ or a click outside.
+If that control is gone, it goes to the control that opened the dialog this one replaced, then to the
+dialog still open underneath, then to the page's main content; never to `<body>`.
 
 **Keyboard** — `?` lists them all. `/` or `g` finds a resource by type or id, `s` saves, `r` raw,
 `e` exports, `l` opens saved documents, `Shift+Esc` leaves the document, `Esc` closes a dialog.
@@ -487,7 +532,7 @@ Chrome 148, Apple Silicon. Fixture: `npm run fixtures` → **25.7 MB, 56,821 res
 The two restoration figures were measured on a re-generated fixture of 61,487 resources rather than
 the 56,821 above; `npm run fixtures` does not produce an identical document twice.
 | Reload from IndexedDB and re-render | ~1.6 s |
-| Create a share link (7.6 kB document) | **~1.0 s**, of which ~200 ms is the KDF |
+| Create a share link (7.6 KiB document) | **~1.0 s**, of which ~200 ms is the KDF |
 
 **What `content-visibility` buys.** Timing a forced full style+layout flush at 56,821 rows:
 
@@ -563,6 +608,7 @@ src/
   router.ts           the five paths, parsed by hand
   seo.ts              the head: canonical, robots, hreflang and cards per route
   parse.ts            validation with specific errors, one-pass index, reverse index
+  json-syntax.ts      where and how text stops being JSON: kind + line/column, engine-independent
   types.ts            structural types for the parts of JSON:API this reads
   format.ts           value classification and typed formatting
   crypto.ts           gzip + AES-GCM + PBKDF2 for the share envelope — one document or a bundle
@@ -575,7 +621,7 @@ src/
   cookies.ts          Cookie and Set-Cookie parsing into name/value/attributes
   secrets.ts          secret-header/credential-shape detection, JWT decoding, redaction
   clipboard.ts        copy and download
-  ui.ts               toast and modal
+  ui.ts               toast, modal, and where focus goes when one closes
   panels.ts           raw view, saved documents (with its selection mode), save, shortcuts
   platform.ts         ⌘ vs Ctrl, and the browser's own history keys per OS
   jump.ts             go-to-resource palette

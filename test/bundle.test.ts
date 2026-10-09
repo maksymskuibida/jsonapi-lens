@@ -195,7 +195,7 @@ describe("mintShareEnvelope", () => {
     }
 
     expect(caught).toBeInstanceOf(ShareError);
-    expect(caught!.hint).toMatch(/MB/);
+    expect(caught!.hint).toMatch(/MiB/);
     expect(caught!.hint).toContain("huge.json");
     expect(caught!.hint).toContain("tiny.json");
   }, 20_000);

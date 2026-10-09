@@ -1,7 +1,7 @@
 /**
  * Everything `share`/`read` refuse before doing any crypto work or touching
  * the network — cheap checks first, so a typo in `origin` or an unusable
- * secret fails in microseconds rather than after a 12 MB gzip or a real
+ * secret fails in microseconds rather than after a 12 MiB gzip or a real
  * `fetch`.
  *
  * None of this duplicates `src/crypto.ts`'s crypto. It duplicates one of its

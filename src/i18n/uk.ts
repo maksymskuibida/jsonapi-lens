@@ -83,6 +83,7 @@ export const uk: Messages = {
     readHint: (mod) =>
       frag(el("kbd", { text: mod }), " ", el("kbd", { text: "↵" }), " — прочитати"),
     errorWhere: (line) => `приблизно в рядку ${f.n(line)}`,
+    errorWhereColumn: (line, column) => `у рядку ${f.n(line)}, стовпці ${f.n(column)}`,
   },
 
   resume: {
@@ -377,6 +378,19 @@ export const uk: Messages = {
     absentChipTitle: (type, id) =>
       `У цьому документі немає ресурсу з type «${type}» та id «${id}»`,
     showMore: (n) => `Показати ще ${f.n(n)}`,
+    identityType: "type",
+    identityId: "id",
+    identityAt: "шлях",
+    actions: {
+      raw: "сирий",
+      rawTitle: "Показати цей ресурс як сирий JSON",
+      copy: "копіювати",
+      copyTitle: "Скопіювати цей ресурс як JSON",
+      path: "шлях",
+      pathTitle: (pointer) => `Скопіювати JSON Pointer до цього ресурсу (${pointer})`,
+      link: "посилання",
+      linkTitle: "Скопіювати глибоке посилання на цей ресурс",
+    },
   },
 
   relationships: {
@@ -399,6 +413,7 @@ export const uk: Messages = {
   },
 
   value: {
+    emptyString: "порожній рядок",
     emptyArray: "порожній масив",
     emptyObject: "порожній об’єкт",
     items: (n) =>
@@ -610,7 +625,38 @@ export const uk: Messages = {
     },
     invalidJson: {
       headline: "Це некоректний JSON.",
-      hint: (detail): RichPart[] => ["Парсер зупинився тут: ", { verbatim: detail }],
+      hint: (problem): RichPart[] => {
+        switch (problem.kind) {
+          case "unexpected-char":
+            return [
+              "Парсер зупинився на неочікуваному символі: ",
+              ...quoted([problem.char], "\u00ab", "\u00bb"),
+              ". Перевірте, чи просто перед ним не бракує коми, двокрапки або лапки.",
+            ];
+          case "unexpected-end":
+            return [
+              "Документ закінчується надто рано. Імовірно, бракує закривної `}` чи `]` або лапки — можливо, текст обрізано?",
+            ];
+          case "trailing-comma":
+            return ["Просто перед закривною `}` або `]` стоїть кома. JSON не дозволяє кінцевої коми."];
+          case "control-in-string":
+            return [
+              "Текстове значення містить сирий розрив рядка або інший керувальний символ. Усередині тексту запишіть його як `\\n` або `\\t`.",
+            ];
+          case "bad-escape":
+            return [
+              'Текстове значення містить некоректну escape-послідовність. Після зворотної скісної риски JSON дозволяє лише `"`, `\\`, `/`, `b`, `f`, `n`, `r`, `t` або `u` із чотирма шістнадцятковими цифрами.',
+            ];
+          case "extra-content":
+            return [
+              "Після завершення документа JSON є ще текст, що починається з ",
+              ...quoted([problem.char], "\u00ab", "\u00bb"),
+              ". Документ — це одне значення; чи не вставлено кілька документів підряд?",
+            ];
+        }
+      },
+      hintUnlocated:
+        "Парсер відхилив цей текст, але не зміг сказати, де саме. Перевірте, чи не бракує коми, двокрапки, лапки або дужки.",
     },
     bareArray: {
       headline: "Це голий масив JSON, а не документ JSON:API.",
@@ -621,7 +667,16 @@ export const uk: Messages = {
       hint: "Payload закодовано двічі. Розгорніть зовнішній рядок і вставте внутрішній документ.",
     },
     wrongType: {
-      headline: (what) => `Це JSON-${what}, а не документ JSON:API.`,
+      headline: (kind) => {
+        switch (kind) {
+          case "null":
+            return "Це JSON-`null`, а не документ JSON:API.";
+          case "boolean":
+            return "Це булеве значення JSON, а не документ JSON:API.";
+          case "number":
+            return "Це число JSON, а не документ JSON:API.";
+        }
+      },
       hint: "Вставте все тіло відповіді — об’єкт із ключем `data`, `errors` або `meta` на верхньому рівні.",
     },
     notJsonApi: {
@@ -739,8 +794,14 @@ export const uk: Messages = {
       downloadTitle: "Завантажити запит і відповідь як файл JSON",
       share: "Поділитися",
       shareTitle: "Поділитися цим документом",
-      copyKind: "обмін",
-      copyKindRedacted: (n) => `обмін — ${f.n(n)} приховано`,
+      copiedExchange: (redacted, chars) =>
+        `Запит і відповідь скопійовано (${f.n(chars)} ${f.plural(chars, { one: "символ", few: "символи", many: "символів", other: "символу" })})${
+          redacted > 0
+            ? `; приховано ${f.n(redacted)} ${f.plural(redacted, { one: "значення", few: "значення", many: "значень", other: "значення" })}`
+            : ""
+        }.`,
+      copyExchangeFailed:
+        "Не вдалося скопіювати запит і відповідь. Браузер заблокував доступ до буфера обміну.",
       redactedCount: (n) =>
         f.plural(n, {
           one: "1 значення знайдено й приховано перед завантаженням.",
@@ -977,8 +1038,12 @@ export const uk: Messages = {
     // than agreeing with `total` the way a bare "N документи" would — genitive
     // singular for exactly 1, genitive plural for anything else.
     imported: (saved, total) =>
-      `Збережено ${f.n(saved)} з ${f.n(total)} ${total === 1 ? "документа" : "документів"}.`,
+      `Збережено ${f.n(saved)} з ${f.n(total)} ${f.plural(total, { one: "документа", few: "документів", many: "документів", other: "документів" })}.`,
     importFailed: "Нічого не вдалося зберегти. Можливо, ваш браузер блокує сховище.",
+    importedToast: (n) =>
+      `Імпортовано ${f.n(n)} ${f.plural(n, { one: "документ", few: "документи", many: "документів", other: "документа" })} до ваших збережених документів.`,
+    importedPartialToast: (saved, total) =>
+      `Імпортовано ${f.n(saved)} з ${f.n(total)} ${f.plural(total, { one: "документа", few: "документів", many: "документів", other: "документів" })}; решту не вдалося зберегти.`,
     done: "Готово",
   },
 };

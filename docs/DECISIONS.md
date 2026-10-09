@@ -718,8 +718,8 @@ what this tool reviews.)
 - a credential inside a JSON, text or multipart body, or in a form body the strict rules reject (`;`-separated,
   multi-line, a name with `{ " : =`, spaces in a value): these bodies are **flagged**, never parsed or rewritten, and
   go into the share as they are.
-Dropping every flagged body was rejected: it would drop most response bodies. The decoded-JWT claims panel under a
-masked `Authorization` header is unchanged and shows claims, never the token.
+Dropping every flagged body was rejected: it would drop most response bodies. The decoded-JWT claims panel under any
+request or response header whose value is JWT-shaped (`Authorization`, `X-Id-Token`, …) is unchanged and shows claims, never the token.
 
 ### On-screen masking
 
@@ -739,3 +739,67 @@ A JSON/text/multipart request body is shown as text.
   that the in-place toggle keeps; the toggle edits one cell.
 - **Update every library entry with the same text** — rejected: overwrites a request the user attached
   to a different saved copy.
+
+---
+
+## D9 · The interface speaks only through the catalogue; sizes are binary and labelled so; focus returns to its opener
+
+**Date:** 2026-10-08 · **Settles:** four small rules found together in the 2026-10-07 production
+gap pass (QA5), each of which later work would otherwise re-decide.
+
+### 1 · No user-facing literal outside `src/i18n/` and `src/legal/`, and a test says so
+
+An `aria-label`, `title`, `placeholder`, `alt`, a `text:` property, a `textContent` assignment, a
+toast, an error constructor, or the label/title argument of a button helper takes its text from the
+catalogue. Six accessible names shipped in English because the *visible* label beside each was
+translated and the `aria-label` was not — typecheck cannot see it and a catalogue row cannot
+prevent it. `test/copy-hygiene.test.ts` scans `src/` for exactly those positions.
+
+The scan is a guard, not a proof (a literal assigned to a variable first is not seen), so the
+exemption list inside it carries a reason per entry and a check that each still matches. Two
+exemptions exist: the JSON keyword `null` shown as written, and the product name in a document
+title. A new `button`-shaped helper fails the scan until its copy arguments are classified — that
+is the point.
+
+**Where the wording of a sentence depends on a noun's case, the catalogue supplies the sentence,
+not the noun.** The German exchange-copy toast was `${what} kopiert (…)` with `what = "den
+Exchange — 2 geschwärzt"`, an accusative fragment. `request.band.copiedExchange(redacted, chars)` is
+the whole message in each language, delivered through `copyWithMessages`.
+
+### 2 · A JSON syntax error is located and worded by the app, never by the engine
+
+`JSON.parse`'s message is English, differs between V8, SpiderMonkey and JavaScriptCore, and quotes
+the input. It is not read. `src/json-syntax.ts` runs only after `JSON.parse` has already failed, finds
+the first offending offset itself, and returns a kind (`unexpected-char`, `unexpected-end`,
+`trailing-comma`, `control-in-string`, `bad-escape`, `extra-content`) plus a line and column that
+count what the person pasted, leading blank lines included. The catalogues word each kind. The only
+fragment of the input that reaches the hint is the single character at the position, carried as a
+`verbatim` part so it can never be parsed as markup. An invisible character is named by code point.
+
+### 3 · Sizes are 1024-based and labelled `KiB` / `MiB`
+
+`formatBytes` always divided by 1024 and printed `kB`/`MB`, which are the decimal units. The label,
+not the arithmetic, was wrong, and it is the label that changes: the limits the app talks about are
+binary (`MAX_BUNDLE_BYTES = 12 × 1024 × 1024`), so on a 1000 base the share limit would print as
+"12.58 MB". The symbols are IEC 80000-13 and are not translated. Prose that quotes a measured file
+size from outside the app (the 25.7 MB fixture in the FAQ, `llms.txt` and the README's performance
+section) is a separate claim about a file and is not rewritten.
+
+### 4 · Focus returns to the control that opened a dialog
+
+On close: the opener, if still in the document and enabled; else the opener of the dialog this one
+replaced; else the dialog still open underneath; else `#view`, made programmatically focusable —
+never `<body>`. "The opener" is the last *clicked* control if the most recent interaction was a
+click, else `document.activeElement`: Safari and Firefox on macOS do not focus a button when it is
+clicked, so `activeElement` alone is `<body>` at the very moment a click opens a dialog. Focus is
+restored with `preventScroll`, because scroll position is something Back/Forward restoration works
+hard to keep. Implemented once, in `openModal`; no dialog reimplements it.
+
+### Rejected alternatives
+
+- **Translating the English engine message** — rejected: three engines, several wordings each,
+  changing with versions; a translation table over them is a maintenance liability that still echoes
+  the input.
+- **Switching to 1000-based `kB`/`MB`** — rejected for the 12 MiB reason above.
+- **A lint rule instead of a test** — the repository has no lint step, and a test runs wherever
+  `npm test` does.

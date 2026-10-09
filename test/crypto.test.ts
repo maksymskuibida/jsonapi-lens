@@ -317,7 +317,7 @@ describe("bundles", () => {
 
     expect(caught).toBeInstanceOf(ShareError);
     // Names the overage, not just "too large".
-    expect(caught!.hint).toMatch(/MB/);
+    expect(caught!.hint).toMatch(/MiB/);
     // Names the offending document specifically, not just the total — and
     // ranks it ahead of the document that barely contributed, so "which one
     // do I remove" has an obvious answer without doing the arithmetic.

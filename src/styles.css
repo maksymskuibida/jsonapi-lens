@@ -296,6 +296,14 @@ code {
   border-radius: 2px;
 }
 
+/* `#view` is made programmatically focusable (`tabindex="-1"`) so that closing a
+   dialog opened from a keyboard shortcut has somewhere better to put focus than
+   `<body>` (`ui.ts`, "focus on close"). It is a landmark, not a control: after
+   a key press the rule above would otherwise ring the entire page. */
+.view[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 ::selection {
   background: var(--accent-soft);
   color: var(--text);

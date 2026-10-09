@@ -3,7 +3,7 @@ import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/jetbrains-mono";
 import "./styles.css";
 
-import { copyBlob, copyText, downloadText } from "./clipboard.js";
+import { copyBlob, copyText, copyWithMessages, downloadText } from "./clipboard.js";
 import { el } from "./dom.js";
 import { renderErrorCard, renderShapeOffer } from "./render-error.js";
 import { formatBytes, formatDuration } from "./format.js";
@@ -445,8 +445,10 @@ function redactedExchangeText(): { text: string; count: number } {
 function copyExchange(): void {
   if (!current) return;
   const { text, count } = redactedExchangeText();
-  const what = count > 0 ? t().request.band.copyKindRedacted(count) : t().request.band.copyKind;
-  void copyBlob(text, what);
+  void copyWithMessages(text, {
+    done: t().request.band.copiedExchange(count, text.length),
+    failed: t().request.band.copyExchangeFailed,
+  });
 }
 
 function downloadExchange(): void {

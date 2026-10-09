@@ -198,11 +198,22 @@ export function summaryAttribute(
   return null;
 }
 
-/** Human-readable byte size for the document meta line. */
+/**
+ * Human-readable byte size, on the 1024 base, labelled as such: `KiB`, `MiB`.
+ *
+ * This used to divide by 1024 and print `kB` and `MB`, which are the 1000-based
+ * SI units — so every size in the app (the raw view, the library, the share
+ * dialog, the request body line) read about 2.4% small against anything that
+ * measures in SI. 1024 is kept, and the label fixed rather than the maths,
+ * because the limits the app talks about are binary (`MAX_BUNDLE_BYTES` is
+ * 12 × 1024 × 1024): on a 1000 base the share limit would print as "12.58 MB".
+ * The unit letters are not translated; they are symbols (IEC 80000-13) and read
+ * the same in all three languages.
+ */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
 }
 
 export function formatDuration(ms: number): string {

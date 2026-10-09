@@ -180,7 +180,14 @@ export async function openLibraryModal(
     const target =
       (preferred ? body.querySelector<HTMLElement>(preferred) : null) ??
       body.querySelector<HTMLElement>("button") ??
-      footer.querySelector<HTMLElement>("button");
+      footer.querySelector<HTMLElement>("button") ??
+      // An emptied list offers nothing but the dialog's own ✕. This used to land
+      // there only by accident: a nested dialog's close handed focus back to
+      // whatever had focus when it *opened*, which in a browser that does not
+      // focus clicked buttons was the ✕. Opener restoration is now correct, so
+      // the row's own button is focused and then removed by this re-render — and
+      // this is the one place that has to name where focus goes instead.
+      handle?.root.querySelector<HTMLElement>(".modal__close");
     target?.focus();
   };
 

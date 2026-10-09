@@ -30,22 +30,23 @@ interface ChipOptions {
   extraClass?: string;
 }
 
-/** String form, for the bulk row path. */
-function chipHtml(type: string, id: string, resolved: boolean, options: ChipOptions = {}): string {
-  const classes = ["chip", resolved ? "chip--link" : "chip--absent", options.extraClass]
-    .filter(Boolean)
-    .join(" ");
+/**
+ * String form, for the bulk row path. Only ever a *resolved* chip: a row's own
+ * identity chip is a link to itself. The unresolved ("not in document") chip is
+ * built by `chip()` below, on the DOM path, and the string form of it that used
+ * to live here had no caller (QA5 review, S1) — and an unreachable HTML-string
+ * branch is one nobody tests.
+ */
+function chipHtml(type: string, id: string, options: ChipOptions = {}): string {
+  const classes = ["chip", "chip--link", options.extraClass].filter(Boolean).join(" ");
   const inner =
     `<b class="chip__sigil">${escapeHtml(typeSigil(type))}</b>` +
     (options.implyType ? "" : `<span class="chip__type">${escapeHtml(type)}</span>`) +
-    `<span class="chip__id">${escapeHtml(id)}</span>` +
-    (resolved ? "" : `<span class="chip__absent">${escapeHtml(t().resource.notInDocument)}</span>`);
+    `<span class="chip__id">${escapeHtml(id)}</span>`;
 
   // `domId` output is `[A-Za-z0-9_]` by construction, so it is safe unquoted —
   // it is still emitted inside quotes for uniformity with the escaped values.
-  return resolved
-    ? `<a class="${classes}" data-hue="${typeHue(type)}" href="${resourceHref(type, id)}">${inner}</a>`
-    : `<span class="${classes}" data-hue="${typeHue(type)}" title="No resource with type &quot;${escapeHtml(type)}&quot; and id &quot;${escapeHtml(id)}&quot; appears in this document">${inner}</span>`;
+  return `<a class="${classes}" data-hue="${typeHue(type)}" href="${resourceHref(type, id)}">${inner}</a>`;
 }
 
 /** DOM form, for the detail path. */
@@ -70,7 +71,7 @@ export function chip(
   node.append(el("b", { class: "chip__sigil", text: typeSigil(type) }));
   if (!options.implyType) node.append(el("span", { class: "chip__type", text: type }));
   node.append(el("span", { class: "chip__id", text: id }));
-  if (!resolved) node.append(el("span", { class: "chip__absent", text: "not in document" }));
+  if (!resolved) node.append(el("span", { class: "chip__absent", text: t().resource.notInDocument }));
 
   return node;
 }
@@ -127,7 +128,7 @@ function rowHtml(resource: Resource): string {
     `<details class="res__d">` +
     `<summary class="res__row">` +
     `<span class="res__caret" aria-hidden="true"></span>` +
-    chipHtml(resource.type, resource.id, true, { implyType: true, extraClass: "chip--self" }) +
+    chipHtml(resource.type, resource.id, { implyType: true, extraClass: "chip--self" }) +
     summaryHtml +
     `<span class="res__tags">${tagsHtml(resource)}</span>` +
     `</summary>` +
@@ -359,13 +360,14 @@ function objectActions(resource: Resource): HTMLElement {
       text: label,
     });
 
+  const a = t().resource.actions;
   return el(
     "div",
     { class: "res__actions" },
-    button("raw", "raw", "Show this resource as raw JSON", "act--accent"),
-    button("copy-object", "copy", "Copy this resource as JSON"),
-    button("copy-pointer", "path", `Copy the JSON Pointer to this resource (${resource.pointer})`),
-    button("copy-link", "link", "Copy a deep link to this resource"),
+    button("raw", a.raw, a.rawTitle, "act--accent"),
+    button("copy-object", a.copy, a.copyTitle),
+    button("copy-pointer", a.path, a.pathTitle(resource.pointer)),
+    button("copy-link", a.link, a.linkTitle),
   );
 }
 
@@ -380,19 +382,19 @@ export function buildResourceBody(resource: Resource, index: DocumentIndex): Doc
       el(
         "div",
         { class: "res__identity-pair" },
-        el("span", { class: "res__identity-label", text: "type" }),
+        el("span", { class: "res__identity-label", text: t().resource.identityType }),
         el("code", { class: "res__identity-value", text: resource.type }),
       ),
       el(
         "div",
         { class: "res__identity-pair" },
-        el("span", { class: "res__identity-label", text: "id" }),
+        el("span", { class: "res__identity-label", text: t().resource.identityId }),
         el("code", { class: "res__identity-value", text: resource.id }),
       ),
       el(
         "div",
         { class: "res__identity-pair res__identity-pair--pointer" },
-        el("span", { class: "res__identity-label", text: "at" }),
+        el("span", { class: "res__identity-label", text: t().resource.identityAt }),
         el("code", { class: "res__identity-value", text: resource.pointer }),
       ),
       objectActions(resource),

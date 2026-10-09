@@ -80,6 +80,7 @@ export const de: Messages = {
     openFile: "Datei öffnen",
     readHint: (mod) => frag(el("kbd", { text: mod }), " ", el("kbd", { text: "↵" }), " zum Lesen"),
     errorWhere: (line) => `etwa in Zeile ${f.n(line)}`,
+    errorWhereColumn: (line, column) => `in Zeile ${f.n(line)}, Spalte ${f.n(column)}`,
   },
 
   resume: {
@@ -366,6 +367,19 @@ export const de: Messages = {
     absentChipTitle: (type, id) =>
       `Im Dokument gibt es keine Ressource mit type „${type}“ und id „${id}“`,
     showMore: (n) => `${f.n(n)} weitere zeigen`,
+    identityType: "type",
+    identityId: "id",
+    identityAt: "Pfad",
+    actions: {
+      raw: "roh",
+      rawTitle: "Diese Ressource als rohes JSON zeigen",
+      copy: "kopieren",
+      copyTitle: "Diese Ressource als JSON kopieren",
+      path: "Pfad",
+      pathTitle: (pointer) => `JSON-Pointer zu dieser Ressource kopieren (${pointer})`,
+      link: "Link",
+      linkTitle: "Deep Link zu dieser Ressource kopieren",
+    },
   },
 
   relationships: {
@@ -393,6 +407,7 @@ export const de: Messages = {
     items: (n) => `${f.n(n)} ${f.plural(n, { one: "Element", other: "Elemente" })}`,
     keys: (n) => `${f.n(n)} ${f.plural(n, { one: "Schlüssel", other: "Schlüssel" })}`,
     copyPointerTitle: "JSON Pointer auf diesen Wert kopieren",
+    emptyString: "leerer String",
     copyPointerLabel: "Pfad",
     copyValueTitle: "Diesen Wert kopieren",
     copyValueLabel: "Wert",
@@ -597,7 +612,38 @@ export const de: Messages = {
     },
     invalidJson: {
       headline: "Das ist kein gültiges JSON.",
-      hint: (detail): RichPart[] => ["Der Parser ist hier stehen geblieben: ", { verbatim: detail }],
+      hint: (problem): RichPart[] => {
+        switch (problem.kind) {
+          case "unexpected-char":
+            return [
+              "Der Parser ist an einem unerwarteten Zeichen hängen geblieben: ",
+              ...quoted([problem.char], "\u201e", "\u201c"),
+              ". Suchen Sie direkt davor nach einem fehlenden Komma, Doppelpunkt oder Anführungszeichen.",
+            ];
+          case "unexpected-end":
+            return [
+              "Das Dokument endet zu früh. Vermutlich fehlt eine schließende `}` oder `]` oder ein Anführungszeichen — wurde der Text abgeschnitten?",
+            ];
+          case "trailing-comma":
+            return ["Direkt vor einer schließenden `}` oder `]` steht ein Komma. JSON erlaubt kein abschließendes Komma."];
+          case "control-in-string":
+            return [
+              "Ein String enthält einen rohen Zeilenumbruch oder ein anderes Steuerzeichen. Innerhalb eines Strings schreiben Sie es als `\\n` oder `\\t`.",
+            ];
+          case "bad-escape":
+            return [
+              'Ein String enthält eine ungültige Escape-Sequenz. Nach einem Backslash erlaubt JSON nur `"`, `\\`, `/`, `b`, `f`, `n`, `r`, `t` oder `u` mit vier Hexadezimalziffern.',
+            ];
+          case "extra-content":
+            return [
+              "Nach dem Ende des JSON-Dokuments steht noch weiterer Text, beginnend mit ",
+              ...quoted([problem.char], "\u201e", "\u201c"),
+              ". Ein Dokument besteht aus genau einem Wert — wurden mehrere Dokumente hintereinander eingefügt?",
+            ];
+        }
+      },
+      hintUnlocated:
+        "Der Parser hat diesen Text abgelehnt, konnte aber nicht sagen, wo. Prüfen Sie, ob ein Komma, Doppelpunkt, Anführungszeichen oder eine Klammer fehlt.",
     },
     bareArray: {
       headline: "Das ist ein blankes JSON-Array, kein JSON:API-Dokument.",
@@ -608,7 +654,16 @@ export const de: Messages = {
       hint: "Der Payload wurde zweimal kodiert. Packen Sie den äußeren String aus und fügen Sie dann das innere Dokument ein.",
     },
     wrongType: {
-      headline: (what) => `Das ist ein JSON-${what}, kein JSON:API-Dokument.`,
+      headline: (kind) => {
+        switch (kind) {
+          case "null":
+            return "Das ist JSON-`null`, kein JSON:API-Dokument.";
+          case "boolean":
+            return "Das ist ein JSON-Boolean, kein JSON:API-Dokument.";
+          case "number":
+            return "Das ist eine JSON-Zahl, kein JSON:API-Dokument.";
+        }
+      },
       hint: "Fügen Sie den ganzen Response-Body ein — ein Objekt mit `data`, `errors` oder `meta` auf oberster Ebene.",
     },
     notJsonApi: {
@@ -728,8 +783,14 @@ export const de: Messages = {
       downloadTitle: "Request und Response als JSON-Datei herunterladen",
       share: "Teilen",
       shareTitle: "Dieses Dokument teilen",
-      copyKind: "den Exchange",
-      copyKindRedacted: (n) => `den Exchange — ${f.n(n)} geschwärzt`,
+      copiedExchange: (redacted, chars) =>
+        `Request und Response wurden kopiert (${f.n(chars)} Zeichen)${
+          redacted > 0
+            ? `; ${f.plural(redacted, { one: "1 Wert wurde geschwärzt", other: `${f.n(redacted)} Werte wurden geschwärzt` })}`
+            : ""
+        }.`,
+      copyExchangeFailed:
+        "Request und Response konnten nicht kopiert werden. Ihr Browser hat den Zugriff auf die Zwischenablage blockiert.",
       redactedCount: (n) =>
         f.plural(n, {
           one: "1 Wert gefunden und vor dem Download geschwärzt.",
@@ -934,6 +995,13 @@ export const de: Messages = {
     imported: (saved, total) =>
       `${f.n(saved)} von ${f.n(total)} ${total === 1 ? "Dokument" : "Dokumenten"} gespeichert.`,
     importFailed: "Es konnte nichts gespeichert werden. Möglicherweise blockiert Ihr Browser den Speicher.",
+    importedToast: (n) =>
+      f.plural(n, {
+        one: "Es wurde 1 Dokument in Ihre gespeicherten Dokumente importiert.",
+        other: `Es wurden ${f.n(n)} Dokumente in Ihre gespeicherten Dokumente importiert.`,
+      }),
+    importedPartialToast: (saved, total) =>
+      `${f.plural(saved, { one: "Es wurde", other: "Es wurden" })} ${f.n(saved)} von ${f.n(total)} Dokumenten importiert; der Rest konnte nicht gespeichert werden.`,
     done: "Fertig",
   },
 };

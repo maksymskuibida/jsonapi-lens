@@ -25,7 +25,7 @@ network connection on its own (see `docs/PROCESS.md` §5).
   `share` call returns.
 - It talks to exactly one HTTP surface: `POST /api/shares` and `GET /api/shares/<id>` on whichever
   `origin` you pass (default `https://jsonapi.mstool.dev`) — the same public API the browser app
-  uses, with the same 12 MB ciphertext cap. There is no separate or privileged endpoint for this
+  uses, with the same 12 MiB ciphertext cap. There is no separate or privileged endpoint for this
   server; it is just another client.
 - It cannot read, write or index anything on your machine. Text goes in through the tool call and
   comes back out through the tool result — no file access, no browser storage, no parsing of the
