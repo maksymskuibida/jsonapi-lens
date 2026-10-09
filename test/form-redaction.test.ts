@@ -317,3 +317,76 @@ describe("secret parameter names, both directions, through the real form (QA6 re
     expect(JSON.stringify(without.exchange)).not.toContain("hunter2");
   });
 });
+
+describe("percent-encoded names, array roots and the OAuth callback (QA6 review B7, S17, S18)", () => {
+  const FORM = "application/x-www-form-urlencoded";
+  const run = (body: string, contentType = FORM) => {
+    const exchange = typeIntoForm({ contentType, body });
+    const result = redactExchange(exchange);
+    return { result, raw: result.exchange.request?.body?.raw ?? "", warns: result.bodyMayContainSecret, count: result.count };
+  };
+
+  // What a browser actually sends for `name="user[pass]"` is `user%5Bpass%5D`.
+  for (const body of ["a=1&user%5Bpass%5D=qa-fake-x3", "a=1&user%5Bsession%5D=qa-fake-x3", "a=1&user%5bpass%5D=qa-fake-x3", "a=1&data%2Epwd=qa-fake-x3"]) {
+    it(`masks, counts and does not warn: ${body}`, () => {
+      const { raw, warns, count } = run(body);
+      expect(raw).not.toContain("qa-fake-x3");
+      expect(count).toBe(1);
+      expect(warns).toBe(false);
+    });
+  }
+
+  it("a double-encoded name is not a clean form, so it warns and claims nothing", () => {
+    const { raw, warns, count } = run("a=1&user%255Bpass%255D=qa-fake-x3");
+    expect(warns).toBe(true);
+    expect(count).toBe(0);
+    expect(raw).toContain("qa-fake-x3"); // untouched; the warning is the disclosure
+  });
+
+  it("a malformed escape in a name warns (fail closed), whatever the name looks like", () => {
+    for (const contentType of [FORM, ""]) {
+      const { warns, count } = run("a=1&user%5Bpa%ZZss%5D=qa-fake-x3", contentType);
+      expect(warns).toBe(true);
+      expect(count).toBe(0);
+    }
+  });
+
+  it("in a URL query the encoded, mixed-case and double-encoded names are all masked", () => {
+    for (const q of ["user%5Bpass%5D=qa-fake-q1", "user%5bsession%5D=qa-fake-q1", "user%255Bpass%255D=qa-fake-q1", "x%ZZpassword=qa-fake-q1"]) {
+      const out = redactExchange(typeIntoForm({ url: `https://app.example.com/x?${q}` }));
+      expect(JSON.stringify(out.exchange), q).not.toContain("qa-fake-q1");
+    }
+  });
+
+  it("S17: the count equals the masked occurrences for repeated and array-style roots", () => {
+    const { count, raw } = run("a[]=1&a[]=x&a[pass]=2");
+    expect(raw).not.toMatch(/=2(&|$)/);
+    expect(count).toBe(3);
+    const two = run("password=qa-fake-r1&password=qa-fake-r2&b=1");
+    expect(two.count).toBe(2);
+    const occurrences = (two.raw.match(/%5BREDACTED%5D|\[REDACTED\]/g) ?? []).length;
+    expect(occurrences).toBe(two.count);
+  });
+
+  it("S17: the same in a URL query", () => {
+    const out = redactExchange(typeIntoForm({ url: "https://app.example.com/x?a[]=1&a[]=x&a[pass]=2&page=2" }));
+    expect(out.count).toBe(3);
+  });
+
+  it("S18: the standard OAuth callback code+state is masked, in a query and in a body; code alone is not", () => {
+    const cb = redactExchange(typeIntoForm({ url: "https://app.example.com/cb?code=qa-fake-code-1&state=xyz" }));
+    expect(JSON.stringify(cb.exchange)).not.toContain("qa-fake-code-1");
+    expect(JSON.stringify(cb.exchange)).toContain("state=xyz");
+    const body = run("code=qa-fake-code-2&state=xyz");
+    expect(body.raw).not.toContain("qa-fake-code-2");
+    expect(body.warns).toBe(false);
+    expect(run("code=US&page=2").count).toBe(0);
+    // Accepted cost, stated in D8: an address-like pair looks the same as a callback.
+    expect(run("code=US&state=CA").count).toBe(1);
+  });
+
+  it("Location and Referer after a login keep no code", () => {
+    const out = redactExchange(typeIntoForm({ headers: [["Location", "https://app.example.com/home?code=qa-fake-code-3&state=abc"], ["Referer", "https://idp.example.com/cb?code=qa-fake-code-4&state=abc"]] }));
+    expect(JSON.stringify(out.exchange)).not.toContain("qa-fake-code");
+  });
+});

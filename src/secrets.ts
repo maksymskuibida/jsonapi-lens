@@ -383,8 +383,38 @@ const SECRET_PARAM_WHOLE_NAMES = new Set(["pass", "auth", "session", "sessionid"
  */
 const OAUTH_CONTEXT_NAMES = new Set(["granttype", "redirecturi", "clientid", "codeverifier"]);
 
+/**
+ * Percent-decode a parameter name for judging, as far as it will go (a
+ * double-encoded `%255B` is `%5B` after one pass and `[` after two), without
+ * ever throwing: a browser submits `name="user[pass]"` as `user%5Bpass%5D`, so a
+ * name judged in its wire form is judged wrongly. `ok` is false when a pass
+ * hit a malformed escape; the caller then judges the raw text *and* treats the
+ * name as not clean (fail closed). `+` is a space in a form name.
+ */
+export function decodeParamNameForJudging(name: string): { names: string[]; ok: boolean } {
+  const names = [name];
+  let current = name;
+  for (let pass = 0; pass < 3; pass++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(current.replace(/\+/g, "%20"));
+    } catch {
+      return { names, ok: false };
+    }
+    if (next === current) break;
+    names.push(next);
+    current = next;
+  }
+  return { names, ok: true };
+}
+
 export function hasOauthContext(entries: readonly ParamEntry[]): boolean {
-  return entries.some((entry) => OAUTH_CONTEXT_NAMES.has(normalizeParamName(entry.name)));
+  const names = new Set(entries.map((entry) => normalizeParamName(decodeParamNameForJudging(entry.name).names.at(-1) ?? entry.name)));
+  if ([...OAUTH_CONTEXT_NAMES].some((needle) => names.has(needle))) return true;
+  // The standard callback is `?code=…&state=…` with no `client_id`. `code` plus
+  // `state` is treated as OAuth. Accepted cost: an address-like `code=US&state=CA`
+  // is masked too — a click to reveal, against a login code left in a Referer.
+  return names.has("code") && names.has("state");
 }
 
 function normalizeParamName(name: string): string {
@@ -392,6 +422,14 @@ function normalizeParamName(name: string): string {
 }
 
 export function isSecretParamName(name: string, oauthContext = false): boolean {
+  // The raw text and every decoded stage: `user%5Bpass%5D`, `%5b`, `%255B`.
+  for (const candidate of decodeParamNameForJudging(name).names) {
+    if (judgeDecodedName(candidate, oauthContext)) return true;
+  }
+  return false;
+}
+
+function judgeDecodedName(name: string, oauthContext: boolean): boolean {
   const whole = normalizeParamName(name);
   if (SECRET_PARAM_NAME_SUBSTRINGS.some((needle) => whole.includes(needle))) return true;
   // Rails-style `user[pass]` and dotted `data.pwd`: each segment is judged on its own.
@@ -513,12 +551,13 @@ function redactEntries(entries: ParamEntry[], tally: RedactionTally): { entries:
   const result = entries.map((entry) => {
     if (!shouldRedactParam(entry, oauth)) return entry;
     changed = true;
-    if (!isEmptyParamValue(entry.value) && !(tally.dedupeNames && tally.countedNames.has(entry.name))) {
-      // A body has no twin to dedupe against, and `decodeParams` folds two
-      // parameters of one name into one entry — so each non-empty wire pair is a
-      // value that was masked and is counted.
-      const pairs = tally.dedupeNames ? 1 : Math.max(1, entry.raw.filter((pair) => pair.value !== null && pair.value !== "").length);
-      tally.count += pairs;
+    // Every masked wire pair is a value that was removed: `a[]=1&a[]=x&a[pass]=2`
+    // is one decoded entry but three values. A name that also appears in the twin
+    // surface (`url` and `query`) is counted once, by the first to see it.
+    let values = entry.raw.filter((pair) => pair.value !== null && pair.value !== "").length;
+    if (values === 0 && !isEmptyParamValue(entry.value)) values = 1;
+    if (values > 0 && !(tally.dedupeNames && tally.countedNames.has(entry.name))) {
+      tally.count += values;
       tally.countedNames.add(entry.name);
     }
     return redactParamEntry(entry);

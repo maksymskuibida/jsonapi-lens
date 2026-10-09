@@ -848,6 +848,16 @@ describe("the screen masks what the share masks, for every shape the real form p
     expect(dom()).toContain("US");
   });
 
+  it("a percent-encoded name (`user%5Bpass%5D`) and an OAuth callback pair are masked on screen too", () => {
+    const exchange = typeIntoForm({
+      contentType: "application/x-www-form-urlencoded",
+      body: "a=1&user%5Bpass%5D=qa-fake-enc-pw&code=qa-fake-cb-code&state=xyz",
+    });
+    show(exchange);
+    expect(dom()).not.toContain("qa-fake-");
+    expect(document.querySelectorAll(".xmask__toggle").length).toBe(2);
+  });
+
   it("a JSON body labelled as a form is not drawn as a parameter table, and is not called safe", () => {
     const exchange = typeIntoForm({ contentType: "application/x-www-form-urlencoded", body: '{"password":"qa-fake-j"}' });
     show(exchange);

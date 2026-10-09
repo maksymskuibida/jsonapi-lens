@@ -658,20 +658,26 @@ every parameter name, once percent-decoded, only letters, digits and `_ . - [ ]`
 blind QA of 2026-10-09. **Redaction tests must use the shape the real UI produces** (`test/form-redaction.test.ts`
 drives the real request form).
 
+**A name that will not decode** (`user%5Bpa%ZZss%5D`) is judged on its raw text and makes a form body **not clean**, so it
+warns. **The count is the number of masked values**, wire pair by wire pair: `a[]=1&a[]=x&a[pass]=2` is three.
+
 **Fail closed.** The "this body may contain credentials" warning is suppressed only for a body that is a clean
 form, was redacted, and has no credential-like name or value left. **Every other non-empty body warns**, whatever
 its content type and whatever the sniffer says — JSON (benign included), text, multipart, an unclean form, a
 rewritten form with leftovers. Over-warning is safe; a silent share is not. A body that is not a clean form is
 never rewritten and never called safe. The count only counts values actually masked.
 
-**Secret parameter names** are matched in a query or a form body, per bracket/dot segment (`user[pass]`,
+**Secret parameter names** are matched in a query or a form body, **percent-decoded first** (as far as they decode: a
+browser submits `user[pass]` as `user%5Bpass%5D`; `%5b` and a double-encoded `%255B` too), per bracket/dot segment (`user[pass]`,
 `data.pwd`): the substrings `token secret signature sig apikey password passwd pwd authorization credential
 privatekey clientassertion codeverifier passphrase passcode`, and the **whole** names `pass auth session
 sessionid sid bearer cookie otp` (whole names only, so `passport`, `bypass`, `compass`, `author`, `authority`
 and `sessionization` stay readable). `key` and `pin` are deliberately not listed (a sort key, a map pin).
 **`code` is masked only when the same parameter set carries OAuth context** (`grant_type`, `redirect_uri`,
-`client_id`, `code_verifier`): OAuth's authorization code is a credential, but `code=US` and `code_style` are
-ordinary, and a name-only rule would mask both. A bare `code=4f2a9c` with no OAuth sibling is therefore not masked
+`client_id`, `code_verifier`, **or a `state`** — the standard callback is `?code=…&state=…` with no `client_id`): OAuth's
+authorization code is a credential, but `code=US` and `code_style` are ordinary, and a name-only rule would mask both. The
+`state` rule's accepted cost: an address-like `code=US&state=CA` is masked too (a click to reveal, against a login code left
+in a `Referer`). A bare `code=4f2a9c` with no OAuth sibling is therefore not masked
 (listed below).
 
 **The userinfo rule.** The *whole* `user[:password]@` prefix is masked as one counted value

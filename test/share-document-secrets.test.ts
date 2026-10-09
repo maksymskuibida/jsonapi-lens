@@ -253,4 +253,26 @@ describe("the number the dialog states is exact (QA6 review N5)", () => {
     expect(redacting).toBe(occurrences);
     expect(redacting).toBe(8); // url userinfo+token, Authorization, Referer userinfo+token, cookie, Location, Content-Location
   });
+
+  it("also for repeated and array-style roots: three masked pairs under one root are three counted values", async () => {
+    const entry: BundleEntry = {
+      label: "a.json",
+      text: "{}",
+      exchange: {
+        request: {
+          // `{ raw, contentType }`: the shape the request form stores.
+          body: { raw: "a[]=1&a[]=x&a[pass]=2&password=qa-fake-r1&password=qa-fake-r2", contentType: "application/x-www-form-urlencoded" },
+        },
+      },
+    };
+    const { redacting } = inspectExchangeForShare([entry]);
+    const secret = generateSecret();
+    const json = JSON.stringify(await openSealed(await mintShareEnvelope([entry], secret), secret));
+    // the sealed payload carries the body twice (`raw` and the rewritten `form`), so count `raw` only
+    const raw = (JSON.parse(json) as { exchange: { request: { body: { raw: string } } } }).exchange.request.body.raw;
+    const occurrences = (raw.match(/%5BREDACTED%5D|\[REDACTED\]/g) ?? []).length;
+    expect(json).not.toContain("qa-fake-r");
+    expect(redacting).toBe(5);
+    expect(occurrences).toBe(redacting);
+  });
 });

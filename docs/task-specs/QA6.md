@@ -279,3 +279,14 @@ authority sessionization code_style key pin`, and `code` unless the same set has
 `client_id`, `code_verifier`). Justification for `code`: OAuth's authorization code is a credential, but `code` is also common for
 non-secrets, so a name-only rule would mask `code=US`; D8 lists a bare `code=` under "not caught". A nested name (`user[pass]`) is
 masked as the whole `user` parameter (over-redaction of its siblings under the same root is accepted).
+
+
+## Round 7 amendments (review round 8)
+
+- Parameter names are **percent-decoded before they are judged** (to a fixed point, at most three passes; `+` is a space), in the share,
+  on screen, in the leftover check and for the OAuth context. A name that will not decode is judged raw and makes a form body not clean
+  (it warns). A double-encoded name (`%255B`) is not a clean form name, so a body with one warns and is not rewritten; in a URL query it
+  is masked.
+- The count is the number of masked wire pairs (`a[]=1&a[]=x&a[pass]=2` counts 3), still once per name across a request's `url` and `query`.
+- `code` is OAuth context-dependent: masked with `grant_type`, `redirect_uri`, `client_id`, `code_verifier`, **or `state`** present. Accepted
+  cost: `code=US&state=CA` is masked.
