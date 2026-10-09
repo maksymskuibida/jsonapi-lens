@@ -687,7 +687,6 @@
        band open. Both are `main.ts` behaviour no unit test reaches. */
     async s32(N) {
       await N.fresh();
-      const before = document.getElementById('edit-request').textContent;
       const band = await SCEN.attachMinimalExchange(N);
       const after = document.getElementById('edit-request').textContent;
       band.open = true;
@@ -698,8 +697,11 @@
       other.click();
       await N.settle(200);
       const stillOpen = document.getElementById('exchange-band').open === true;
-      const ok = before !== after && stillOpen;
-      return { name: '32 request button label changes after attach; band stays open on mode switch', ok, driftPx: 0, detail: JSON.stringify({ before, after, stillOpen }) };
+      // The band's own edit control carries the "Edit request" wording in whatever
+      // language is active; the overview button must say the same once attached.
+      const bandEdit = document.querySelector('#exchange-band [data-x-action="edit"]');
+      const ok = !!bandEdit && bandEdit.textContent.trim() === after.trim() && stillOpen;
+      return { name: '32 overview request button says what the band says after attach; band stays open on mode switch', ok, driftPx: 0, detail: JSON.stringify({ after, bandEdit: bandEdit && bandEdit.textContent, stillOpen }) };
     },
 
     s29: (N) => SCEN.bandScenario(N, '29 exchange attached, following a relationship, Back', true),
