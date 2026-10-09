@@ -12,7 +12,7 @@ import {
 } from "./crypto.js";
 import type { BundleEntry, BundlePayload, SharePayload } from "./crypto.js";
 import type { Exchange } from "./exchange.js";
-import { redactExchange } from "./secrets.js";
+import { redactForExport } from "./secrets.js";
 import { shareUrl } from "./navigation.js";
 import { openModal, toast } from "./ui.js";
 
@@ -318,7 +318,7 @@ function sealedJsonBytes(entry: BundleEntry): number {
   const encoder = new TextEncoder();
   const text = encoder.encode(entry.text).byteLength;
   if (!entry.exchange || Object.keys(entry.exchange).length === 0) return text;
-  return text + encoder.encode(JSON.stringify(redactExchange(entry.exchange).exchange)).byteLength;
+  return text + encoder.encode(JSON.stringify(redactForExport(entry.exchange).exchange)).byteLength;
 }
 
 /**
@@ -336,14 +336,14 @@ function sealedJsonBytes(entry: BundleEntry): number {
  * saying the same thing about the same exchange.
  */
 export function inspectExchangeForShare(documents: BundleEntry[]): { redacting: number; bodyUnredacted: boolean } {
-  // No emptiness guard of its own: `redactExchange({})` tallies 0, and a second
+  // No emptiness guard of its own: `redactForExport({})` tallies 0, and a second
   // copy of `redactEntryExchange`'s check (bundle.ts) is exactly the kind of
   // duplication that drifts. That one exists to preserve object identity for an
   // entry with nothing to mask; this only needs the figures.
   let redacting = 0;
   let bodyUnredacted = false;
   for (const entry of documents) {
-    const result = redactExchange(entry.exchange ?? {});
+    const result = redactForExport(entry.exchange ?? {});
     redacting += result.count;
     if (result.bodyMayContainSecret) bodyUnredacted = true;
   }

@@ -58,7 +58,7 @@ import { openRequestForm } from "./request-form.js";
 import type { RequestFormResult } from "./request-form.js";
 import { mergeExchange } from "./exchange.js";
 import type { Exchange } from "./exchange.js";
-import { redactExchange } from "./secrets.js";
+import { redactForExport } from "./secrets.js";
 import { currentRoute, navigate } from "./navigation.js";
 import { parseRoute, PASTE_PATH, VIEW_PATH } from "./router.js";
 import type { LegalRoute, Route } from "./router.js";
@@ -438,7 +438,7 @@ function openExchangeEditor(): void {
 
 /** `Copy`/`Download` for the exchange: redacted by default, the count always stated — never a silent mask. */
 function redactedExchangeText(): { text: string; count: number } {
-  const { exchange, count } = redactExchange(current?.exchange ?? {});
+  const { exchange, count } = redactForExport(current?.exchange ?? {});
   return { text: JSON.stringify(exchange, null, 2), count };
 }
 

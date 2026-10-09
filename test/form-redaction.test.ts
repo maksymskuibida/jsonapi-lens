@@ -18,7 +18,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { typeIntoForm, resetModalRoot } from "./helpers/type-into-form.js";
 import type { Exchange } from "../src/exchange.js";
-import { redactExchange } from "../src/secrets.js";
+import { redactExchange, redactForExport } from "../src/secrets.js";
 import { inspectExchangeForShare } from "../src/share.js";
 
 beforeEach(resetModalRoot);
@@ -212,13 +212,15 @@ describe("fail closed: the body warning is suppressed only for a clean, fully re
     }
   }
 
-  it("S13: a redacted form with a credential-shaped leftover still warns (count counts only what was masked)", () => {
+  it("S13 (superseded by N1): a credential used as a bare NAME is masked and counted, so nothing is left", () => {
     const stripe = ["sk", "live", "FAKE0notREAL0stripe0key00"].join("_");
     const jwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.c2lnbmF0dXJlLWZha2U";
     for (const body of [`password=x&${stripe}`, `password=x&${jwt}`]) {
-      const result = warns(FORM, body);
-      expect(result.bodyUnredacted, body).toBe(true);
-      expect(result.redacting, body).toBeGreaterThanOrEqual(1);
+      const exchange = typeIntoForm({ contentType: FORM, body });
+      const out = JSON.stringify(redactForExport(exchange).exchange);
+      expect(out, body).not.toContain(stripe);
+      expect(out, body).not.toContain("c2lnbmF0dXJl");
+      expect(redactForExport(exchange).count, body).toBe(2);
     }
   });
 

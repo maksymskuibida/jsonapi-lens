@@ -290,3 +290,22 @@ masked as the whole `user` parameter (over-redaction of its siblings under the s
 - The count is the number of masked wire pairs (`a[]=1&a[]=x&a[pass]=2` counts 3), still once per name across a request's `url` and `query`.
 - `code` is OAuth context-dependent: masked with `grant_type`, `redirect_uri`, `client_id`, `code_verifier`, **or `state`** present. Accepted
   cost: `code=US&state=CA` is masked.
+
+
+## Round 8 amendments (blind QA 2): one canonical export, a final sweep
+
+- **Canonical export.** Copy, Download and the sealed share carry `canonicalExchange(redactExchange(x))` — `redactForExport` — not
+  the in-memory model: request `{method, url, headers, cookies, body{contentType, raw}}`, response `{status, statusText, elapsedMs,
+  headers, cookies, body{contentType, raw}}`, `origin`. **Never** `query`, `form`, `entries[].raw[]` or decoded trees. The reader
+  derives the query table from the URL when `query` is absent (`queryOf`); an old link that still has it keeps using it.
+  **No envelope version change**: still version 2 (version 3 for bundles); proven by `export-compat-seal.test.ts` (old and new
+  payloads open with the current reader) and `export-compat-render.test.ts` (same parameter rows rendered either way).
+- **Final sweep** over the canonical strings (header names and values, cookie names, method, status text, URL, a clean form's raw): any
+  JWT, Stripe key, AWS key id (`AKIA`/`ASIA` + 16), `Bearer|Basic|Token <anything>`, or URL userinfo not already masked is replaced by
+  `[REDACTED]` and counted. Not the generic hex/base64 rule. A non-clean body is not rewritten; it warns.
+- **Credential-shaped names** (a JWT as a name, or as a segment of `a.b`/`a[b]`) and path names on secret-named entries
+  (`token.K`, `auth[K]`, `session.K.x`, `user[K][password]`) are masked as `[REDACTED]=[REDACTED]`, one per wire pair, counted;
+  a plain secret name (`password`) stays readable. On screen a credential-shaped name shows `[REDACTED]` and its anchor id is omitted.
+- **Values:** a URL with userinfo inside a parameter value, `Bearer`/`Basic`/`Token` + anything (including after a `+`-encoded space) and
+  AWS key ids are credential-shaped.
+- **Documented limits:** `a=1&<bare jwt>` with an **empty** content type is not a clean form (a bare name needs the form type): it warns instead.

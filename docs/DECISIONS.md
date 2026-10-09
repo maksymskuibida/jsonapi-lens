@@ -650,6 +650,22 @@ header and cookie values, the URL's userinfo, query and fragment, the value of `
 `Content-Location` and `Origin` (through the same URL redaction), `query`, a clean form body and the
 provenance field `origin`.
 
+**One canonical copy leaves the browser, and a final sweep runs over it.** The model holds a datum several ways
+(`url` and `query`, `raw` and `form`, `entries[].raw[].key` and the decoded tree); every extra representation is
+another place redaction can be wrong, and three leaks in a row had exactly that shape. Copy, Download and the sealed
+share therefore carry `canonicalExchange(redactExchange(x))` (`redactForExport`, `secrets.ts`): the URL as a string,
+headers and cookies as name/value, each body as `{contentType, raw}`, the response status; **no** `query`, `form`,
+`entries[].raw` or decoded trees. The reader re-derives them on load (`queryOf`, `render-request.ts`), as for a request
+typed into the form. **The envelope is unchanged** (`exchange` is an opaque optional field of the version-2 payload;
+old links still carrying `query`/`form` open as before; `export-compat-seal.test.ts`). The sweep then masks, in
+header names and values, cookie names, the method, the status text, the URL and a clean form's `raw`, every discrete
+token of unmistakable shape — a JWT (`eyJ…`), a Stripe key, an AWS key id, `Bearer`/`Basic`/`Token` followed by
+anything, a URL's `user:pw@` — and counts it. It deliberately does not use the generic hex/base64 length rule (etags,
+slugs). **A credential-shaped parameter name is masked** (`[REDACTED]=[REDACTED]`, one per wire pair), and so is a
+path name (`token.K`, `user[K][password]`) on a secret-named entry, because a name can carry text no detector can
+judge; on screen the name is masked too. The tests assert on `JSON.stringify` of the whole export, typed through the
+real form (`export-payload.test.ts`), never on the DOM or a parsed field.
+
 **A form body is recognised from what is stored, by one function.** `classifyBody` (`secrets.ts`) is called
 by the screen, the redaction and the share dialog's warning: content type `application/x-www-form-urlencoded`,
 empty or `text/plain`; text not starting with `{ [ " <` **whatever the content type**; no whitespace and no `;`;
@@ -693,6 +709,8 @@ what this tool reviews.)
   shapeless). A clean form with such a pair is **not** warned about, because nothing credential-like is left in
   it by any test this module has;
 - a bare `code=…` with no OAuth sibling;
+- a credential of no recognisable shape in a **name**: only credential-shaped names and path names on secret-named
+  entries are masked;
 - any URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;
 - a token inside a URL **path** segment;
 - a credential inside a JSON, text or multipart body, or in a form body the strict rules reject (`;`-separated,

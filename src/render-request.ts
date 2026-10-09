@@ -65,6 +65,7 @@
  */
 
 import { el, setRichText } from "./dom.js";
+import { decodeParams } from "./params.js";
 import { t } from "./i18n/index.js";
 import {
   requestFieldDomId,
@@ -89,6 +90,7 @@ import {
   decodeJwt,
   detectCredentialShape,
   isSecretParam,
+  paramNameCarriesCredential,
   isUrlValuedHeader,
   maskUrlForDisplay,
   shouldMaskHeader,
@@ -382,9 +384,24 @@ export function resolveSecret(exchange: Exchange, ref: string): string | null {
   return entry === undefined ? null : entry.value;
 }
 
+/**
+ * The request's query parameters: the stored table when there is one (a request
+ * typed into the form, or an old share link), otherwise **derived from the URL**
+ * — the canonical export carries only the URL string, and the reader re-derives
+ * the table exactly as the form does at Save (`secrets.ts#canonicalExchange`).
+ */
+export function queryOf(request: RequestPart | undefined): ParamSet | null {
+  if (!request) return null;
+  if (request.query) return request.query;
+  if (request.url === undefined) return null;
+  const withoutFragment = request.url.split("#", 1)[0] ?? "";
+  const at = withoutFragment.indexOf("?");
+  return decodeParams(at < 0 ? "" : withoutFragment.slice(at + 1));
+}
+
 /** The parameter table a `req.query` / `req.body` / `res.body` locator points into — the same one the table was rendered from. */
 function paramSetFor(exchange: Exchange, base: string): ParamSet | null {
-  if (base === "req.query") return exchange.request?.query ?? null;
+  if (base === "req.query") return queryOf(exchange.request);
   const body = base === "req.body" ? exchange.request?.body : exchange.response?.body;
   if (!body) return null;
   const classified = classifyBody(body); // the same decision the table was drawn under
@@ -791,8 +808,11 @@ function paramBody(entry: ParamEntry): HTMLElement {
  * are built only when revealed.
  */
 function paramRow(entry: ParamEntry, ref: string | null, siblings: readonly ParamEntry[]): HTMLElement {
-  const row = el("div", { class: "xrow xrow--param", id: requestFieldDomId("reqParam", entry.name) });
-  row.append(el("code", { class: "xrow__name", text: entry.name }));
+  // A name that carries a credential is masked too — in the text and in the
+  // anchor id, which would otherwise spell it out.
+  const nameIsSecret = paramNameCarriesCredential(entry);
+  const row = el("div", { class: "xrow xrow--param", id: nameIsSecret ? undefined : requestFieldDomId("reqParam", entry.name) });
+  row.append(el("code", { class: "xrow__name", text: nameIsSecret ? "[REDACTED]" : entry.name }));
   row.append(ref !== null && isSecretParam(entry, siblings) ? el("div", { class: "xparam__body" }, maskedValue(ref)) : paramBody(entry));
   return row;
 }
@@ -1167,7 +1187,8 @@ function renderRequestReview(request: RequestPart): HTMLElement {
     ),
   );
 
-  if (request.query) section.append(reviewSection(m.queryTitle, renderParamTable(request.query, "req.query"), request.query.entries.length));
+  const query = queryOf(request);
+  if (query) section.append(reviewSection(m.queryTitle, renderParamTable(query, "req.query"), query.entries.length));
   if (request.headers) {
     section.append(
       reviewSection(m.headersTitle, renderHeaderTable(request.headers, "reqHeader", null), request.headers.entries.length),
@@ -1255,7 +1276,7 @@ function renderModeControl(mode: ReviewMode): HTMLElement {
 function countLine(request: RequestPart | undefined, response: ResponsePart | undefined): string {
   const m = t().request.band;
   const parts: string[] = [];
-  const paramCount = request?.query?.entries.length ?? 0;
+  const paramCount = queryOf(request)?.entries.length ?? 0;
   const headerCount = (request?.headers?.entries.length ?? 0) + (response?.headers?.entries.length ?? 0);
   const cookieCount = (request?.cookies?.entries.length ?? 0) + (response?.cookies?.entries.length ?? 0);
   if (paramCount > 0) parts.push(m.summaryParams(paramCount));

@@ -101,7 +101,7 @@ describe("a share seals no credential, on any surface", () => {
     expect(redacting).toBe(8);
     const secret = generateSecret();
     const opened = await openSealed(await mintShareEnvelope([entry("a.json")], secret), secret);
-    expect(JSON.stringify(opened).split("[REDACTED]").length - 1).toBeGreaterThanOrEqual(redacting);
+    expect((JSON.stringify(opened).match(/\[REDACTED\]|%5BREDACTED%5D/g) ?? []).length).toBeGreaterThanOrEqual(redacting);
   });
 });
 
@@ -270,7 +270,8 @@ describe("the number the dialog states is exact (QA6 review N5)", () => {
     const json = JSON.stringify(await openSealed(await mintShareEnvelope([entry], secret), secret));
     // the sealed payload carries the body twice (`raw` and the rewritten `form`), so count `raw` only
     const raw = (JSON.parse(json) as { exchange: { request: { body: { raw: string } } } }).exchange.request.body.raw;
-    const occurrences = (raw.match(/%5BREDACTED%5D|\[REDACTED\]/g) ?? []).length;
+    // one masked *value* per counted value (a flattened `[REDACTED]=[REDACTED]` pair has a masked name too)
+    const occurrences = (raw.match(/=%5BREDACTED%5D|=\[REDACTED\]/g) ?? []).length;
     expect(json).not.toContain("qa-fake-r");
     expect(redacting).toBe(5);
     expect(occurrences).toBe(redacting);

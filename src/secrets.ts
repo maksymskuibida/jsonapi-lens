@@ -65,7 +65,7 @@
  * Pure data and pure functions — no DOM, no `t()`, no network.
  */
 
-import type { Exchange, BodyPart, OriginMeta } from "./exchange.js";
+import type { Exchange, BodyPart, OriginMeta, RequestPart, ResponsePart } from "./exchange.js";
 import type { HeaderSet } from "./headers.js";
 import type { CookieSet, SetCookieSet } from "./cookies.js";
 import type { JsonObject } from "./types.js";
@@ -94,6 +94,8 @@ export function isSecretHeaderName(name: string): boolean {
 export type CredentialShape =
   | { kind: "jwt" }
   | { kind: "stripe-key" }
+  | { kind: "aws-key" }
+  | { kind: "auth-scheme" }
   | { kind: "hex"; length: number }
   | { kind: "base64"; length: number };
 
@@ -105,6 +107,10 @@ export type CredentialShape =
 // base64url characters), so the floor costs no real detection.
 const JWT_SHAPE_RE = /^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/;
 const STRIPE_KEY_RE = /^(sk|pk)_[A-Za-z0-9_]{6,}$/i;
+/** An AWS access key id: `AKIA…` (long-lived) or `ASIA…` (temporary), 20 characters. */
+const AWS_KEY_RE = /^(?:AKIA|ASIA)[0-9A-Z]{16}$/;
+/** `Bearer x`, `Basic x`, `Token x`, `JWT x`: a credential whatever the length of `x`. */
+const AUTH_SCHEME_VALUE_RE = /^(?:Bearer|Basic|Token|JWT)\s+\S+/i;
 const HEX_RE = /^[0-9a-fA-F]+$/;
 const BASE64_RE = /^[A-Za-z0-9+/_-]+={0,2}$/;
 
@@ -135,8 +141,11 @@ export function detectCredentialShape(value: string): CredentialShape | null {
 
   if (JWT_SHAPE_RE.test(token)) return { kind: "jwt" };
   if (STRIPE_KEY_RE.test(token)) return { kind: "stripe-key" };
+  if (AWS_KEY_RE.test(token)) return { kind: "aws-key" };
   if (token.length >= MIN_HEX_LENGTH && HEX_RE.test(token)) return { kind: "hex", length: token.length };
   if (token.length >= MIN_BASE64_LENGTH && BASE64_RE.test(token)) return { kind: "base64", length: token.length };
+  // `Bearer x` is a credential whatever the length or shape of `x`.
+  if (AUTH_SCHEME_VALUE_RE.test(value.trim())) return { kind: "auth-scheme" };
   return null;
 }
 
@@ -445,9 +454,12 @@ function judgeDecodedName(name: string, oauthContext: boolean): boolean {
  * Does any leaf of a decoded parameter value — a plain string, or one nested
  * in an array/object — look like a credential?
  */
+/** A URL with userinfo inside a value (`u=https://admin:SECRET@h/`): the same shape the request-URL path masks. */
+const URL_WITH_USERINFO_RE = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s\/?#@]+@/;
+
 function valueHasCredentialShape(value: ParamValue | undefined): boolean {
   if (value === undefined || value === null) return false;
-  if (typeof value === "string") return detectCredentialShape(value) !== null;
+  if (typeof value === "string") return detectCredentialShape(value) !== null || URL_WITH_USERINFO_RE.test(value);
   if (Array.isArray(value)) return value.some(valueHasCredentialShape);
   if (typeof value === "object") return Object.values(value).some(valueHasCredentialShape);
   return false; // number, boolean
@@ -459,6 +471,7 @@ function valueHasCredentialShape(value: ParamValue | undefined): boolean {
  * on screen with the same test redaction uses.
  */
 function shouldRedactParam(entry: ParamEntry, oauthContext = false): boolean {
+  if (paramNameCarriesCredential(entry)) return true;
   if (isSecretParamName(entry.name, oauthContext)) return true;
   // A bracketed or dotted name is decoded into a tree under its first segment
   // (`user[pass]` becomes `user` -> `pass`), so the entry's own name is just `user`.
@@ -468,6 +481,30 @@ function shouldRedactParam(entry: ParamEntry, oauthContext = false): boolean {
   if (entry.alternatives.some((alt) => valueHasCredentialShape(alt.value))) return true;
   if (entry.conflict?.some((reading) => valueHasCredentialShape(reading.value))) return true;
   return false;
+}
+
+/** `siblings`: the other parameters of the same set, for the OAuth-context rule on `code`. */
+/**
+ * Does this parameter's **name** carry a credential? A bare JWT used as a name
+ * (`password=x&eyJ…`), or a dotted/bracketed name with a credential-shaped
+ * segment (`token.<key>`, `user[<key>][password]`). Judged on every wire key,
+ * decoded as far as it goes, whole and per segment.
+ */
+export function paramNameCarriesCredential(entry: ParamEntry): boolean {
+  return entry.raw.some((pair) => keyCarriesCredential(pair.key)) || keyCarriesCredential(entry.name);
+}
+
+function keyCarriesCredential(key: string): boolean {
+  for (const candidate of decodeParamNameForJudging(key).names) {
+    if (detectCredentialShape(candidate) !== null) return true;
+    if (candidate.split(/[\[\].]+/).some((segment) => segment !== "" && detectCredentialShape(segment) !== null)) return true;
+  }
+  return false;
+}
+
+/** Is any wire key of this entry a path (`a[b]`, `a.b`)? Such a name can carry text of its own. */
+function hasPathName(entry: ParamEntry): boolean {
+  return entry.raw.some((pair) => decodeParamNameForJudging(pair.key).names.some((n) => /[\[\].]/.test(n)));
 }
 
 /** `siblings`: the other parameters of the same set, for the OAuth-context rule on `code`. */
@@ -491,7 +528,32 @@ function redactParamValue(value: ParamValue): ParamValue {
  * `encodeParams` uses for a conflicted entry), `value`, `conflict`, and
  * `alternatives` (cleared: nothing is left to disambiguate once redacted).
  */
-function redactParamEntry(entry: ParamEntry): ParamEntry {
+function redactParamEntry(entry: ParamEntry, oauthContext = false): ParamEntry {
+  // A name that carries a credential, or a path name (`user[K][password]`,
+  // `token.K`) on an entry that is secret by name, can hold text of its own that
+  // no detector can judge: the whole entry becomes `[REDACTED]=[REDACTED]`. A
+  // plain secret name (`password`) is only a label and stays readable.
+  if (paramNameCarriesCredential(entry) || (hasPathName(entry) && shouldRedactParam(entry, oauthContext))) {
+    // One `[REDACTED]=[REDACTED]` per original wire pair, so the number of masked
+    // occurrences in the output equals the number counted.
+    const pairs = entry.raw.map(() => ({ key: REDACTED_VALUE, value: REDACTED_VALUE }));
+    return pairs.length > 1
+      ? {
+          name: REDACTED_VALUE,
+          raw: pairs,
+          conventions: ["plain"],
+          alternatives: [],
+          conflict: pairs.map(() => ({ convention: "plain" as const, value: REDACTED_VALUE })),
+        }
+      : {
+          name: REDACTED_VALUE,
+          raw: pairs.length === 1 ? pairs : [{ key: REDACTED_VALUE, value: REDACTED_VALUE }],
+          value: REDACTED_VALUE,
+          convention: "plain",
+          conventions: ["plain"],
+          alternatives: [],
+        };
+  }
   const redacted: ParamEntry = {
     ...entry,
     raw: entry.raw.map((pair) => (pair.value === null ? pair : { key: pair.key, value: REDACTED_VALUE })),
@@ -556,11 +618,13 @@ function redactEntries(entries: ParamEntry[], tally: RedactionTally): { entries:
     // surface (`url` and `query`) is counted once, by the first to see it.
     let values = entry.raw.filter((pair) => pair.value !== null && pair.value !== "").length;
     if (values === 0 && !isEmptyParamValue(entry.value)) values = 1;
+    // A credential used as a bare name has no value to count, but it was removed.
+    if (values === 0 && (paramNameCarriesCredential(entry) || hasPathName(entry))) values = Math.max(1, entry.raw.length);
     if (values > 0 && !(tally.dedupeNames && tally.countedNames.has(entry.name))) {
       tally.count += values;
       tally.countedNames.add(entry.name);
     }
-    return redactParamEntry(entry);
+    return redactParamEntry(entry, oauth);
   });
   return { entries: result, changed };
 }
@@ -969,4 +1033,128 @@ export function redactExchange(exchange: Exchange): RedactionResult {
     originTally.count;
 
   return { exchange: redacted, count, bodyMayContainSecret };
+}
+
+
+/* ------------------------------------------------ canonical export + sweep --- */
+
+/**
+ * What leaves the browser is a **canonical exchange**, never the in-memory model.
+ *
+ * The model holds the same datum several ways — `url` and `query`, `raw` and
+ * `form`, `entries[].raw[].key` and the decoded tree — and every extra
+ * representation is one more place redaction has to be right. Three leaks in a
+ * row had that shape (QA6 blind QA: a credential used as a parameter *name*
+ * survived in a derived key while the parsed value was masked). So Copy,
+ * Download and the sealed share carry **one** copy of each field: the URL as a
+ * string, headers and cookies as name/value, each body as `{ contentType, raw }`,
+ * the response status. Derived structures (`query`, `form`, parsed trees) are not
+ * sent; the reader re-derives them on load, exactly as for a request typed into
+ * the form (`queryOf`, `render-request.ts`). The envelope is unchanged: an old
+ * link that still carries `query`/`form` opens as before.
+ */
+function canonicalBody(body: BodyPart | undefined): BodyPart | undefined {
+  if (!body) return undefined;
+  const out: BodyPart = { raw: body.raw };
+  if (body.contentType !== undefined) out.contentType = body.contentType;
+  return out;
+}
+
+function canonicalHeaders(headers: HeaderSet | undefined): HeaderSet | undefined {
+  return headers ? { entries: headers.entries.map((e) => ({ name: e.name, value: e.value })) } : undefined;
+}
+
+export function canonicalExchange(exchange: Exchange): Exchange {
+  const out: Exchange = {};
+  if (exchange.request) {
+    const r = exchange.request;
+    const request: RequestPart = {};
+    if (r.method !== undefined) request.method = r.method;
+    if (r.url !== undefined) request.url = r.url;
+    const headers = canonicalHeaders(r.headers);
+    if (headers) request.headers = headers;
+    if (r.cookies) request.cookies = { entries: r.cookies.entries.map((c) => ({ name: c.name, value: c.value })) };
+    const body = canonicalBody(r.body);
+    if (body) request.body = body;
+    out.request = request;
+  }
+  if (exchange.response) {
+    const r = exchange.response;
+    const response: ResponsePart = {};
+    if (r.status !== undefined) response.status = r.status;
+    if (r.statusText !== undefined) response.statusText = r.statusText;
+    if (r.elapsedMs !== undefined) response.elapsedMs = r.elapsedMs;
+    const headers = canonicalHeaders(r.headers);
+    if (headers) response.headers = headers;
+    if (r.cookies) response.cookies = r.cookies; // parsed Set-Cookie readings: the only copy
+    const body = canonicalBody(r.body);
+    if (body) response.body = body;
+    out.response = response;
+  }
+  if (exchange.origin !== undefined) out.origin = exchange.origin;
+  return out;
+}
+
+/**
+ * The final fail-closed sweep: tokens whose shape is unmistakable, wherever they
+ * sit in a string that is not already masked — a JWT, a Stripe key, an AWS key
+ * id, `Bearer`/`Basic`/`Token` followed by anything, and a URL's `user:pw@`.
+ * Deliberately **not** the generic hex/base64 length rule: applied inside URLs
+ * and header values it would mask etags and long path slugs. Returns the text
+ * with each hit replaced by `[REDACTED]` and the number of hits.
+ */
+const SWEEP_RES: Array<[RegExp, string]> = [
+  [/\bey[A-Za-z0-9_-]{6,}\.ey[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/g, REDACTED_VALUE],
+  [/\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9_]{6,}/gi, REDACTED_VALUE],
+  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, REDACTED_VALUE],
+  [/\b(?:Bearer|Basic|Token)\s+(?!\[REDACTED\])[^\s,;"']+/gi, REDACTED_VALUE],
+];
+const SWEEP_USERINFO_RE = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)(?!\[REDACTED\]@)([^\s\/?#@]+)@/g;
+
+function sweepText(text: string, tally: RedactionTally): string {
+  let out = text;
+  for (const [re, replacement] of SWEEP_RES) {
+    out = out.replace(re, () => {
+      tally.count++;
+      return replacement;
+    });
+  }
+  out = out.replace(SWEEP_USERINFO_RE, (_m, scheme: string) => {
+    tally.count++;
+    return `${scheme}${REDACTED_VALUE}@`;
+  });
+  return out;
+}
+
+function sweepHeaders(headers: HeaderSet | undefined, tally: RedactionTally): HeaderSet | undefined {
+  if (!headers) return headers;
+  return {
+    entries: headers.entries.map((e) => ({
+      name: sweepText(e.name, tally),
+      value: e.value === REDACTED_VALUE ? e.value : sweepText(e.value, tally),
+    })),
+  };
+}
+
+/** What Copy, Download and the share send, and how many values were masked to make it. */
+export function redactForExport(exchange: Exchange): RedactionResult {
+  const base = redactExchange(exchange);
+  const canonical = canonicalExchange(base.exchange);
+  const sweep = freshTally(false);
+
+  if (canonical.request) {
+    const r = canonical.request;
+    if (r.method !== undefined) r.method = sweepText(r.method, sweep);
+    if (r.url !== undefined) r.url = sweepText(r.url, sweep);
+    r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
+    if (r.cookies) r.cookies = { entries: r.cookies.entries.map((c) => ({ name: sweepText(c.name, sweep), value: c.value })) };
+    if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
+  }
+  if (canonical.response) {
+    const r = canonical.response;
+    if (r.statusText !== undefined) r.statusText = sweepText(r.statusText, sweep);
+    r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
+    if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
+  }
+  return { exchange: canonical, count: base.count + sweep.count, bodyMayContainSecret: base.bodyMayContainSecret };
 }
