@@ -256,9 +256,11 @@ visitor.
   itself a JSON:API document gets the same full resource treatment a pasted document does, anchored
   under its own scope so it never collides with the response even when both share a `type`/`id`.
 - `Authorization`, cookies, and anything shaped like a credential (a JWT, a long hex/base64 run, a
-  `sk_`/`pk_`-prefixed key) are masked on arrival; click to reveal, one at a time. A `Bearer` JWT is
-  decoded locally — header and payload, never the signature, never a network call — with `exp` shown
-  relative to the response's own `Date` header when there is one.
+  `sk_`/`pk_`-prefixed key) are masked on arrival; each has its own toggle that reveals (and hides) just that value, and a
+  value you revealed stays revealed until you hide it again. A `Bearer` JWT is decoded locally —
+  header and payload, never the signature, never a network call — with `exp` shown relative to the
+  response's own `Date` header when there is one. The decoded claims are visible before you reveal
+  anything (deliberately: they are what the panel is for); the signature, and so the token, is not.
 - **Copy**, **Download** and **Share** all pass through one redaction ([D8](docs/DECISIONS.md)) and say
   how many values it removed — a count of what was found, never a claim that nothing else remains;
   for Share the count and the warnings are shown *before* the link is created. It replaces with
@@ -267,7 +269,8 @@ visitor.
   same parts of a URL in `Location`, `Referer`, `Content-Location` and `Origin`, whose other parts
   are left as they are), credential-named parameters in a form body in the strict `a=1&b=2` shape,
   and credential-shaped values in the `origin` field. What the recipient sees in those places is
-  `[REDACTED]`, not a value they can reveal.
+  `[REDACTED]`, not a value they can reveal (inside a URL's query or fragment it is written
+  percent-encoded, `%5BREDACTED%5D`).
   **It is not complete.** A JSON, text or multipart body, and a form body that is not in that strict
   shape (separated by `;`, spread over several lines, or with spaces in a value), is flagged, never
   rewritten, and goes out as it is — the dialog says so before the link is created. A secret under an
@@ -277,7 +280,8 @@ visitor.
 - **Share carries the attached request and response into the encrypted link**, redacted as above —
   whether you share the open document or tick it in **Saved documents → Share**. The link opens
   with the exchange band in place. On screen a masked header, cookie, URL or form value is not in
-  the page at all until you click to reveal it; a JSON, text or multipart request body is shown as
+  the page at all until you click to reveal it (the decoded JWT claims under an `Authorization` header
+  excepted, as above); a JSON, text or multipart request body is shown as
   text, as it is.
 
 Importing from a bundle link ends with a toast saying how many documents were saved (and, if

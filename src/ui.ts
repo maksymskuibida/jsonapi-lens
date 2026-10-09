@@ -301,7 +301,13 @@ export function openModal(options: ModalOptions): ModalHandle {
   }
 
   root.addEventListener("mousedown", (event) => {
-    if (event.target === root) handle.close();
+    if (event.target !== root) return;
+    // The press itself is what moves focus: a mousedown on something that is
+    // not focusable blurs the active element *after* this handler, which put
+    // the focus restored by `close()` straight back on `<body>` (QA5 blind QA,
+    // finding 1). Cancelling the default keeps what `close()` just did.
+    event.preventDefault();
+    handle.close();
   });
 
   openers.set(handle, chain);

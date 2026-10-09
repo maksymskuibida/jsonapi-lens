@@ -170,3 +170,66 @@ describe("a nested dialog", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 });
+
+/**
+ * QA5 blind QA, finding 1: a click on the backdrop closed the dialog and left
+ * focus on `<body>`. The press blurs the active element *after* the handler
+ * runs, so the handler must cancel the default; jsdom does not model that blur,
+ * so the assertion is that the event is cancelled as well as that focus is on
+ * the opener. The real behaviour is observed in the browser run (evidence).
+ */
+describe("closing by a press on the backdrop, for every real dialog", () => {
+  const backdrop = (): HTMLElement => document.querySelector<HTMLElement>(".modal")!;
+
+  async function openers(): Promise<[string, () => void | Promise<void>][]> {
+    const [{ openRawModal, openSaveModal, openLibraryModal, openShortcutsModal }, { openJumpModal }, { openShareModal }] =
+      await Promise.all([import("../src/panels.js"), import("../src/jump.js"), import("../src/share.js")]);
+    const { buildIndex } = await import("../src/parse.js");
+    const { openRequestForm } = await import("../src/request-form.js");
+    const index = buildIndex({ data: { type: "a", id: "1" } } as never);
+    return [
+      ["raw", () => openRawModal({ title: "t", value: {}, filename: "x.json" })],
+      ["save", () => openSaveModal("x", () => {})],
+      ["library", () => openLibraryModal(() => {})],
+      ["shortcuts", () => openShortcutsModal()],
+      ["jump", () => openJumpModal(index)],
+      ["share", () => openShareModal("{}", "a.json")],
+      ["request form", () => openRequestForm({}, () => {})],
+    ];
+  }
+
+  it("returns focus to the opener, and cancels the press so the browser cannot blur it again", async () => {
+    for (const [name, open] of await openers()) {
+      closeAllModals();
+      $("opener").focus();
+      await open();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(document.querySelectorAll(".modal__panel").length, name).toBe(1);
+      const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      backdrop().dispatchEvent(press);
+      expect(document.querySelectorAll(".modal__panel").length, `${name} closed`).toBe(0);
+      expect(press.defaultPrevented, `${name} press cancelled`).toBe(true);
+      expect(document.activeElement, name).toBe($("opener"));
+    }
+  });
+
+  it("after a shortcut (nothing focused) lands on #view", async () => {
+    for (const [name, open] of await openers()) {
+      closeAllModals();
+      (document.activeElement as HTMLElement).blur();
+      await open();
+      await new Promise((r) => setTimeout(r, 0));
+      backdrop().dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      expect(document.activeElement, name).toBe($("view"));
+    }
+  });
+
+  it("a press inside the dialog does not close it and is not cancelled", () => {
+    $("opener").focus();
+    const handle = openModal({ title: "T", body: body() });
+    const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    handle.root.querySelector(".modal__panel")!.dispatchEvent(press);
+    expect(document.querySelectorAll(".modal__panel").length).toBe(1);
+    expect(press.defaultPrevented).toBe(false);
+  });
+});
