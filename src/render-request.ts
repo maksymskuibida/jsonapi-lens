@@ -828,8 +828,9 @@ function paramRow(
 /**
  * `base` is the locator prefix (`req.query`, `req.body`, `res.body`); without it nothing is masked (a caller with no exchange to resolve against).
  * `fieldKind` is this table's own `q_` kind (D1): a query and a body table must not share one. Only the first row
- * of a repeated name carries the anchor, as the header and cookie tables do. `decodeParams` already folds `a=1&a=2` into one
- * entry, so this is a guard for a ParamSet built another way, not a behaviour a current input reaches.
+ * of a repeated name carries the anchor, as the header and cookie tables do. `decodeParams` folds `a=1&a=2` into one
+ * entry, but `queryOf` returns a stored `request.query` as it is, so an old share or a saved exchange can carry two entries of one
+ * name; without this guard each would mint the same id (`test/render-request.test.ts`, review S1).
  */
 function renderParamTable(params: ParamSet, base: string | null, fieldKind: RequestFieldKind): HTMLElement {
   const list = el("div", { class: "xtable xtable--params" });

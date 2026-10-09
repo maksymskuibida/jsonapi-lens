@@ -18,6 +18,16 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
+/** The repository root, asked of git itself (the test's own URL is not a file URL under jsdom). Falls back to the cwd. */
+function repoRoot(): string {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || process.cwd();
+  } catch {
+    return process.cwd();
+  }
+}
+const REPO_ROOT = repoRoot();
+
 /*
  * Files are collected with Vite's own `import.meta.glob` rather than `node:fs`.
  * `tsconfig.json` sets `types: ["vite/client"]` deliberately narrowly, so a
@@ -87,6 +97,8 @@ function gitIgnored(paths: readonly string[]): Set<string> {
     const out = execFileSync("git", ["check-ignore", "--stdin", "-z"], {
       input: paths.join("\0"),
       encoding: "utf8",
+      // the paths are repo-root-relative, so run git from the root, wherever vitest was launched
+      cwd: REPO_ROOT,
       stdio: ["pipe", "pipe", "ignore"],
     });
     return new Set(out.split("\0").filter((p) => p !== ""));

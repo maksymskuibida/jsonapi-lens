@@ -428,6 +428,19 @@ describe("QA7 S20 — a query parameter and a body parameter of one name get dis
     band.remove();
   });
 
+  it("review S1: a stored query that already carries two entries of one name (an old share, a saved exchange) still mints one id", () => {
+    const stored = decodeParams("page=1&other=2");
+    const dup: Exchange = { request: { url: "https://api.example.com/x", query: { ...stored, entries: [...stored.entries, stored.entries[0]!] } } };
+    expect(dup.request!.query!.entries.filter((e) => e.name === "page")).toHaveLength(2);
+    const band = renderExchangeBand({ exchange: dup, mode: "both", currentDocument: null })!;
+    document.body.append(band);
+    const all = ids(band);
+    expect(new Set(all).size, all.join(", ")).toBe(all.length);
+    expect(band.querySelectorAll("#q_reqParam__page").length).toBe(1);
+    expect(band.querySelectorAll(".xrow--param").length).toBe(3); // every row is still drawn
+    band.remove();
+  });
+
   it("a request body, a response body and the query all carrying `page` stay unique, one anchor each", () => {
     const exchange: Exchange = {
       request: { url: "https://api.example.com/x?page=1&page=2", body: { raw: "page=2&page=3", contentType: FORM } },

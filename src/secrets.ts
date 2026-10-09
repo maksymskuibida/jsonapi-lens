@@ -1199,8 +1199,15 @@ export function redactForExport(exchange: Exchange): RedactionResult {
     const r = canonical.response;
     if (r.statusText !== undefined) r.statusText = sweepText(r.statusText, sweep);
     r.headers = sweepHeaders(r.headers, sweep) ?? r.headers;
-    // Set-Cookie *names*: values and unsafe attributes were masked by `redactSetCookieSet`.
-    if (r.cookies) r.cookies = { entries: r.cookies.entries.map((c) => ({ ...c, name: sweepText(c.name, sweep) })) };
+    // Set-Cookie *names* and unrecognised attribute names: values and unsafe attributes were masked by `redactSetCookieSet`.
+    if (r.cookies) r.cookies = {
+        entries: r.cookies.entries.map((c) => {
+          const swept = { ...c, name: sweepText(c.name, sweep) };
+          // an attribute the parser could not place is kept verbatim, name included (`sid=1; <jwt>=1`)
+          if (c.unrecognized) swept.unrecognized = c.unrecognized.map((a) => ({ ...a, name: sweepText(a.name, sweep) }));
+          return swept;
+        }),
+      };
     r.body = sweepBodyContentType(r.body, sweep);
     if (r.body && classifyBody(r.body).kind === "form") r.body = { ...r.body, raw: sweepText(r.body.raw, sweep) };
   }

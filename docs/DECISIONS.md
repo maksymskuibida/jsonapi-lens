@@ -775,10 +775,17 @@ what this tool reviews.)
   shapeless). A clean form with such a pair is **not** warned about, because nothing credential-like is left in
   it by any test this module has;
 - a bare `code=…` with no OAuth sibling;
-- **in those three fields (Set-Cookie names, `body.contentType`, `origin` strings) only the discrete token shapes
-  above**: QA7 S19 extended the final sweep to them, so an embedded JWT, Stripe key, AWS key id, `Bearer`/`Basic`/`Token`
-  value or `user:pw@` is masked and counted, but a secret of no recognisable shape in them is not (an `origin` key is also
-  not rewritten, only its string values, and only values under a credential-named key get the older whole-leaf mask);
+- **in those fields only the discrete token shapes above**: QA7 S19 extended the final sweep to Set-Cookie names
+  **and unrecognised Set-Cookie attribute names** (`sid=1; <jwt>=1` parses the second part as an attribute name, kept
+  verbatim), `body.contentType` and `origin` string values, so an embedded JWT, Stripe key, AWS key id,
+  `Bearer`/`Basic`/`Token` value or `user:pw@` is masked and counted there, but a secret of no recognisable shape is not.
+  In `origin` the older per-leaf pass also masks a whole leaf that is credential-shaped (`detectCredentialShape`)
+  whatever its key, and any value under a credential-named key; an `origin` **key** is never rewritten (only
+  `__proto__`/`constructor`/`prototype` are dropped);
+- a Set-Cookie `Domain`, `Path`, `Expires` or `SameSite` value: masked only when it contains `=` or is credential-shaped
+  (`attributeLooksUnsafe`), and the final sweep does not look at it, so `Path=/x Bearer abc` style text without `=` is
+  exported as it is (the field audit of the canonical export, QA7 review B1: every other field is a number, a boolean, a
+  swept string or a masked value);
 - a credential of no recognisable shape in a **name**: only credential-shaped names and path names on secret-named
   entries are masked;
 - any URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;

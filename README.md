@@ -273,7 +273,7 @@ visitor.
   and credential-shaped values in the `origin` field. A last pass over what leaves also masks a token of
   unmistakable shape (a JWT, a Stripe key, an AWS key id, `Bearer`/`Basic`/`Token` followed by a value,
   a URL's `user:pw@`) wherever it sits in a header name or value, a cookie name (request and
-  `Set-Cookie`), the method, a body's content type, the URL, a clean form body, or any string inside
+  `Set-Cookie`, and a `Set-Cookie` attribute the parser could not place), the method, a body's content type, the URL, a clean form body, or any string inside
   `origin`. What the recipient sees in those places is
   `[REDACTED]`, not a value they can reveal (inside a URL's query or fragment it is written
   percent-encoded, `%5BREDACTED%5D`).
@@ -281,7 +281,7 @@ visitor.
   shape (separated by `;`, spread over several lines, or with spaces in a value), is flagged, never
   rewritten, and goes out as it is — the dialog says so before the link is created. A secret under an
   unlisted name with a shapeless value, a token in a URL path, and a secret of no recognisable shape
-  anywhere (including in a cookie name, a content type or inside an `origin` string — only the shapes
+  anywhere (including in a cookie name, a content type or inside an `origin` string, and a `Set-Cookie` `Path`/`Domain` without an `=` — only the shapes
   above are found there) are not caught; D8 keeps the exact list.
 - **Share carries the attached request and response into the encrypted link**, redacted as above —
   whether you share the open document or tick it in **Saved documents → Share**. The link opens

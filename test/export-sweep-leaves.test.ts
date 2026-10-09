@@ -29,6 +29,19 @@ describe("S19: Set-Cookie names", () => {
   });
 });
 
+describe("S19 (review B1): unrecognised Set-Cookie attribute names", () => {
+  it("masks a token that sits in an attribute name, parsed from the real wire text", async () => {
+    const { parseSetCookies } = await import("../src/cookies.js");
+    const jwt = ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxIn0", "qafakesigAAAA1111"].join(".");
+    const ex: Exchange = { response: { cookies: parseSetCookies([`sid=1; ${jwt}=1`]) } };
+    expect(JSON.stringify(ex)).toContain(jwt); // the fixture really carries it in an attribute name
+    const out = redactForExport(ex);
+    expect(JSON.stringify(out.exchange)).not.toContain("qafakesig");
+    expect(out.exchange.response?.cookies?.entries[0]?.unrecognized?.[0]?.name).toContain("[REDACTED]");
+    expect(out.count).toBeGreaterThanOrEqual(2); // the value, and the attribute name
+  });
+});
+
 describe("S19: body.contentType", () => {
   it("masks a token in a request and a response content type", () => {
     const ex: Exchange = {
@@ -68,10 +81,10 @@ describe("S19: string leaves inside origin", () => {
     expect((out.exchange.origin?.nested as { n: number }).n).toBe(3);
     expect(out.count).toBeGreaterThanOrEqual(2);
   });
-  it("returns the same origin object when nothing needed sweeping", () => {
+  it("returns the same origin object (reference) when nothing needed sweeping", () => {
     const origin = { source: "har", text: "GET /x" };
     const out = redactForExport({ origin });
-    expect(out.exchange.origin).toEqual(origin);
+    expect(out.exchange.origin).toBe(origin);
     expect(out.count).toBe(0);
   });
   it("does not resurrect a prototype-pollution key", () => {
