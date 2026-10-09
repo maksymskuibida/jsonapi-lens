@@ -610,6 +610,8 @@ export const en = {
         one: "1 value in the attached request looks like a credential and will be removed before this link is created.",
         other: `${f.n(n)} values in the attached request look like credentials and will be removed before this link is created.`,
       }),
+    bodyNotRedacted:
+      "An attached body may still contain credentials: only plain form data is redacted, and nothing else in a body is checked. Review it before creating this link — whatever is left in it is included as it is.",
     create: "Create link",
     deriving: "Deriving the key and encrypting…",
     uploading: (size: string) => `Uploading ${size}…`,
@@ -758,6 +760,15 @@ export const en = {
     createFailed: {
       headline: "The share could not be created.",
       serverStatus: (status: number) => `The server returned ${status}.`,
+      /** One sentence per failure, chosen by HTTP status — the Worker's own JSON text is English and developer-facing, and is never shown. */
+      badRequest: "The server did not accept this share (400). Reload the page and try again.",
+      notFound: "The share service could not be reached at its address (404).",
+      notAllowed: "The server refused this kind of request (405).",
+      tooManyRequests: "Too many shares were created in a short time (429). Wait a moment and try again.",
+      tooLarge: (limit: string) => `The encrypted document is over the ${limit} share limit. Share a smaller document.`,
+      serverError: (status: number) => `The server could not store the share (${status}). Try again in a moment.`,
+      network: "The network request failed. Check your connection and try again.",
+      unexpected: "Something went wrong while encrypting or uploading the document. Try again.",
     },
     fetchFailed: {
       headline: "That shared document could not be fetched.",
@@ -882,7 +893,7 @@ export const en = {
        * list changes and this file did not.
        */
       redactionCaveat:
-        "Redaction targets header and cookie values shaped like credentials. It does not scan the body or the URL — review those yourself before sharing.",
+        "Copy, Download and Share mask what they recognise as a credential: header and cookie values, the user name and password in a URL, and credential-like parameters in the URL and in form bodies. A JSON or text body is not rewritten, and a secret with an unfamiliar name or shape can slip through — review the request yourself before sharing.",
       saved: "Request saved.",
       // Removing is not a kind of saving, and this line is the only
       // confirmation a screen reader gets: the band it would have read
@@ -914,9 +925,13 @@ export const en = {
       duplicateHeader: (n: number) => `sent ${f.n(n)} times`,
       unnamedCookie: (n: number) => `cookie ${f.n(n)}`,
       noResponse: "No response entered.",
+      invalidJsonBody: "The body is declared as JSON but does not parse, so it is shown as plain text below.",
       reveal: "reveal",
       revealLabel: "Reveal this value",
       revealTitle: "Masked because it looks like a credential — click to reveal",
+      hide: "hide",
+      hideLabel: "Hide this value",
+      hideTitle: "Click to hide this value again",
 
       jwt: {
         title: "Decoded JWT (signature not verified)",

@@ -522,6 +522,8 @@ export const de: Messages = {
         one: "1 Wert in der angehängten Anfrage sieht nach Zugangsdaten aus und wird entfernt, bevor dieser Link erstellt wird.",
         other: `${f.n(n)} Werte in der angehängten Anfrage sehen nach Zugangsdaten aus und werden entfernt, bevor dieser Link erstellt wird.`,
       }),
+    bodyNotRedacted:
+      "Ein angehängter Body kann noch Zugangsdaten enthalten: nur einfache Formulardaten werden geschwärzt, alles andere in einem Body wird nicht geprüft. Prüfen Sie ihn, bevor Sie den Link erstellen — was darin übrig bleibt, wird unverändert aufgenommen.",
     create: "Link erstellen",
     deriving: "Schlüssel wird abgeleitet und verschlüsselt …",
     uploading: (size) => `${size} werden hochgeladen …`,
@@ -637,6 +639,14 @@ export const de: Messages = {
     createFailed: {
       headline: "Der Share-Link konnte nicht erstellt werden.",
       serverStatus: (status) => `Der Server hat ${f.n(status)} zurückgegeben.`,
+      badRequest: "Der Server hat diesen Share nicht akzeptiert (400). Laden Sie die Seite neu und versuchen Sie es noch einmal.",
+      notFound: "Der Share-Dienst war unter seiner Adresse nicht erreichbar (404).",
+      notAllowed: "Der Server hat diese Art von Anfrage abgelehnt (405).",
+      tooManyRequests: "Es wurden in kurzer Zeit zu viele Shares erstellt (429). Warten Sie einen Moment und versuchen Sie es erneut.",
+      tooLarge: (limit) => `Das verschlüsselte Dokument überschreitet das Share-Limit von ${limit}. Teilen Sie ein kleineres Dokument.`,
+      serverError: (status) => `Der Server konnte den Share nicht speichern (${f.n(status)}). Versuchen Sie es gleich noch einmal.`,
+      network: "Die Netzwerkanfrage ist fehlgeschlagen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+      unexpected: "Beim Verschlüsseln oder Hochladen des Dokuments ist etwas schiefgelaufen. Versuchen Sie es erneut.",
     },
     fetchFailed: {
       headline: "Das geteilte Dokument konnte nicht geladen werden.",
@@ -726,7 +736,7 @@ export const de: Messages = {
           other: `${f.n(n)} Werte gefunden und vor dem Download geschwärzt.`,
         }),
       redactionCaveat:
-        "Die Schwärzung erfasst Header- und Cookie-Werte, die wie Zugangsdaten aussehen. Body und URL werden nicht durchsucht — prüfen Sie diese vor dem Teilen selbst.",
+        "Kopieren, Herunterladen und Teilen schwärzen, was als Zugangsdaten erkannt wird: Header- und Cookie-Werte, Benutzername und Passwort in einer URL sowie zugangsdatenähnliche Parameter in der URL und in Formular-Bodys. Ein JSON- oder Text-Body wird nicht verändert, und ein Geheimnis mit unbekanntem Namen oder Aufbau kann durchrutschen — prüfen Sie die Anfrage vor dem Teilen selbst.",
       saved: "Request gespeichert.",
       removed: "Request entfernt.",
       modeResponse: "Response",
@@ -755,9 +765,13 @@ export const de: Messages = {
       duplicateHeader: (n) => `${f.n(n)}× gesendet`,
       unnamedCookie: (n) => `Cookie ${f.n(n)}`,
       noResponse: "Keine Response eingetragen.",
+      invalidJsonBody: "Der Body ist als JSON angegeben, lässt sich aber nicht lesen — er wird unten als Text angezeigt.",
       reveal: "anzeigen",
       revealLabel: "Diesen Wert anzeigen",
       revealTitle: "Geschwärzt, weil es wie ein Zugangsdatum aussieht — zum Anzeigen klicken",
+      hide: "verbergen",
+      hideLabel: "Diesen Wert verbergen",
+      hideTitle: "Klicken, um diesen Wert wieder zu verbergen",
 
       jwt: {
         title: "Dekodiertes JWT (Signatur nicht geprüft)",

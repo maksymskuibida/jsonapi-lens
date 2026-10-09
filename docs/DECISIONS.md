@@ -607,3 +607,135 @@ link's *transit*, not its *vintage*.
   HTTP log pipeline, is Enterprise-only, and its filters drop whole records rather than redacting a
   field. The reachable mitigation for already-logged keys is to delete the shares they open, not to
   edit the log.
+
+---
+
+## D8 · Every share carries the attached request, redacted in one place; a masked value is absent from the DOM, not hidden
+
+**Date:** 2026-10-08 · **Settles:** what a share contains, and where a secret may exist in the page,
+for `src/share.ts`, `src/bundle.ts`, `src/render-request.ts` and `src/main.ts`
+
+### Why this is load-bearing
+
+PROCESS §4 says masking that can be walked around by exporting or sharing is not masking. Until QA6
+the app had two Share buttons that disagreed: Library → Share sealed the request (redacted) and
+stated the count, while the overview's own Share silently dropped it. And a "masked" header or
+cookie value was still in the document as text, hidden only by `display:none`.
+
+### The rules
+
+1. **Every share path seals the request, and `mintShareEnvelope` (`bundle.ts`) is the only place that
+   masks it.** Both dialogs are one function, `openShareModal`/`runShareModal`, and both state the
+   count (and the unredacted-body note) through one function, `inspectExchangeForShare`. A caller
+   that forgets to redact cannot leak, because redaction is below the callers, not in them. Adding a
+   share entry point means passing the exchange to `mintShareEnvelope`, never a second masker.
+2. **A secret-shaped value is not in the DOM until revealed.** The cell holds a mask, a button and a
+   *locator* (`data-x-secret="req.header.2"`: side, table, position). Reveal resolves the locator
+   against the live exchange and inserts the text; hide removes it. Nothing, including attributes
+   and `title`s, carries the value. This is the "pointer, not copy" rule of PROCESS §6 applied to
+   secrets, and `display:none` is not an implementation of it.
+3. **A library entry follows its open document's request** only when the document was saved or
+   opened *as* that entry: `libraryId`, carried on the stored current-document record so it survives
+   a reload (an optional field, no schema change). **There is no same-text fallback** — an opened
+   share link or a fresh paste can match a saved entry's text without being it, and writing its
+   request over the entry destroys the saved one. The read and the write are one transaction
+   (`setExchangeInLibrary`).
+4. **An assumed `https://` needs something that could be a host** (`canBeHost`, defined in
+   `docs/task-specs/QA6.md`). `host:digits` is a host and a port.
+
+### What this does not buy
+
+**A share is redacted as far as the detector can recognise, not completely.** `redactExchange` rewrites
+header and cookie values, the URL's userinfo, query and fragment, the value of `Location`, `Referer`,
+`Content-Location` and `Origin` (through the same URL redaction), `query`, a clean form body and the
+provenance field `origin`.
+
+**One canonical copy leaves the browser, and a final sweep runs over it.** The model holds a datum several ways
+(`url` and `query`, `raw` and `form`, `entries[].raw[].key` and the decoded tree); every extra representation is
+another place redaction can be wrong, and three leaks in a row had exactly that shape. Copy, Download and the sealed
+share therefore carry `canonicalExchange(redactExchange(x))` (`redactForExport`, `secrets.ts`): the URL as a string,
+headers and cookies as name/value, each body as `{contentType, raw}`, the response status; **no** `query`, `form`,
+`entries[].raw` or decoded trees. The reader re-derives them on load (`queryOf`, `render-request.ts`), as for a request
+typed into the form. **The envelope is unchanged** (`exchange` is an opaque optional field of the version-2 payload;
+old links still carrying `query`/`form` open as before; `export-compat-seal.test.ts`). The sweep then masks, in
+request and response header names and values, **request** cookie names, the method, the response status text, the request URL and a clean form's `raw`, every discrete
+token of unmistakable shape — a JWT (`eyJ…`), a Stripe key, an AWS key id, `Bearer`/`Basic`/`Token` followed by
+anything, a URL's `user:pw@` — and counts it. It deliberately does not use the generic hex/base64 length rule (etags,
+slugs). **A credential-shaped parameter name is masked** (`[REDACTED]=[REDACTED]`, one per wire pair), and so is a
+path name (`token.K`, `user[K][password]`) on a secret-named entry, because a name can carry text no detector can
+judge; on screen the name is masked too. The tests assert on `JSON.stringify` of the whole export, typed through the
+real form (`export-payload.test.ts`), never on the DOM or a parsed field.
+
+**A form body is recognised from what is stored, by one function.** `classifyBody` (`secrets.ts`) is called
+by the screen, the redaction and the share dialog's warning: content type `application/x-www-form-urlencoded`,
+empty or `text/plain`; text not starting with `{ [ " <` **whatever the content type**; no whitespace and no `;`;
+every parameter name, once percent-decoded, only letters, digits and `_ . - [ ]`. This exists because
+`BodyPart.form` is never populated by the app, and redacting only when it was is what shipped broken until the
+blind QA of 2026-10-09. **Redaction tests must use the shape the real UI produces** (`test/form-redaction.test.ts`
+drives the real request form).
+
+**A name that will not decode** (`user%5Bpa%ZZss%5D`) is judged on its raw text and makes a form body **not clean**, so it
+warns. **The count is the number of masked values**, wire pair by wire pair: `a[]=1&a[]=x&a[pass]=2` is three.
+
+**Fail closed.** The "this body may contain credentials" warning is suppressed only for a body that is a clean
+form, was redacted, and has no credential-like name or value left. **Every other non-empty body warns**, whatever
+its content type and whatever the sniffer says — JSON (benign included), text, multipart, an unclean form, a
+rewritten form with leftovers. Over-warning is safe; a silent share is not. A body that is not a clean form is
+never rewritten and never called safe. The count only counts values actually masked.
+
+**Secret parameter names** are matched in a query or a form body, **percent-decoded first** (as far as they decode: a
+browser submits `user[pass]` as `user%5Bpass%5D`; `%5b` and a double-encoded `%255B` too), per bracket/dot segment (`user[pass]`,
+`data.pwd`): the substrings `token secret signature sig apikey password passwd pwd authorization credential
+privatekey clientassertion codeverifier passphrase passcode`, and the **whole** names `pass auth session
+sessionid sid bearer cookie otp` (whole names only, so `passport`, `bypass`, `compass`, `author`, `authority`
+and `sessionization` stay readable). `key` and `pin` are deliberately not listed (a sort key, a map pin).
+**`code` is masked only when the same parameter set carries OAuth context** (`grant_type`, `redirect_uri`,
+`client_id`, `code_verifier`, **or a `state`** — the standard callback is `?code=…&state=…` with no `client_id`): OAuth's
+authorization code is a credential, but `code=US` and `code_style` are ordinary, and a name-only rule would mask both. The
+`state` rule's accepted cost: an address-like `code=US&state=CA` is masked too (a click to reveal, against a login code left
+in a `Referer`). A bare `code=4f2a9c` with no OAuth sibling is therefore not masked
+(listed below).
+
+**The userinfo rule.** The *whole* `user[:password]@` prefix is masked as one counted value
+(`https://[REDACTED]@host/…`), never just the password and never conditionally on the user name "looking like a
+credential". Stripe (`https://sk_live_…:@<api host>`) and GitHub (`https://<token>:x-oauth-basic@<git host>`) put
+the secret in the **user name**, and deciding by shape is the detector gap this rule exists to avoid. Cost: an
+ordinary user name is hidden too. (`sip:alice:secret@host` over-redacts to `sip:[REDACTED]@host`; harmless, not
+what this tool reviews.)
+
+**It does not catch** (and nothing in this entry or the UI may claim more than this):
+- a secret under a name the detector does not list, with a value of no recognisable shape — `X-Session: s3cr3t`
+  as a header, or `mykey=abc123` in a clean form or a query (the name is not on the list and the value is short and
+  shapeless). A clean form with such a pair is **not** warned about, because nothing credential-like is left in
+  it by any test this module has;
+- a bare `code=…` with no OAuth sibling;
+- **not yet swept** (deferred to QA7): **Set-Cookie** names, `body.contentType`, and string leaves inside the
+  provenance field `origin` (which only gets the older per-leaf redaction);
+- a credential of no recognisable shape in a **name**: only credential-shaped names and path names on secret-named
+  entries are masked;
+- any URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;
+- a token inside a URL **path** segment;
+- a credential inside a JSON, text or multipart body, or in a form body the strict rules reject (`;`-separated,
+  multi-line, a name with `{ " : =`, spaces in a value): these bodies are **flagged**, never parsed or rewritten, and
+  go into the share as they are.
+Dropping every flagged body was rejected: it would drop most response bodies. The decoded-JWT claims panel under a
+masked `Authorization` header is unchanged and shows claims, never the token.
+
+### On-screen masking
+
+The same rule applies to the request URL's userinfo and credential-like query parameters, to
+credential-like query/form-body parameters, and to the value of `Location`, `Referer`, `Content-Location`
+and `Origin`: only a mask (or the URL shown redacted, with no `href`) is in the DOM until revealed. The
+screen decides with the same functions the share uses (`classifyBody`, `maskUrlForDisplay`,
+`isSecretParam`), including for URL text that does not parse (`admin:pw@host/x`, `not a url?api_key=…`).
+A JSON/text/multipart request body is shown as text.
+
+### Rejected alternatives
+
+- **Keep omitting the request from the document's Share and say so** — rejected: the two buttons
+  would still disagree, and the request is most of what a recipient needs.
+- **Hide the value with CSS, as before** — rejected: not hidden from scripts or extensions.
+- **Reveal by re-rendering the band with the value** — rejected: it would lose scroll and fold state
+  that the in-place toggle keeps; the toggle edits one cell.
+- **Update every library entry with the same text** — rejected: overwrites a request the user attached
+  to a different saved copy.

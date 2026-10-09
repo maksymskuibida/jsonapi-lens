@@ -1185,7 +1185,9 @@ try {
         plainVisible: getComputedStyle(valueOf(plain)).display !== "none",
         plainWidth: Math.round(plainBox.width),
         plainText: (plain.querySelector(".xrow__value") || {}).innerText.trim(),
-        secretHidden: getComputedStyle(valueOf(secret)).display === "none",
+        // QA6: masked means *absent*, not display:none — the value must not be
+        // in the row's text at all until it is revealed.
+        secretHidden: !valueOf(secret) && !secret.textContent.includes("SECRETSESSIONVALUE123"),
         secretHasToggle: !!secret.querySelector(".xmask__toggle"),
         dots: (secret.querySelector(".xmask__dots") || { textContent: "" }).textContent.length,
         secretLength: "Bearer SECRETSESSIONVALUE123".length,
@@ -1217,6 +1219,127 @@ try {
       "the review shows an ordinary header value and masks a credential-shaped one",
       error.message,
     );
+  }
+
+  /*
+   * QA6: an edit to the request reaches the library entry the document *is* —
+   * and only that one.
+   *
+   * `main.ts` owns the link (`libraryId`, carried on the stored current-document
+   * record so it survives a reload), so no vitest test reaches it: the store
+   * tests pass an id in by hand, and dropping the wiring would leave them green.
+   * Four things are asserted, each of which a different wiring mistake breaks:
+   *   1. Save, then attach        -> the entry gains the request   (saveCurrent)
+   *   2. Reload, then edit        -> the entry follows             (the stored record's libraryId)
+   *   3. The same text pasted fresh (what an opened share link or a sample is),
+   *      then edit, then remove   -> the saved entry is NOT touched (no text fallback)
+   *   4. Open the entry from the library, then edit -> it follows  (openLibrary)
+   * Synthetic secrets only.
+   */
+  try {
+    const lib = await page.openSized(1200, 900);
+    const DOCTEXT = '{"data":{"type":"a","id":"qa6lib"}}';
+    const helpers = `
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const d = document;
+      const set = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); };
+      const attach = async (token) => {
+        for (let i = 0; i < 40 && !d.getElementById("edit-request"); i++) await wait(250);
+        d.getElementById("edit-request").click();
+        await wait(700);
+        set(d.querySelector(".xform__url-input"), "https://api.example.com/v2/x");
+        const headerList = [...d.querySelectorAll(".xform-rowlist")][1];
+        const existing = headerList.querySelector(".xform-row");
+        if (existing) { set(existing.querySelector(".xform__name"), "Authorization"); set(existing.querySelector(".xform__value"), "Bearer " + token); }
+        else {
+          headerList.querySelector(".btn--sm").click();
+          await wait(250);
+          const row = headerList.querySelector(".xform-row");
+          set(row.querySelector(".xform__name"), "Authorization");
+          set(row.querySelector(".xform__value"), "Bearer " + token);
+        }
+        d.querySelector(".modal .modal__actions .xform__save").click();
+        await wait(1200);
+      };
+      const library = () => new Promise((res) => {
+        const r = indexedDB.open("jsonapi-lens");
+        r.onsuccess = () => {
+          const db = r.result;
+          const g = db.transaction("library").objectStore("library").getAll();
+          g.onsuccess = () => { db.close(); res(g.result.filter((e) => e.label === "QA6 library doc").map((e) => JSON.stringify(e.exchange || null))); };
+        };
+      });
+    `;
+    await lib.navigate(`${ORIGIN}/?lang=en`);
+    await lib.evaluate(readFlow(DOCTEXT));
+    // 1. save first, then attach
+    const one = await lib.evaluate(`(async () => {
+      ${helpers}
+      await wait(500);
+      [...d.querySelectorAll(".overview__actions button")].find((b) => b.textContent.trim() === "Save").click();
+      await wait(500);
+      set(d.querySelector(".modal input"), "QA6 library doc");
+      [...d.querySelectorAll(".modal button")].find((b) => b.classList.contains("btn--primary")).click();
+      await wait(900);
+      await attach("FAKE-QA6-A");
+      return JSON.stringify(await library());
+    })()`);
+    // 2. reload, resume, edit
+    await lib.navigate(`${ORIGIN}/?lang=en`);
+    const two = await lib.evaluate(`(async () => {
+      ${helpers}
+      for (let i = 0; i < 40 && !d.querySelector("#resume button"); i++) await wait(250);
+      d.querySelector("#resume button").click();
+      await wait(1500);
+      await attach("FAKE-QA6-B");
+      return JSON.stringify(await library());
+    })()`);
+    // 3. the same text pasted fresh, then edited and removed
+    await lib.navigate(`${ORIGIN}/?lang=en`);
+    await lib.evaluate(readFlow(DOCTEXT));
+    const three = await lib.evaluate(`(async () => {
+      ${helpers}
+      await wait(500);
+      await attach("FAKE-QA6-C");
+      const afterEdit = JSON.stringify(await library());
+      d.getElementById("edit-request").click();
+      await wait(900);
+      [...d.querySelectorAll(".modal__actions button")].find((b) => /remove/i.test(b.textContent)).click();
+      await wait(700);
+      [...[...d.querySelectorAll(".modal__panel")].pop().querySelectorAll(".modal__actions .btn--danger")][0].click();
+      await wait(1500);
+      return JSON.stringify({ afterEdit, afterRemove: JSON.stringify(await library()) });
+    })()`);
+    // 4. open the entry from the library, then edit
+    await lib.navigate(`${ORIGIN}/?lang=en`);
+    const four = await lib.evaluate(`(async () => {
+      ${helpers}
+      for (let i = 0; i < 40 && !d.getElementById("open-library"); i++) await wait(250);
+      await wait(800);
+      d.getElementById("open-library").click();
+      await wait(800);
+      [...d.querySelectorAll(".modal .library__open")].find((b) => b.title.includes("QA6 library doc"))?.click();
+      await wait(1500);
+      if (!d.getElementById("edit-request")) return JSON.stringify({ reason: "entry did not open" });
+      await attach("FAKE-QA6-D");
+      return JSON.stringify(await library());
+    })()`);
+    await lib.dispose();
+
+    const has = (json, token) => json.includes(token);
+    const r1 = JSON.parse(one), r2 = JSON.parse(two), r3 = JSON.parse(three), r4 = JSON.parse(four);
+    const checks = {
+      "save then attach reaches the entry": r1.length === 1 && has(r1[0], "FAKE-QA6-A"),
+      "the entry follows after a reload (libraryId survived)": r2.length === 1 && has(r2[0], "FAKE-QA6-B") && !has(r2[0], "FAKE-QA6-A"),
+      "a fresh paste of the same text does not overwrite it": has(r3.afterEdit, "FAKE-QA6-B") && !has(r3.afterEdit, "FAKE-QA6-C"),
+      "removing the request on that copy does not delete the entry's": has(r3.afterRemove, "FAKE-QA6-B"),
+      "an entry opened from the library follows": Array.isArray(r4) && r4.length === 1 && has(r4[0], "FAKE-QA6-D"),
+    };
+    for (const [name, ok] of Object.entries(checks)) {
+      report(ok, "-", `library follows the request: ${name}`, ok ? null : JSON.stringify({ r1, r2, r3, r4 }).slice(0, 400));
+    }
+  } catch (error) {
+    report(false, "err", "library follows the request", error.message);
   }
 
   /*

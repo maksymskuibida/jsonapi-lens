@@ -4,6 +4,7 @@ import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
 import { mintShareEnvelope } from "./bundle.js";
 import {
+  MAX_BUNDLE_BYTES,
   generateSecret,
   open as openSealed,
   ShareError,
@@ -11,7 +12,7 @@ import {
 } from "./crypto.js";
 import type { BundleEntry, BundlePayload, SharePayload } from "./crypto.js";
 import type { Exchange } from "./exchange.js";
-import { redactExchange } from "./secrets.js";
+import { redactForExport } from "./secrets.js";
 import { shareUrl } from "./navigation.js";
 import { openModal, toast } from "./ui.js";
 
@@ -54,23 +55,45 @@ interface CreatedShare {
   expiresAt: number | null;
 }
 
-async function upload(blob: Uint8Array, lifetime: LifetimeKey): Promise<CreatedShare> {
-  const response = await fetch(`/api/shares?lifetime=${encodeURIComponent(lifetime)}`, {
-    method: "POST",
-    headers: { "content-type": "application/octet-stream" },
-    body: blob as BodyInit,
-  });
+/**
+ * A failed upload, as catalogue copy chosen **by HTTP status**. The Worker's JSON
+ * `error` is English and written for developers — it is an API — so it is never
+ * shown: a German or Ukrainian reader got an English sentence in the middle of a
+ * translated dialog. There is no upload timeout in this module, so none is mapped.
+ */
+export function uploadFailure(status: number): ShareError {
+  const m = t().shareErrors.createFailed;
+  const hint =
+    status === 400
+      ? m.badRequest
+      : status === 404
+        ? m.notFound
+        : status === 405
+          ? m.notAllowed
+          : status === 413
+            ? m.tooLarge(formatBytes(MAX_BUNDLE_BYTES))
+            : status === 429
+              ? m.tooManyRequests
+              : status >= 500
+              ? m.serverError(status)
+              : m.serverStatus(status);
+  return new ShareError(m.headline, hint);
+}
 
-  if (!response.ok) {
-    const detail = await response
-      .json()
-      .then((body: { error?: string }) => body.error)
-      .catch(() => null);
-    throw new ShareError(
-      t().shareErrors.createFailed.headline,
-      detail ?? t().shareErrors.createFailed.serverStatus(response.status),
-    );
+async function upload(blob: Uint8Array, lifetime: LifetimeKey): Promise<CreatedShare> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/shares?lifetime=${encodeURIComponent(lifetime)}`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: blob as BodyInit,
+    });
+  } catch {
+    // The browser's own message ("Failed to fetch", "NetworkError…") is English.
+    throw new ShareError(t().shareErrors.createFailed.headline, t().shareErrors.createFailed.network);
   }
+
+  if (!response.ok) throw uploadFailure(response.status);
 
   return (await response.json()) as CreatedShare;
 }
@@ -149,6 +172,12 @@ function runShareModal(options: {
    * that said nothing was the one silent mask left in the app.
    */
   redacting: number;
+  /**
+   * Whether an attached body is not redacted but looks as if it may carry a
+   * credential (`redactExchange`'s `bodyMayContainSecret`). Said before the link
+   * exists for the same reason the count is.
+   */
+  bodyUnredacted: boolean;
   mint: (secret: string) => Promise<Uint8Array<ArrayBuffer>>;
 }): void {
   let lifetime = readLifetime();
@@ -198,6 +227,10 @@ function runShareModal(options: {
     body.append(
       el("p", { class: "share__note share__note--redacting" }, t().share.redacting(options.redacting)),
     );
+  }
+
+  if (options.bodyUnredacted) {
+    body.append(el("p", { class: "share__note share__note--body" }, t().share.bodyNotRedacted));
   }
 
   body.append(status, result);
@@ -264,7 +297,7 @@ function runShareModal(options: {
       const shareError =
         error instanceof ShareError
           ? error
-          : new ShareError(t().shareErrors.createFailed.headline, String(error));
+          : new ShareError(t().shareErrors.createFailed.headline, t().shareErrors.createFailed.unexpected);
       result.replaceChildren(
         el(
           "div",
@@ -280,32 +313,50 @@ function runShareModal(options: {
   });
 }
 
+/** Bytes of the JSON a document contributes to a share: its text, plus its (redacted) request when it has one. */
+function sealedJsonBytes(entry: BundleEntry): number {
+  const encoder = new TextEncoder();
+  const text = encoder.encode(entry.text).byteLength;
+  if (!entry.exchange || Object.keys(entry.exchange).length === 0) return text;
+  return text + encoder.encode(JSON.stringify(redactForExport(entry.exchange).exchange)).byteLength;
+}
+
 /**
- * How many values redaction will mask across every entry about to be sealed.
+ * What redaction will do to the entries about to be sealed: how many values it
+ * masks, and whether any body is left as it is despite looking like it may carry
+ * a credential.
  *
  * This runs `redactExchange` a second time — `mintShareEnvelope` does the
- * masking itself and drops the count — and that duplication is deliberate.
+ * masking itself and drops the result — and that duplication is deliberate.
  * Redaction stays inside `mintShareEnvelope` because it is the one function
  * every share path funnels through, so a caller added later cannot forget it;
  * moving it out here to reuse the count would trade that guarantee for one
- * avoided pass over a handful of headers.
+ * avoided pass over a handful of headers. Both share dialogs call this one
+ * function, which is what keeps "the document's Share" and "Library → Share"
+ * saying the same thing about the same exchange.
  */
-function countRedactions(documents: BundleEntry[]): number {
-  // No emptiness guard of its own: `redactExchange({})` tallies 0, and a second
+export function inspectExchangeForShare(documents: BundleEntry[]): { redacting: number; bodyUnredacted: boolean } {
+  // No emptiness guard of its own: `redactForExport({})` tallies 0, and a second
   // copy of `redactEntryExchange`'s check (bundle.ts) is exactly the kind of
   // duplication that drifts. That one exists to preserve object identity for an
-  // entry with nothing to mask; this only needs the number.
-  return documents.reduce((sum, entry) => sum + redactExchange(entry.exchange ?? {}).count, 0);
+  // entry with nothing to mask; this only needs the figures.
+  let redacting = 0;
+  let bodyUnredacted = false;
+  for (const entry of documents) {
+    const result = redactForExport(entry.exchange ?? {});
+    redacting += result.count;
+    if (result.bodyMayContainSecret) bodyUnredacted = true;
+  }
+  return { redacting, bodyUnredacted };
 }
 
 /**
  * Share the currently open document. Unchanged in shape since before
  * bundles existed: routing through `mintShareEnvelope` with a one-document
  * list still calls `seal` underneath (see that function), so this produces
- * the exact version-2 blob it always has. `exchange` is optional and new —
- * T2 wires a real value through once it lands; every existing caller that
- * passes only `text`/`label` keeps compiling and keeps sealing the same
- * bytes.
+ * the exact version-2 blob it always has. `exchange` is optional: both the
+ * document's own Share (`main.ts#shareDocument`) and Library → Share pass the
+ * attached request, and a call without one seals the same bytes as before.
  */
 export function openShareModal(text: string, label: string, exchange?: Exchange): void {
   if (!shareSupported()) {
@@ -313,11 +364,13 @@ export function openShareModal(text: string, label: string, exchange?: Exchange)
     return;
   }
 
-  const originalBytes = new TextEncoder().encode(text).byteLength;
+  // "from N of JSON" must describe what is sealed: the document *and* the request
+  // that rides with it (QA6 gap F).
+  const originalBytes = sealedJsonBytes({ label, text, exchange });
   runShareModal({
     subtitle: `${label} · ${formatBytes(originalBytes)}`,
     originalBytes,
-    redacting: countRedactions([{ label, text, exchange }]),
+    ...inspectExchangeForShare([{ label, text, exchange }]),
     mint: (secret) => mintShareEnvelope([{ label, text, exchange }], secret),
   });
 }
@@ -337,14 +390,11 @@ export function openBundleShareModal(documents: BundleEntry[]): void {
     return;
   }
 
-  const originalBytes = documents.reduce(
-    (sum, doc) => sum + new TextEncoder().encode(doc.text).byteLength,
-    0,
-  );
+  const originalBytes = documents.reduce((sum, doc) => sum + sealedJsonBytes(doc), 0);
   runShareModal({
     subtitle: t().bundleUi.shareSubtitle(documents.length, formatBytes(originalBytes)),
     originalBytes,
-    redacting: countRedactions(documents),
+    ...inspectExchangeForShare(documents),
     mint: (secret) => mintShareEnvelope(documents, secret),
   });
 }

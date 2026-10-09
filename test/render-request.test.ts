@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   effectiveMode,
   hasExchangeContent,
   parseReqResourceMarker,
+  canBeHost,
   parseRequestUrl,
+  resolveSecret,
+  secretRef,
+  toggleMaskedValue,
   readBodyLens,
   renderBodyPart,
   renderExchangeBand,
@@ -11,13 +15,15 @@ import {
   requestBodyRoot,
   responseReferenceTime,
 } from "../src/render-request.js";
+import { t } from "../src/i18n/index.js";
+import { typeIntoForm, resetModalRoot } from "./helpers/type-into-form.js";
 import { requestResourceDomId, requestNodeDomId } from "../src/ident.js";
 import { buildIndex } from "../src/parse.js";
 import { groupsHtml } from "../src/render-document.js";
 import { buildJsonIndex } from "../src/json-index.js";
 import { buildAnnotations, renderJsonGroups } from "../src/render-json.js";
 import { headerSet } from "../src/headers.js";
-import type { Exchange } from "../src/exchange.js";
+import { decodeParams } from "../src/params.js";import type { Exchange } from "../src/exchange.js";
 import type { JsonObject } from "../src/types.js";
 
 const doc = (value: unknown): JsonObject => value as JsonObject;
@@ -201,15 +207,16 @@ describe("parseRequestUrl", () => {
     expect(parseRequestUrl("[::1]://x")?.url.origin).toBe("https://[::1]");
   });
 
-  it("leaves `host:port` alone, which the URL parser reads as a scheme", () => {
-    // Not something this fix changes, and worth pinning rather than leaving to
-    // be rediscovered: `api.example.com` is a syntactically valid scheme, so
-    // `new URL` accepts `api.example.com:8080/x` on the first attempt and the
-    // assumed-scheme path — and therefore the malformed-scheme check — is never
-    // reached. The result is an opaque URL whose origin is "null".
+  it("reads `host:port` as a host and a port (changed in QA6; it used to be an opaque `api.example.com:` URL)", () => {
+    // `api.example.com` is a syntactically valid scheme, so `new URL` accepted
+    // `api.example.com:8080/x` on the first attempt — origin "null", nothing to
+    // link — and this test pinned that as "not something this fix changes".
+    // QA6's boundary pass listed `localhost:8080` as a genuine scheme-less host,
+    // which is what `claimsScheme`'s own comment says it should be: digits after
+    // the colon are a port. Anything else after a colon is still a scheme.
     const parsed = parseRequestUrl("api.example.com:8080/x");
-    expect(parsed?.assumedScheme).toBe(false);
-    expect(parsed?.url.protocol).toBe("api.example.com:");
+    expect(parsed?.assumedScheme).toBe(true);
+    expect(parsed?.url.href).toBe("https://api.example.com:8080/x");
   });
 });
 
@@ -411,3 +418,486 @@ describe("D1 — a request-body document and the response share every identity w
 // leading docblock — writing it out in prose here previously made this whole
 // file silently run without a DOM and fail 19 tests with "document is not
 // defined". Say what it did wrong, never how, if this comment is edited again.
+
+describe("parseRequestUrl: only text that could be a host gets an assumed scheme (QA6)", () => {
+  const linked: Array<[string, string]> = [
+    ["api.example.com/v2/x", "https://api.example.com/v2/x"],
+    ["localhost:8080", "https://localhost:8080/"],
+    ["localhost:8080/a?b=1", "https://localhost:8080/a?b=1"],
+    ["intranet", "https://intranet/"],
+    ["[::1]:8080/x", "https://[::1]:8080/x"],
+    ["[2001:db8::1]/x", "https://[2001:db8::1]/x"],
+    ["münchen.de/x", "https://xn--mnchen-3ya.de/x"],
+    ["api.example.com./x", "https://api.example.com./x"],
+    ["user@api.example.com/x", "https://user@api.example.com/x"],
+    ["my_host.example.com", "https://my_host.example.com/"],
+    ["192.0.2.1:3000", "https://192.0.2.1:3000/"],
+  ];
+  for (const [input, href] of linked) {
+    it(`links ${JSON.stringify(input)} under an assumed https`, () => {
+      const parsed = parseRequestUrl(input);
+      expect(parsed?.assumedScheme).toBe(true);
+      expect(parsed?.url.href).toBe(href);
+    });
+  }
+
+  const text = [
+    "not a url",
+    "a b.com/x",
+    ":8080/x",
+    "user@",
+    "a..b",
+    ".example.com",
+    "%20.com",
+    "ex ample",
+    "[::1",
+    "[nothex]/x",
+  ];
+  for (const input of text) {
+    it(`keeps ${JSON.stringify(input)} as text`, () => {
+      expect(parseRequestUrl(input)).toBeNull();
+    });
+  }
+
+  it("still refuses a claimed-but-invalid scheme and a bare path, and still accepts a given scheme", () => {
+    expect(parseRequestUrl("ht!tp://example.com")).toBeNull();
+    expect(parseRequestUrl("/just/a/path")).toBeNull();
+    expect(parseRequestUrl("https://a.example/x")?.assumedScheme).toBe(false);
+  });
+
+  it("a port above 65535 is the URL parser's to refuse", () => {
+    expect(parseRequestUrl("host:99999/x")).toBeNull();
+  });
+
+  it("host:notaport is a scheme, not a host — read as given, never an assumed https, never a link", () => {
+    // Digits after the colon make a port; anything else is something trying to
+    // be a scheme (`claimsScheme`'s rule), so it is not given an https it did
+    // not claim.
+    for (const input of ["host:notaport", "api.example.com:80:80"]) {
+      expect(parseRequestUrl(input)?.assumedScheme).toBe(false);
+      const band = renderExchangeBand({ exchange: { request: { url: input } }, mode: "request", currentDocument: null });
+      expect(band!.querySelector(".xurl a")).toBeNull();
+    }
+  });
+
+  it("renders text with the unparseable note and no link, and never the assumed-scheme note", () => {
+    const band = renderExchangeBand({ exchange: { request: { url: "not a url" } }, mode: "request", currentDocument: null });
+    expect(band!.querySelector(".xurl a")).toBeNull();
+    expect(band!.textContent).toContain("not a url");
+    expect(band!.textContent).toContain(t().request.review.urlUnparseable);
+    expect(band!.textContent).not.toContain("assumed");
+  });
+
+  it("the new host:port branch can only ever produce an https link; a given scheme is never linked (S6)", () => {
+    const hrefOf = (url: string) => {
+      const band = renderExchangeBand({ exchange: { request: { url } }, mode: "request", currentDocument: null });
+      return band!.querySelector<HTMLAnchorElement>(".xurl a")?.getAttribute("href") ?? null;
+    };
+    for (const input of ["javascript:1", "JAVASCRIPT:1", "data:123", "tel:555"]) {
+      const href = hrefOf(input);
+      expect(href, input).not.toBeNull();
+      expect(href!.startsWith("https://"), input).toBe(true);
+    }
+    expect(hrefOf("javascript:alert(1)")).toBeNull();
+    expect(hrefOf("data:text/html,<script>alert(1)</script>")).toBeNull();
+    // `tel:5551234` is a port above 65535, so it is text; `tel:555` is the linked case.
+    expect(parseRequestUrl("tel:5551234")).toBeNull();
+    expect(parseRequestUrl("tel:555")?.url.href).toBe("https://tel:555/");
+  });
+
+  it("canBeHost is a shape check on the authority only", () => {
+    expect(canBeHost("example.com/a b c")).toBe(true);
+    expect(canBeHost("example.com?q=a b")).toBe(true);
+    expect(canBeHost("")).toBe(false);
+  });
+});
+
+describe("masked values are not in the DOM until revealed (QA6)", () => {
+  const TOKEN = "qa-fake-bearer-9f3a1c-not-real";
+  const COOKIE = "qa-fake-session-7b2e-not-real";
+  const SETCOOKIE = "qa-fake-setcookie-4d8a-not-real";
+  const exchange: Exchange = {
+    request: {
+      headers: headerSet([
+        { name: "Authorization", value: `Bearer ${TOKEN}` },
+        { name: "Accept", value: "application/vnd.api+json" },
+      ]),
+      cookies: { entries: [{ name: "session", value: COOKIE }] },
+    },
+    response: { status: 200, cookies: { entries: [{ name: "sid", value: SETCOOKIE }] } },
+  };
+
+  const mount = (ex: Exchange = exchange) => {
+    const band = renderExchangeBand({ exchange: ex, mode: "both", currentDocument: null })!;
+    document.body.replaceChildren(band);
+    return band;
+  };
+  const toggles = () => Array.from(document.querySelectorAll<HTMLElement>(".xmask__toggle"));
+  const everywhere = () => {
+    // text, markup, and every attribute of every element: "the DOM" is all three.
+    const attrs = Array.from(document.querySelectorAll("*")).flatMap((n) =>
+      Array.from(n.attributes).map((a) => a.value),
+    );
+    return [document.body.textContent, new XMLSerializer().serializeToString(document.body), ...attrs].join("\n");
+  };
+
+  it("renders only the mask for each secret, and the ordinary header in full", () => {
+    mount();
+    const all = everywhere();
+    for (const secret of [TOKEN, COOKIE, SETCOOKIE]) expect(all).not.toContain(secret);
+    expect(document.body.textContent).toContain("application/vnd.api+json");
+    expect(toggles()).toHaveLength(3);
+    expect(document.querySelectorAll(".xmask__dots")).toHaveLength(3);
+    expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(0);
+  });
+
+  it("reveals one value, and only that one, from the exchange", () => {
+    mount();
+    toggleMaskedValue(toggles()[0]!, exchange);
+    expect(document.body.textContent).toContain(TOKEN);
+    expect(document.body.textContent).not.toContain(COOKIE);
+    expect(document.body.textContent).not.toContain(SETCOOKIE);
+    expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(1);
+  });
+
+  it("hides again by removing the text from the DOM, and can reveal a second time", () => {
+    mount();
+    const button = toggles()[0]!;
+    toggleMaskedValue(button, exchange);
+    toggleMaskedValue(button, exchange);
+    expect(everywhere()).not.toContain(TOKEN);
+    expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(0);
+    toggleMaskedValue(button, exchange);
+    expect(document.body.textContent).toContain(TOKEN);
+    expect(document.body.textContent!.split(TOKEN)).toHaveLength(2); // exactly one copy
+  });
+
+  it("keeps the toggle a real button with a translated name that follows its state", () => {
+    mount();
+    const button = toggles()[0]!;
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.getAttribute("aria-label")).toBe(t().request.review.revealLabel);
+    expect(button.hasAttribute("aria-pressed")).toBe(false); // one pattern: the name flips (S3)
+    toggleMaskedValue(button, exchange);
+    expect(button.getAttribute("aria-label")).toBe(t().request.review.hideLabel);
+    expect(button.textContent).toBe(t().request.review.hide);
+    expect(button.hasAttribute("aria-pressed")).toBe(false);
+    expect(t().request.review.hideLabel).not.toBe(t().request.review.revealLabel);
+  });
+
+  it("puts a hostile value in the DOM as text, never as markup", () => {
+    const hostile = '"><img src=x onerror=alert(1)><script>alert(2)</script>';
+    const ex: Exchange = { request: { headers: headerSet([{ name: "Authorization", value: hostile }]) } };
+    mount(ex);
+    expect(everywhere()).not.toContain("onerror");
+    toggleMaskedValue(toggles()[0]!, ex);
+    expect(document.querySelector("img")).toBeNull();
+    expect(document.querySelector("script")).toBeNull();
+    expect(document.querySelector(".xmask__value")!.textContent).toBe(hostile);
+  });
+
+  it("shows nothing when the exchange no longer has the entry the locator points at", () => {
+    mount();
+    toggleMaskedValue(toggles()[0]!, { request: { headers: headerSet([]) } });
+    expect(document.querySelectorAll(".xmask[data-x-secret] .xmask__value")).toHaveLength(0);
+    expect(toggles()[0]!.getAttribute("aria-label")).toBe(t().request.review.revealLabel);
+  });
+
+  it("a rebuilt band is masked again, and a duplicate header is located by position", () => {
+    const dup: Exchange = {
+      request: {
+        headers: headerSet([
+          { name: "Authorization", value: "Bearer first-fake-not-real" },
+          { name: "Authorization", value: "Bearer second-fake-not-real" },
+        ]),
+      },
+    };
+    mount(dup);
+    toggleMaskedValue(toggles()[1]!, dup);
+    expect(document.body.textContent).toContain("second-fake-not-real");
+    expect(document.body.textContent).not.toContain("first-fake-not-real");
+    mount(dup);
+    expect(everywhere()).not.toContain("second-fake-not-real");
+  });
+
+  it("resolveSecret accepts only its own locator format", () => {
+    expect(resolveSecret(exchange, secretRef("req", "header", 0))).toBe(`Bearer ${TOKEN}`);
+    expect(resolveSecret(exchange, secretRef("req", "cookie", 0))).toBe(COOKIE);
+    expect(resolveSecret(exchange, secretRef("res", "cookie", 0))).toBe(SETCOOKIE);
+    for (const bad of ["", "req.header.9", "req.header.-1", "req.header.0.x", "__proto__", "req.body.0", "res.header.0"]) {
+      expect(resolveSecret(exchange, bad)).toBeNull();
+    }
+  });
+});
+
+describe("an invalid-JSON request body reads as text, in every language (QA6)", () => {
+  // `DocumentError.hint` is `string | RichPart[]`; interpolating it printed
+  // `[object Object]`. The locale is memoised on first use, so each language gets
+  // a fresh module graph with its choice already stored.
+  for (const lang of ["en", "de", "uk"] as const) {
+    it(`${lang}: headline and hint are readable, nothing is [object Object], and the raw text stays`, async () => {
+      vi.resetModules();
+      localStorage.setItem("jsonapi-lens:locale", lang);
+      try {
+        const { renderBodyPart: render } = await import("../src/render-request.js");
+        const i18n = await import("../src/i18n/index.js");
+        expect(i18n.locale()).toBe(lang);
+        const hostile = '{"a": <img src=x onerror=alert(1)>';
+        const el = render({ raw: hostile, contentType: "application/json" });
+        const note = el?.querySelector(".xrow__note--conflict");
+        expect(note).not.toBeNull();
+        expect(note!.textContent).not.toContain("[object Object]");
+        expect(note!.textContent!.trim().length).toBeGreaterThan(15);
+        // The JS engine's own English message must not reach any language (S9).
+        expect(note!.textContent).not.toMatch(/Expected|Unexpected|position \d|property name|JSON\.parse/);
+        // the note is catalogue text plus text nodes; the payload is only in the <pre>
+        expect(el!.querySelector("img")).toBeNull();
+        expect(el!.querySelector("pre")!.textContent).toBe(hostile);
+      } finally {
+        localStorage.setItem("jsonapi-lens:locale", "en");
+        vi.resetModules();
+      }
+    });
+  }
+});
+
+describe("the band's redaction caveat says what redaction does, and no more (QA6)", () => {
+  it("redactExchange does everything the caveat claims, and does not rewrite a JSON body", async () => {
+    const { redactExchange } = await import("../src/secrets.js");
+    const form = "a=1&client_secret=qa-fake-form-not-real";
+    const json = '{"password":"qa-fake-json-not-real"}';
+    const { exchange } = redactExchange({
+      request: {
+        url: "https://user:qa-fake-pw-not-real@api.example.com/x?api_key=qa-fake-key-0123456789-not-real",
+        headers: headerSet([{ name: "Authorization", value: "Bearer qa-fake-not-real" }]),
+        cookies: { entries: [{ name: "s", value: "qa-fake-cookie-not-real" }] },
+        body: { raw: form, contentType: "application/x-www-form-urlencoded" },
+      },
+      response: { body: { raw: json, contentType: "application/json" } },
+    });
+    const out = JSON.stringify(exchange);
+    for (const fake of ["qa-fake-not-real", "qa-fake-cookie", "qa-fake-pw", "qa-fake-key", "qa-fake-form"]) {
+      expect(out, fake).not.toContain(fake);
+    }
+    expect(exchange.response?.body?.raw).toBe(json); // "not rewritten", as the caveat says
+  });
+
+  const words = {
+    en: ["user name", "form", "JSON", "review"],
+    de: ["Benutzername", "Formular", "JSON", "prüfen"],
+    uk: ["імʼя користувача", "форм", "JSON", "перегляньте"],
+  } as const;
+  for (const lang of ["en", "de", "uk"] as const) {
+    it(`${lang}: the caveat names userinfo, form bodies and the unrewritten JSON body, and no longer says the URL is not scanned`, async () => {
+      vi.resetModules();
+      localStorage.setItem("jsonapi-lens:locale", lang);
+      try {
+        const { t: tt } = await import("../src/i18n/index.js");
+        const text = tt().request.band.redactionCaveat;
+        for (const word of words[lang]) expect(text, word).toContain(word);
+        expect(text).not.toMatch(/does not scan the body or the URL|Body und URL werden nicht|не перевіряються/);
+      } finally {
+        localStorage.setItem("jsonapi-lens:locale", "en");
+        vi.resetModules();
+      }
+    });
+  }
+});
+
+describe("URL and parameter credentials are masked on screen until revealed (QA6 gap A)", () => {
+  const PW = "qa-fake-urlpw-0004-not-real";
+  const KEY = "qa-fake-urlkey-0003-not-real";
+  const FORM = "qa-fake-formsecret-0005-not-real";
+  const exchange: Exchange = {
+    request: {
+      method: "POST",
+      url: `https://admin:${PW}@api.example.com/v2/x?api_key=${KEY}&page=2`,
+      query: decodeParams(`api_key=${KEY}&page=2`),
+      body: { raw: `a=1&client_secret=${FORM}`, contentType: "application/x-www-form-urlencoded" },
+    },
+  };
+  const mount = () => {
+    const band = renderExchangeBand({ exchange, mode: "request", currentDocument: null })!;
+    document.body.replaceChildren(band);
+    return band;
+  };
+  const everything = () =>
+    [
+      document.body.textContent,
+      new XMLSerializer().serializeToString(document.body),
+      ...Array.from(document.querySelectorAll("*")).flatMap((n) => Array.from(n.attributes).map((a) => a.value)),
+    ].join("\n");
+
+  it("keeps the password, the key and the form secret out of text, markup, hrefs and tooltips", () => {
+    mount();
+    const all = everything();
+    for (const secret of [PW, KEY, FORM]) expect(all, secret).not.toContain(secret);
+    // what *is* readable: the host, the ordinary parameter, the parameter names
+    expect(all).toContain("api.example.com");
+    expect(all).toContain("page");
+    expect(all).toContain("client_secret");
+    expect(document.querySelector(".xurl a")).toBeNull();
+    expect(document.querySelector(".xband__url")!.textContent).toContain("[REDACTED]@api.example.com");
+  });
+
+  it("reveals the URL as a real link with its full href, and hides it again", () => {
+    mount();
+    const urlToggle = document.querySelector<HTMLElement>('.xmask[data-x-secret="req.url"] .xmask__toggle')!;
+    toggleMaskedValue(urlToggle, exchange);
+    const link = document.querySelector<HTMLAnchorElement>(".xurl a");
+    expect(link?.getAttribute("href")).toContain(`${PW}@api.example.com`);
+    toggleMaskedValue(urlToggle, exchange);
+    expect(document.querySelector(".xurl a")).toBeNull();
+    expect(document.querySelector(".xurl")!.textContent).not.toContain(PW);
+  });
+
+  it("reveals one query parameter, and one form-body parameter, from the exchange", () => {
+    mount();
+    const toggle = (ref: string) =>
+      document.querySelector<HTMLElement>(`.xmask[data-x-secret="${ref}"] .xmask__toggle`)!;
+    toggleMaskedValue(toggle("req.query.0"), exchange);
+    expect(document.body.textContent).toContain(KEY);
+    expect(document.body.textContent).not.toContain(FORM);
+    toggleMaskedValue(toggle("req.body.1"), exchange);
+    expect(document.body.textContent).toContain(FORM);
+    toggleMaskedValue(toggle("req.query.0"), exchange);
+    expect(document.body.textContent).not.toContain(KEY);
+  });
+
+  it("a URL with nothing to hide is a plain link, with no reveal control", () => {
+    const band = renderExchangeBand({
+      exchange: { request: { url: "https://api.example.com/v2/x?page=2" } },
+      mode: "request",
+      currentDocument: null,
+    })!;
+    document.body.replaceChildren(band);
+    expect(document.querySelector<HTMLAnchorElement>(".xurl a")?.getAttribute("href")).toBe("https://api.example.com/v2/x?page=2");
+    expect(document.querySelector('[data-x-secret="req.url"]')).toBeNull();
+  });
+
+  it("shows a scheme-only URL as typed, never as `null` plus the rest, and never as a link", () => {
+    for (const url of ["host:notaport", "javascript:alert(1)"]) {
+      const band = renderExchangeBand({ exchange: { request: { url } }, mode: "request", currentDocument: null })!;
+      document.body.replaceChildren(band);
+      const line = document.querySelector(".xurl")!;
+      expect(line.textContent, url).toBe(url);
+      expect(line.querySelector("a"), url).toBeNull();
+    }
+  });
+});
+
+describe("the invalid-JSON body note always has a hint, with no engine text (QA6 finding 4)", () => {
+  for (const lang of ["en", "de", "uk"] as const) {
+    it(`${lang}: a body of {"a": } shows a translated headline and a translated hint`, async () => {
+      vi.resetModules();
+      localStorage.setItem("jsonapi-lens:locale", lang);
+      try {
+        const { renderBodyPart: render } = await import("../src/render-request.js");
+        const { t: tt } = await import("../src/i18n/index.js");
+        const el = render({ raw: '{"a": }', contentType: "application/json" });
+        const note = el!.querySelector(".xrow__note--conflict")!;
+        expect(note.querySelector(".xrow__note-hint")!.textContent).toBe(tt().request.review.invalidJsonBody);
+        expect(note.textContent).not.toMatch(/Expected|Unexpected|position \d/);
+      } finally {
+        localStorage.setItem("jsonapi-lens:locale", "en");
+        vi.resetModules();
+      }
+    });
+  }
+});
+
+describe("the screen masks what the share masks, for every shape the real form produces (QA6 review B4, S10)", () => {
+  const dom = () => {
+    const attrs = Array.from(document.querySelectorAll("*")).flatMap((n) => Array.from(n.attributes).map((a) => a.value));
+    return [document.body.textContent, new XMLSerializer().serializeToString(document.body), ...attrs].join("\n");
+  };
+  beforeEach(resetModalRoot);
+  const show = (exchange: Exchange) => {
+    const band = renderExchangeBand({ exchange, mode: "request", currentDocument: null })!;
+    document.body.replaceChildren(band);
+    return band;
+  };
+  const press = (exchange: Exchange, selector = ".xmask__toggle") => {
+    for (const b of document.querySelectorAll<HTMLElement>(selector)) toggleMaskedValue(b, exchange);
+  };
+
+  for (const contentType of ["application/x-www-form-urlencoded", "", "text/plain"]) {
+    it(`a form body with content type ${JSON.stringify(contentType)}: the password is not on screen until revealed`, () => {
+      const exchange = typeIntoForm({ contentType, body: "username=alice&password=qa-fake-screen-pw-not-real" });
+      show(exchange);
+      expect(dom()).not.toContain("qa-fake-screen-pw");
+      expect(dom()).toContain("alice");
+      expect(document.querySelectorAll(".xrow--param").length).toBe(2);
+      press(exchange);
+      expect(document.body.textContent).toContain("qa-fake-screen-pw-not-real");
+    });
+  }
+
+  it("Rails-style and OAuth names are masked on screen with the same rule as the share", () => {
+    const exchange = typeIntoForm({
+      contentType: "application/x-www-form-urlencoded",
+      body: "profile[name]=ann&user[password]=qa-fake-rails-pw&session=qa-fake-sess&code=qa-fake-code&grant_type=authorization_code",
+    });
+    show(exchange);
+    expect(dom()).not.toContain("qa-fake-");
+    expect(dom()).toContain("ann");
+    expect(document.querySelectorAll(".xmask__toggle").length).toBe(3);
+    resetModalRoot();
+    const plain = typeIntoForm({ contentType: "application/x-www-form-urlencoded", body: "code=US&page=2" });
+    show(plain);
+    expect(dom()).toContain("US");
+  });
+
+  it("a percent-encoded name (`user%5Bpass%5D`) and an OAuth callback pair are masked on screen too", () => {
+    const exchange = typeIntoForm({
+      contentType: "application/x-www-form-urlencoded",
+      body: "a=1&user%5Bpass%5D=qa-fake-enc-pw&code=qa-fake-cb-code&state=xyz",
+    });
+    show(exchange);
+    expect(dom()).not.toContain("qa-fake-");
+    expect(document.querySelectorAll(".xmask__toggle").length).toBe(2);
+  });
+
+  it("a JSON body labelled as a form is not drawn as a parameter table, and is not called safe", () => {
+    const exchange = typeIntoForm({ contentType: "application/x-www-form-urlencoded", body: '{"password":"qa-fake-j"}' });
+    show(exchange);
+    expect(document.querySelectorAll(".xrow--param").length).toBe(0);
+  });
+
+  const rawUrls: Array<[string, string]> = [
+    ["a scheme-less user:password@host", "admin:qa-fake-urlpw-s-not-real@api.example.com/x"],
+    ["an unparseable URL with a credential query", "not a url?api_key=qa-fake-urlkey-s-not-real"],
+    ["a scheme-only URL with a credential query", "javascript:alert(1)//?token=qa-fake-tok-s-0123456789-not-real"],
+  ];
+  for (const [name, url] of rawUrls) {
+    it(`${name}: masked in the line and the summary, revealable, no href`, () => {
+      const exchange = typeIntoForm({ url });
+      show(exchange);
+      expect(dom()).not.toContain("qa-fake-");
+      expect(document.querySelector(".xband__url")!.textContent).toMatch(/REDACTED/);
+      expect(document.querySelector('.xmask[data-x-secret="req.url"]')).not.toBeNull();
+      press(exchange);
+      expect(document.querySelector(".xurl")!.textContent).toContain(url);
+      expect(document.querySelector(".xurl a")).toBeNull(); // never linked
+    });
+  }
+
+  it("Location, Referer, Content-Location and Origin: shown redacted with a reveal when they carry a credential, plain when clean", () => {
+    const exchange = typeIntoForm({
+      headers: [
+        ["Origin", "https://u:qa-fake-o-pw-not-real@o.example.com"],
+        ["Referer", "https://r.example.com/p?access_token=qa-fake-r-tok-0123456789-not-real"],
+        ["Location", "https://l.example.com/cb?state=1"],
+        ["Content-Location", "/v2/x?token=qa-fake-cl-tok-0123456789-not-real"],
+      ],
+    });
+    show(exchange);
+    expect(dom()).not.toContain("qa-fake-");
+    expect(document.body.textContent).toContain("https://l.example.com/cb?state=1"); // clean: shown as is
+    expect(document.querySelectorAll(".xmask__toggle")).toHaveLength(3);
+    press(exchange);
+    expect(document.body.textContent).toContain("qa-fake-o-pw-not-real");
+    expect(document.body.textContent).toContain("qa-fake-r-tok");
+    expect(document.body.textContent).toContain("qa-fake-cl-tok");
+  });
+});

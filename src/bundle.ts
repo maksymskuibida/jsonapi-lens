@@ -43,7 +43,7 @@ import { formatBytes } from "./format.js";
 import { t } from "./i18n/index.js";
 import type { BundleEntry, BundlePayload } from "./crypto.js";
 import { seal, sealBundle } from "./crypto.js";
-import { redactExchange } from "./secrets.js";
+import { redactForExport } from "./secrets.js";
 import { getFromLibrary, listLibrary, saveToLibrary } from "./store.js";
 import type { LibraryEntry } from "./store.js";
 
@@ -88,7 +88,7 @@ export async function mintShareEnvelope(
  */
 function redactEntryExchange(entry: BundleEntry): BundleEntry {
   if (!entry.exchange || Object.keys(entry.exchange).length === 0) return entry;
-  return { ...entry, exchange: redactExchange(entry.exchange).exchange };
+  return { ...entry, exchange: redactForExport(entry.exchange).exchange };
 }
 
 /**

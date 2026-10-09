@@ -630,6 +630,80 @@
       return result;
     },
 
+    /* 31 QA6: a masked request value is not in the page until revealed.
+       Not a layout measurement — it is here because it has to be the *built*
+       page, with the real form, the real band and a real click, that proves it:
+       a unit test can only show that one function inserts the node. Attaches an
+       exchange with a synthetic Authorization header through the form, then
+       looks for the value in the text, the markup and every attribute of the
+       whole document, before and after a reveal and after hiding it again. */
+    async s31(N) {
+      const SECRET = 'qa-fake-bearer-31-not-real';
+      const everything = () => {
+        const attrs = Array.from(document.querySelectorAll('*')).flatMap((n) => Array.from(n.attributes).map((a) => a.value));
+        return [document.documentElement.textContent, new XMLSerializer().serializeToString(document.documentElement), ...attrs].join('\n');
+      };
+      await N.fresh();
+      document.getElementById('edit-request').click();
+      await N.settle(300);
+      const urlInput = document.querySelector('.modal .xform__url-input');
+      urlInput.value = 'https://api.example.com/connections';
+      urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      // The second row list in the form is the request's headers (query is first).
+      const headerList = document.querySelectorAll('.modal .xform-rowlist')[1];
+      headerList.querySelector('.btn--sm').click();
+      const row = headerList.querySelector('.xform-row');
+      row.querySelector('.xform__name').value = 'Authorization';
+      row.querySelector('.xform__value').value = 'Bearer ' + SECRET;
+      document.querySelector('.modal .modal__actions .xform__save').click();
+      await N.settle(400);
+
+      const band = document.getElementById('exchange-band');
+      if (!band) return { name: '31 masked value not in the DOM', ok: false, driftPx: 0, detail: 'no band' };
+      band.open = true;
+      await N.settle(200);
+      const toggle = band.querySelector('.xmask__toggle');
+      if (!toggle) return { name: '31 masked value not in the DOM', ok: false, driftPx: 0, detail: 'no toggle' };
+
+      const before0 = toggle.getAttribute('aria-label');
+      const before = everything().includes(SECRET);
+      toggle.click();
+      await N.settle(100);
+      const revealed = everything().includes(SECRET) && toggle.getAttribute('aria-label') !== before0;
+      toggle.click();
+      await N.settle(100);
+      const after = everything().includes(SECRET);
+      const ok = !before && revealed && !after;
+      return {
+        name: '31 masked value is absent until revealed, present once, absent after hiding',
+        ok,
+        driftPx: 0,
+        detail: JSON.stringify({ before, revealed, after }),
+      };
+    },
+
+    /* 32 QA6 (gaps D and E): the overview's request button changes its label once
+       a request is attached, and switching Request/Response/Both leaves the
+       band open. Both are `main.ts` behaviour no unit test reaches. */
+    async s32(N) {
+      await N.fresh();
+      const band = await SCEN.attachMinimalExchange(N);
+      const after = document.getElementById('edit-request').textContent;
+      band.open = true;
+      await N.settle(150);
+      const modeButtons = [...document.querySelectorAll('[data-x-mode]')];
+      const other = modeButtons.find((b) => b.getAttribute('data-x-mode') === 'request');
+      if (!other) return { name: '32 request button label and band stays open', ok: false, driftPx: 0, detail: 'no mode buttons' };
+      other.click();
+      await N.settle(200);
+      const stillOpen = document.getElementById('exchange-band').open === true;
+      // The band's own edit control carries the "Edit request" wording in whatever
+      // language is active; the overview button must say the same once attached.
+      const bandEdit = document.querySelector('#exchange-band [data-x-action="edit"]');
+      const ok = !!bandEdit && bandEdit.textContent.trim() === after.trim() && stillOpen;
+      return { name: '32 overview request button says what the band says after attach; band stays open on mode switch', ok, driftPx: 0, detail: JSON.stringify({ after, bandEdit: bandEdit && bandEdit.textContent, stillOpen }) };
+    },
+
     s29: (N) => SCEN.bandScenario(N, '29 exchange attached, following a relationship, Back', true),
     s30: (N) => SCEN.bandScenario(N, '30 exchange attached, band collapsed, following a relationship, Back', false),
   };

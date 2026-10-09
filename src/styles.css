@@ -4058,23 +4058,28 @@ body.has-modal {
   cursor: pointer;
 }
 
-/* Reveal is `false` by default (`render-request.ts#maskableValue`): the dots
-   and the toggle show, the real value is hidden. `[data-x-reveal="true"]`
-   flips which of the two is visible — never a re-render, just a class check.
+/* A masked value renders its dots and a toggle, and nothing else: the real
+   text is not in the document until the toggle inserts it
+   (`render-request.ts#toggleMaskedValue`), and is removed again on hide, so
+   there is nothing here to hide with CSS. Once it is showing
+   (`data-x-reveal="true"`) the dots go and the toggle stays, as "hide".
 
-   Matched on `="false"` rather than `:not(="true")`. A value that needs no mask
-   is the same `.xmask` element with **no** attribute at all, and `:not(="true")`
-   matched that too — so every ordinary header, cookie and URL part in the review
-   rendered as an empty cell, with no dots and no toggle to bring it back. The
-   panel exists to show the exchange; it was hiding everything that was not a
-   secret. */
-.xmask[data-x-reveal="false"] .xmask__value {
+   An ordinary value (not a secret) is the same `.xmask` with no attribute and
+   a plain `.xmask__value`; it must stay visible, which is why nothing here
+   matches on the *absence* of the attribute. */
+.xmask[data-x-reveal="true"] .xmask__dots {
   display: none;
 }
 
-.xmask[data-x-reveal="true"] .xmask__dots,
-.xmask[data-x-reveal="true"] .xmask__toggle {
-  display: none;
+/* A masked URL is shown redacted, as text, not as a run of dots. */
+.xmask__dots--text {
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+
+.xmask__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ----------------------------------------------------------------- jwt --- */

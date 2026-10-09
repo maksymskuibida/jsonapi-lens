@@ -3,6 +3,7 @@ import {
   detectCredentialShape,
   decodeJwt,
   isSecretHeaderName,
+  isSecretParamName,
   redactExchange,
   REDACTED_VALUE,
   shouldMaskHeader,
@@ -343,7 +344,7 @@ describe("redactExchange", () => {
     const rawForm = `amount=100&api_key=${secret}`;
     const exchange: Exchange = {
       request: {
-        body: { raw: rawForm, contentType: "application/x-www-form-urlencoded", form: decodeParams(rawForm) },
+        body: { raw: rawForm, contentType: "application/x-www-form-urlencoded" },
       },
     };
     const { exchange: redacted, count, bodyMayContainSecret } = redactExchange(exchange);
@@ -369,22 +370,37 @@ describe("redactExchange", () => {
     // long hex/base64 run -- detectCredentialShape alone would miss it. This
     // is specifically the key=value/"key":"value" pattern, not the stripe-key
     // pattern the test above already covers via its sk_-prefixed secret.
-    for (const raw of ['{"amount":100,"password":"hunter2"}', "amount=100&password=hunter2"]) {
-      const exchange: Exchange = { request: { body: { raw, contentType: "text/plain" } } };
-      expect(redactExchange(exchange).bodyMayContainSecret).toBe(true);
+    // The JSON body is only flagged. The `k=v` text used to be flagged too; a
+    // clean `k=v&k=v` body with an empty or text/plain content type is now read
+    // as a form and *redacted* (QA6), so it is not flagged — it is fixed.
+    const json = { request: { body: { raw: '{"amount":100,"password":"hunter2"}', contentType: "text/plain" } } };
+    expect(redactExchange(json).bodyMayContainSecret).toBe(true);
+    const kv = redactExchange({ request: { body: { raw: "amount=100&password=hunter2", contentType: "text/plain" } } });
+    expect(kv.count).toBe(1);
+    expect(JSON.stringify(kv.exchange)).not.toContain("hunter2");
+  });
+
+  it("fails closed: any non-empty body that is not a clean form is flagged, whatever the sniffer says", () => {
+    // Used to be "does not flag prose / benign JSON". A silent share is the failure
+    // this module exists to prevent, so a body is only called clean when it parsed
+    // as a clean form and nothing credential-like is left in it (QA6 B6).
+    for (const body of [
+      { raw: "please sign here and return the form" },
+      { raw: '{"amount":100,"currency":"usd"}', contentType: "application/json" },
+    ]) {
+      expect(redactExchange({ response: { body } }).bodyMayContainSecret).toBe(true);
     }
+    expect(redactExchange({ response: { body: { raw: "   " } } }).bodyMayContainSecret).toBe(false);
+    expect(redactExchange({ response: { body: { raw: "" } } }).bodyMayContainSecret).toBe(false);
   });
 
-  it("does not flag prose that merely contains a credential-ish word without a key/value shape", () => {
-    const exchange: Exchange = { request: { body: { raw: "please sign here and return the form" } } };
-    expect(redactExchange(exchange).bodyMayContainSecret).toBe(false);
-  });
-
-  it("does not flag a non-form body with nothing credential-shaped in it", () => {
-    const exchange: Exchange = {
-      response: { body: { raw: '{"amount":100,"currency":"usd"}', contentType: "application/json" } },
-    };
-    expect(redactExchange(exchange).bodyMayContainSecret).toBe(false);
+  it("names: `pass`, `pwd` and `passwd` are credentials; `passport`, `bypass` and `compass` are not", () => {
+    for (const name of ["pass", "Pass", "pwd", "user_pwd", "passwd", "db-passwd"]) {
+      expect(isSecretParamName(name), name).toBe(true);
+    }
+    for (const name of ["passport", "bypass", "compass", "passenger", "page"]) {
+      expect(isSecretParamName(name), name).toBe(false);
+    }
   });
 
   it("a JWT embedded in a JSON body is still detected even though the body itself is not redacted", () => {
