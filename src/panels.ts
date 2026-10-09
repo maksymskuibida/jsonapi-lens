@@ -502,7 +502,7 @@ function browserShortcuts(): KeyHint[] {
     newTab: m.browserNewTab,
   };
   return browserNavKeys().map(({ id, combos }) => ({
-    combos: combos.map((combo) => combo.replace(CLICK_WORD, m.clickWord)),
+    combos: combos.map((combo) => combo.replace(CLICK_WORD, () => m.clickWord)),
     description: described[id] ?? id,
   }));
 }

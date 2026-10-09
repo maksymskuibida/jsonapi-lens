@@ -76,3 +76,52 @@ describe("export -> share -> open -> export reports the same count and the same 
     expect([sender.count, recipient.count]).toEqual([0, 0]);
   });
 });
+
+describe("Set-Cookie and every other exact `[REDACTED]` is recounted (QA7 blind QA, low 1)", () => {
+  const sc = async (lines: string[]) => (await import("../src/cookies.js")).parseSetCookies(lines);
+
+  it("the reported case: `sid=1; Domain=Bearer x` is 2 on both sides, byte-identical", async () => {
+    const ex: Exchange = { response: { cookies: await sc(["sid=1; Domain=Bearer qafakeBBB"]) } };
+    const { sender, recipient } = await roundTrip(ex);
+    expect(sender.count).toBe(2);
+    expect(recipient.count).toBe(2);
+    expect(JSON.stringify(recipient.exchange)).toBe(JSON.stringify(sender.exchange));
+  });
+
+  it("a fixture with every Set-Cookie field (value, each attribute, unrecognised with a value, a bare flag, a token-named cookie and flag)", async () => {
+    const ex: Exchange = {
+      response: {
+        cookies: await sc([
+          "a=1; Path=Bearer qafakeP; Domain=Bearer qafakeD; Expires=Token qafakeE; SameSite=Bearer qafakeS; Secure; HttpOnly; Max-Age=60; extra=qafakeX; flagonly",
+          `${JWT}=v; Path=/ok`,
+          `b=2; ${JWT}`,
+          `c=3; ${JWT}=w`,
+          "d=4; Path=/plain; Domain=example.com; SameSite=Lax",
+        ]),
+        headers: headerSet([{ name: JWT, value: "x" }, { name: "X-Note", value: "Bearer qafakeN" }]),
+      },
+      request: { cookies: { entries: [{ name: JWT, value: "v" }] } },
+      origin: { a: "Bearer qafakeO", b: "plain" },
+    };
+    const { sender, recipient } = await roundTrip(ex);
+    expect(sender.count).toBeGreaterThan(10);
+    expect(recipient.count).toBe(sender.count);
+    expect(JSON.stringify(recipient.exchange)).toBe(JSON.stringify(sender.exchange));
+    expect(JSON.stringify(sender.exchange)).not.toContain("qafake");
+    // and a third pass
+    const third = redactForExport(recipient.exchange);
+    expect(third.count).toBe(sender.count);
+    expect(JSON.stringify(third.exchange)).toBe(JSON.stringify(sender.exchange));
+  });
+
+  it("the one documented exception: a token masked inside a longer attribute value is not recounted (D8)", async () => {
+    const { sender, recipient } = await roundTrip({ response: { cookies: await sc(["sid=1; Path=/x Bearer qafakeAAA"]) } });
+    expect([sender.count, recipient.count]).toEqual([2, 1]);
+    expect(JSON.stringify(recipient.exchange)).toBe(JSON.stringify(sender.exchange));
+  });
+
+  it("a literal `[REDACTED]` the author wrote counts like one the app wrote", () => {
+    const authored: Exchange = { request: { headers: headerSet([{ name: "X-Foo", value: "[REDACTED]" }]) }, origin: { k: "[REDACTED]" } };
+    expect(redactForExport(authored).count).toBe(2);
+  });
+});

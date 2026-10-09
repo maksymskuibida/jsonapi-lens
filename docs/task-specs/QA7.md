@@ -22,7 +22,7 @@ documents (`D8`, `D7`/REGRESSION §7) now say what the code does.
   in `count`. No new export; the result shape is unchanged.
 - **S20** `ident.ts` exports `REQUEST_FIELD_KINDS` and `RequestFieldKind`; `requestFieldDomId` and
   `requestFieldHref` take a `RequestFieldKind`. New kinds `reqBodyParam` (form request body) and
-  `resBodyParam` (form-shaped response body); `reqParam` stays the **query** kind with its spelling,
+  `resBodyParam` (form-shaped response body; **reserved**: not reachable from the UI, only through the exported `renderBodyPart(…, "res")`, kept so a future caller cannot reuse `reqBodyParam`; D1 says so); `reqParam` stays the **query** kind with its spelling,
   so existing `#q_reqParam__…` links keep working. `render-request.ts#renderParamTable` takes the kind.
 - **S21** `test/hygiene.test.ts` asks `git check-ignore --stdin -z` which of the files it reached are
   ignored and does not scan them. No list of ignored paths exists in the test.
@@ -40,7 +40,7 @@ documents (`D8`, `D7`/REGRESSION §7) now say what the code does.
   and the sweep never writes to `Object.prototype`. An `origin` with nothing to sweep is returned as
   the same structure with the same values.
 - **S20**: the query table mints `q_reqParam__<name>`, a request form-body table
-  `q_reqBodyParam__<name>`, a response form-body table `q_resBodyParam__<name>`. A secret-named
+  `q_reqBodyParam__<name>`, a response form-body table `q_resBodyParam__<name>` (reserved, see Interface; QA cannot reach it). A secret-named
   parameter row has no id (unchanged). A repeated name anchors only its first row.
 - **S21**: a gitignored file is skipped; a tracked file is scanned even if its path matches an
   ignore pattern (git does not report tracked files as ignored); an untracked, non-ignored file is

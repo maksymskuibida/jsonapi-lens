@@ -218,7 +218,9 @@ export function nodeHref(pointer: string): string {
  *   - `reqParam` — the request URL's **query** parameters (the name predates the body kinds and
  *     is kept so existing `#q_reqParam__…` links keep working);
  *   - `reqBodyParam` — parameters of a **form-urlencoded request body**;
- *   - `resBodyParam` — parameters of a form-shaped **response body**.
+ *   - `resBodyParam` — parameters of a form-shaped **response body**. Reserved: no screen draws one today
+ *     (the band shows no response body); `renderBodyPart(body, "res")` is the only way to mint it, so it is
+ *     here to stop a future caller reusing `reqBodyParam` (D1, QA7).
  *
  * A query parameter and a body parameter called `page` used to both mint `q_reqParam__page`
  * (QA7 S20). Adding a table means adding a kind here, not reusing one.

@@ -257,6 +257,8 @@ function redactHeaderSet(headers: HeaderSet | undefined, tally: RedactionTally):
   if (!headers) return headers;
   let changed = false;
   const entries = headers.entries.map((entry) => {
+    // a name the sweep masked (`[REDACTED]: x`) counts on the second pass as it did on the first
+    if (entry.name === REDACTED_VALUE) tally.count++;
     if (!shouldMaskHeader(entry.name, entry.value)) {
       if (entry.value === REDACTED_VALUE) {
         tally.count++; // masked by an earlier pass (the sender's): counted, text unchanged
@@ -321,6 +323,10 @@ function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: RedactionT
   // The count is the number of values masked (QA7 S4): the cookie value, each of domain/path/expires/sameSite that was
   // masked, and each unrecognised attribute that had a value. A bare unrecognised flag has no value and counts nothing.
   const attribute = (value: string | undefined): string | undefined => {
+    if (value === REDACTED_VALUE) {
+      tally.count++; // masked by an earlier pass (the sender's): counted, unchanged (D8, the recount rule)
+      return value;
+    }
     if (!attributeLooksUnsafe(value)) return value;
     tally.count++;
     return REDACTED_VALUE;
@@ -336,7 +342,8 @@ function redactSetCookieSet(cookies: SetCookieSet | undefined, tally: RedactionT
         expires: attribute(cookie.expires),
         sameSite: attribute(cookie.sameSite),
         unrecognized: cookie.unrecognized?.map((a) => {
-          if (a.value !== undefined) tally.count++;
+          // a value is always masked and counted; a bare flag whose name already reads `[REDACTED]` was masked by the sweep
+          if (a.value !== undefined || a.name === REDACTED_VALUE) tally.count++;
           return { name: a.name, value: a.value !== undefined ? REDACTED_VALUE : undefined };
         }),
       };
