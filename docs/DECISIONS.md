@@ -658,7 +658,7 @@ headers and cookies as name/value, each body as `{contentType, raw}`, the respon
 `entries[].raw` or decoded trees. The reader re-derives them on load (`queryOf`, `render-request.ts`), as for a request
 typed into the form. **The envelope is unchanged** (`exchange` is an opaque optional field of the version-2 payload;
 old links still carrying `query`/`form` open as before; `export-compat-seal.test.ts`). The sweep then masks, in
-header names and values, cookie names, the method, the status text, the URL and a clean form's `raw`, every discrete
+request and response header names and values, **request** cookie names, the method, the response status text, the request URL and a clean form's `raw`, every discrete
 token of unmistakable shape — a JWT (`eyJ…`), a Stripe key, an AWS key id, `Bearer`/`Basic`/`Token` followed by
 anything, a URL's `user:pw@` — and counts it. It deliberately does not use the generic hex/base64 length rule (etags,
 slugs). **A credential-shaped parameter name is masked** (`[REDACTED]=[REDACTED]`, one per wire pair), and so is a
@@ -709,6 +709,8 @@ what this tool reviews.)
   shapeless). A clean form with such a pair is **not** warned about, because nothing credential-like is left in
   it by any test this module has;
 - a bare `code=…` with no OAuth sibling;
+- **not yet swept** (deferred to QA7): **Set-Cookie** names, `body.contentType`, and string leaves inside the
+  provenance field `origin` (which only gets the older per-leaf redaction);
 - a credential of no recognisable shape in a **name**: only credential-shaped names and path names on secret-named
   entries are masked;
 - any URL-valued header other than `Location`, `Referer`, `Content-Location` and `Origin`;

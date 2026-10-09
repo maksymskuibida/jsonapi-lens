@@ -535,7 +535,8 @@ function redactParamEntry(entry: ParamEntry, oauthContext = false): ParamEntry {
   // plain secret name (`password`) is only a label and stays readable.
   if (paramNameCarriesCredential(entry) || (hasPathName(entry) && shouldRedactParam(entry, oauthContext))) {
     // One `[REDACTED]=[REDACTED]` per original wire pair, so the number of masked
-    // occurrences in the output equals the number counted.
+    // *values* in the output equals the number counted. (Each pair has a masked
+    // name as well, so it shows two `[REDACTED]` tokens for one counted value.)
     const pairs = entry.raw.map(() => ({ key: REDACTED_VALUE, value: REDACTED_VALUE }));
     return pairs.length > 1
       ? {
